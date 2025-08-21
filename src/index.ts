@@ -1,5 +1,5 @@
+import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
-import { createConnection, type Socket } from "net";
 
 export interface MemcacheOptions {
 	host?: string;
@@ -13,6 +13,16 @@ export interface MemcacheStats {
 	[key: string]: string;
 }
 
+export type CommandQueueItem = {
+	command: string;
+	// biome-ignore lint/suspicious/noExplicitAny: expected
+	resolve: (value: any) => void;
+	// biome-ignore lint/suspicious/noExplicitAny: expected
+	reject: (reason?: any) => void;
+	isMultiline?: boolean;
+	isStats?: boolean;
+};
+
 export class Memcache extends Hookified {
 	private _socket: Socket | null = null;
 	private _host: string;
@@ -21,15 +31,9 @@ export class Memcache extends Hookified {
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _connected: boolean = false;
-	private _commandQueue: Array<{
-		command: string;
-		resolve: (value: any) => void;
-		reject: (reason?: any) => void;
-		isMultiline?: boolean;
-		isStats?: boolean;
-	}> = [];
+	private _commandQueue: CommandQueueItem[] = [];
 	private _buffer: string = "";
-	private _currentCommand: any = null;
+	private _currentCommand: CommandQueueItem | null = null;
 	private _multilineData: string[] = [];
 
 	constructor(options: MemcacheOptions = {}) {
@@ -98,23 +102,11 @@ export class Memcache extends Hookified {
 		this._connected = value;
 	}
 
-	public get commandQueue(): Array<{
-		command: string;
-		resolve: (value: any) => void;
-		reject: (reason?: any) => void;
-		isMultiline?: boolean;
-		isStats?: boolean;
-	}> {
+	public get commandQueue(): CommandQueueItem[] {
 		return this._commandQueue;
 	}
 
-	public set commandQueue(value: Array<{
-		command: string;
-		resolve: (value: any) => void;
-		reject: (reason?: any) => void;
-		isMultiline?: boolean;
-		isStats?: boolean;
-	}>) {
+	public set commandQueue(value: CommandQueueItem[]) {
 		this._commandQueue = value;
 	}
 
@@ -126,11 +118,11 @@ export class Memcache extends Hookified {
 		this._buffer = value;
 	}
 
-	public get currentCommand(): any {
+	public get currentCommand(): CommandQueueItem | null {
 		return this._currentCommand;
 	}
 
-	public set currentCommand(value: any) {
+	public set currentCommand(value: CommandQueueItem | null) {
 		this._currentCommand = value;
 	}
 
@@ -324,7 +316,7 @@ export class Memcache extends Hookified {
 		if (this._connected && this._socket) {
 			try {
 				await this.sendCommand("quit");
-				// biome-ignore lint/correctness/noUnusedVariables: expected to be used
+				// biome-ignore lint/correctness/noUnusedVariables: expected
 			} catch (error) {
 				// Ignore errors from quit command as the server closes the connection
 			}
@@ -361,12 +353,12 @@ export class Memcache extends Hookified {
 	}
 
 	private processLine(line: string): void {
-		if (!this.currentCommand) {
-			this.currentCommand = this.commandQueue.shift();
-			if (!this.currentCommand) return;
+		if (!this._currentCommand) {
+			this._currentCommand = this._commandQueue.shift() || null;
+			if (!this._currentCommand) return;
 		}
 
-		if (this.currentCommand.isStats) {
+		if (this._currentCommand.isStats) {
 			if (line === "END") {
 				const stats: MemcacheStats = {};
 				for (const statLine of this.multilineData) {
@@ -375,23 +367,23 @@ export class Memcache extends Hookified {
 						stats[key] = value;
 					}
 				}
-				this.currentCommand.resolve(stats);
-				this.multilineData = [];
-				this.currentCommand = null;
+				this._currentCommand.resolve(stats);
+				this._multilineData = [];
+				this._currentCommand = null;
 			} else if (line.startsWith("STAT ")) {
-				this.multilineData.push(line);
+				this._multilineData.push(line);
 			} else if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||
 				line.startsWith("SERVER_ERROR")
 			) {
-				this.currentCommand.reject(new Error(line));
-				this.currentCommand = null;
+				this._currentCommand.reject(new Error(line));
+				this._currentCommand = null;
 			}
 			return;
 		}
 
-		if (this.currentCommand.isMultiline) {
+		if (this._currentCommand.isMultiline) {
 			if (line.startsWith("VALUE ")) {
 				const parts = line.split(" ");
 				const bytes = parseInt(parts[3], 10);
@@ -399,17 +391,17 @@ export class Memcache extends Hookified {
 			} else if (line === "END") {
 				const result =
 					this.multilineData.length > 0 ? this.multilineData : null;
-				this.currentCommand.resolve(result);
-				this.multilineData = [];
-				this.currentCommand = null;
+				this._currentCommand.resolve(result);
+				this._multilineData = [];
+				this._currentCommand = null;
 			} else if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||
 				line.startsWith("SERVER_ERROR")
 			) {
-				this.currentCommand.reject(new Error(line));
-				this.multilineData = [];
-				this.currentCommand = null;
+				this._currentCommand.reject(new Error(line));
+				this._multilineData = [];
+				this._currentCommand = null;
 			}
 		} else {
 			if (
@@ -451,13 +443,14 @@ export class Memcache extends Hookified {
 		command: string,
 		isMultiline: boolean = false,
 		isStats: boolean = false,
+		// biome-ignore lint/suspicious/noExplicitAny: expected
 	): Promise<any> {
-		if (!this.connected || !this.socket) {
+		if (!this._connected || !this._socket) {
 			throw new Error("Not connected to memcache server");
 		}
 
 		return new Promise((resolve, reject) => {
-			this.commandQueue.push({
+			this._commandQueue.push({
 				command,
 				resolve,
 				reject,
@@ -465,17 +458,17 @@ export class Memcache extends Hookified {
 				isStats,
 			});
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			this.socket!.write(command + "\r\n");
+			this._socket!.write(`${command}\r\n`);
 		});
 	}
 
 	private rejectPendingCommands(error: Error): void {
-		if (this.currentCommand) {
-			this.currentCommand.reject(error);
-			this.currentCommand = null;
+		if (this._currentCommand) {
+			this._currentCommand.reject(error);
+			this._currentCommand = null;
 		}
-		while (this.commandQueue.length > 0) {
-			const cmd = this.commandQueue.shift();
+		while (this._commandQueue.length > 0) {
+			const cmd = this._commandQueue.shift();
 			if (cmd) {
 				cmd.reject(error);
 			}

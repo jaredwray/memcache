@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import type { Socket } from "net";
+import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache from "../src/index";
 
