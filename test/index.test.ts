@@ -1,12 +1,12 @@
 import type { Socket } from "net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import MemcacheClient from "../src/index";
+import Memcache from "../src/index";
 
-describe("MemcacheClient", () => {
-	let client: MemcacheClient;
+describe("Memcache", () => {
+	let client: Memcache;
 
 	beforeEach(() => {
-		client = new MemcacheClient({
+		client = new Memcache({
 			host: "localhost",
 			port: 11211,
 			timeout: 5000,
@@ -21,18 +21,18 @@ describe("MemcacheClient", () => {
 
 	describe("Constructor", () => {
 		it("should create instance with default options", () => {
-			const defaultClient = new MemcacheClient();
-			expect(defaultClient).toBeInstanceOf(MemcacheClient);
+			const defaultClient = new Memcache();
+			expect(defaultClient).toBeInstanceOf(Memcache);
 		});
 
 		it("should create instance with custom options", () => {
-			const customClient = new MemcacheClient({
+			const customClient = new Memcache({
 				host: "127.0.0.1",
 				port: 11212,
 				timeout: 10000,
 				keepAlive: false,
 			});
-			expect(customClient).toBeInstanceOf(MemcacheClient);
+			expect(customClient).toBeInstanceOf(Memcache);
 		});
 	});
 
@@ -79,7 +79,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle connecting when already connected", async () => {
-			const client12 = new MemcacheClient();
+			const client12 = new Memcache();
 			await client12.connect();
 			expect(client12.isConnected()).toBe(true);
 
@@ -91,7 +91,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle connection errors", async () => {
-			const client13 = new MemcacheClient({
+			const client13 = new Memcache({
 				host: "0.0.0.0",
 				port: 99999, // Invalid port
 				timeout: 100,
@@ -101,7 +101,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle connection timeout", async () => {
-			const client14 = new MemcacheClient({
+			const client14 = new Memcache({
 				host: "192.0.2.0", // Non-routable IP address that will timeout
 				port: 11211,
 				timeout: 100, // Very short timeout
@@ -111,7 +111,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should emit error events after connection", async () => {
-			const client15 = new MemcacheClient();
+			const client15 = new Memcache();
 			await client15.connect();
 
 			let errorEmitted = false;
@@ -147,7 +147,7 @@ describe("MemcacheClient", () => {
 
 	describe("Error Handling", () => {
 		it("should handle connection being closed during pending commands", async () => {
-			const client2 = new MemcacheClient();
+			const client2 = new Memcache();
 			await client2.connect();
 
 			// Start a command but don't await it
@@ -161,7 +161,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should reject current command on connection close", async () => {
-			const client17 = new MemcacheClient();
+			const client17 = new Memcache();
 			await client17.connect();
 
 			// Access private members for testing
@@ -189,7 +189,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle multiple pending commands when connection closes", async () => {
-			const client3 = new MemcacheClient();
+			const client3 = new Memcache();
 			await client3.connect();
 
 			// Start multiple commands without awaiting
@@ -211,7 +211,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle protocol errors in responses", async () => {
-			const client4 = new MemcacheClient();
+			const client4 = new Memcache();
 			await client4.connect();
 
 			// Test with an invalid key to trigger an error
@@ -224,7 +224,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle server errors", async () => {
-			const client5 = new MemcacheClient();
+			const client5 = new Memcache();
 			await client5.connect();
 
 			// Force an error by simulating a bad response
@@ -244,7 +244,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle CLIENT_ERROR responses", async () => {
-			const client6 = new MemcacheClient();
+			const client6 = new Memcache();
 			await client6.connect();
 
 			const socket = (client6 as any).socket as Socket;
@@ -264,7 +264,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle SERVER_ERROR responses", async () => {
-			const client7 = new MemcacheClient();
+			const client7 = new Memcache();
 			await client7.connect();
 
 			const socket = (client7 as any).socket as Socket;
@@ -282,7 +282,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle stats SERVER_ERROR", async () => {
-			const client8 = new MemcacheClient();
+			const client8 = new Memcache();
 			await client8.connect();
 
 			const socket = (client8 as any).socket as Socket;
@@ -302,7 +302,7 @@ describe("MemcacheClient", () => {
 
 	describe("Protocol Parsing", () => {
 		it("should handle partial value reads", async () => {
-			const client9 = new MemcacheClient();
+			const client9 = new Memcache();
 			await client9.connect();
 
 			const socket = (client9 as any).socket as Socket;
@@ -321,7 +321,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle numeric responses", async () => {
-			const client10 = new MemcacheClient();
+			const client10 = new Memcache();
 			await client10.connect();
 
 			const socket = (client10 as any).socket as Socket;
@@ -337,7 +337,7 @@ describe("MemcacheClient", () => {
 		});
 
 		it("should handle generic string responses", async () => {
-			const client11 = new MemcacheClient();
+			const client11 = new Memcache();
 			await client11.connect();
 
 			const socket = (client11 as any).socket as Socket;

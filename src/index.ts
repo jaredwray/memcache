@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { Hookified } from "hookified";
 import { createConnection, type Socket } from "net";
 
 export interface MemcacheOptions {
@@ -16,7 +16,7 @@ export interface MemcacheStats {
 	[key: string]: string;
 }
 
-export class MemcacheClient extends EventEmitter {
+export class Memcache extends Hookified {
 	private socket: Socket | null = null;
 	private host: string;
 	private port: number;
@@ -403,4 +403,4 @@ export class MemcacheClient extends EventEmitter {
 	}
 }
 
-export default MemcacheClient;
+export default Memcache;
