@@ -142,3 +142,6 @@ pnpm-lock.yaml
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# AI
+.claude

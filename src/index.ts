@@ -223,142 +223,6 @@ export class Memcache extends Hookified {
 		});
 	}
 
-	private handleData(data: string): void {
-		this.buffer += data;
-
-		while (true) {
-			const lineEnd = this.buffer.indexOf("\r\n");
-			if (lineEnd === -1) break;
-
-			const line = this.buffer.substring(0, lineEnd);
-			this.buffer = this.buffer.substring(lineEnd + 2);
-
-			this.processLine(line);
-		}
-	}
-
-	private processLine(line: string): void {
-		if (!this.currentCommand) {
-			this.currentCommand = this.commandQueue.shift();
-			if (!this.currentCommand) return;
-		}
-
-		if (this.currentCommand.isStats) {
-			if (line === "END") {
-				const stats: MemcacheStats = {};
-				for (const statLine of this.multilineData) {
-					const [, key, value] = statLine.split(" ");
-					if (key && value) {
-						stats[key] = value;
-					}
-				}
-				this.currentCommand.resolve(stats);
-				this.multilineData = [];
-				this.currentCommand = null;
-			} else if (line.startsWith("STAT ")) {
-				this.multilineData.push(line);
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this.currentCommand.reject(new Error(line));
-				this.currentCommand = null;
-			}
-			return;
-		}
-
-		if (this.currentCommand.isMultiline) {
-			if (line.startsWith("VALUE ")) {
-				const parts = line.split(" ");
-				const bytes = parseInt(parts[3], 10);
-				this.readValue(bytes);
-			} else if (line === "END") {
-				const result =
-					this.multilineData.length > 0 ? this.multilineData : null;
-				this.currentCommand.resolve(result);
-				this.multilineData = [];
-				this.currentCommand = null;
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this.currentCommand.reject(new Error(line));
-				this.multilineData = [];
-				this.currentCommand = null;
-			}
-		} else {
-			if (
-				line === "STORED" ||
-				line === "DELETED" ||
-				line === "OK" ||
-				line === "TOUCHED" ||
-				line === "EXISTS" ||
-				line === "NOT_FOUND"
-			) {
-				this.currentCommand.resolve(line);
-			} else if (line === "NOT_STORED") {
-				this.currentCommand.resolve(false);
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this.currentCommand.reject(new Error(line));
-			} else if (/^\d+$/.test(line)) {
-				this.currentCommand.resolve(parseInt(line, 10));
-			} else {
-				this.currentCommand.resolve(line);
-			}
-			this.currentCommand = null;
-		}
-	}
-
-	private readValue(bytes: number): void {
-		const valueEnd = this.buffer.indexOf("\r\n");
-		if (valueEnd >= bytes) {
-			const value = this.buffer.substring(0, bytes);
-			this.buffer = this.buffer.substring(bytes + 2);
-			this.multilineData.push(value);
-		}
-	}
-
-	private sendCommand(
-		command: string,
-		isMultiline: boolean = false,
-		isStats: boolean = false,
-	): Promise<any> {
-		return new Promise((resolve, reject) => {
-			if (!this.connected || !this.socket) {
-				reject(new Error("Not connected to memcache server"));
-				return;
-			}
-
-			this.commandQueue.push({
-				command,
-				resolve,
-				reject,
-				isMultiline,
-				isStats,
-			});
-			this.socket.write(command + "\r\n");
-		});
-	}
-
-	private rejectPendingCommands(error: Error): void {
-		if (this.currentCommand) {
-			this.currentCommand.reject(error);
-			this.currentCommand = null;
-		}
-		while (this.commandQueue.length > 0) {
-			const cmd = this.commandQueue.shift();
-			if (cmd) {
-				cmd.reject(error);
-			}
-		}
-	}
-
 	public async get(key: string): Promise<string | null> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true);
@@ -511,6 +375,143 @@ export class Memcache extends Hookified {
 
 	public isConnected(): boolean {
 		return this.connected;
+	}
+
+	// Private methods
+	private handleData(data: string): void {
+		this.buffer += data;
+
+		while (true) {
+			const lineEnd = this.buffer.indexOf("\r\n");
+			if (lineEnd === -1) break;
+
+			const line = this.buffer.substring(0, lineEnd);
+			this.buffer = this.buffer.substring(lineEnd + 2);
+
+			this.processLine(line);
+		}
+	}
+
+	private processLine(line: string): void {
+		if (!this.currentCommand) {
+			this.currentCommand = this.commandQueue.shift();
+			if (!this.currentCommand) return;
+		}
+
+		if (this.currentCommand.isStats) {
+			if (line === "END") {
+				const stats: MemcacheStats = {};
+				for (const statLine of this.multilineData) {
+					const [, key, value] = statLine.split(" ");
+					if (key && value) {
+						stats[key] = value;
+					}
+				}
+				this.currentCommand.resolve(stats);
+				this.multilineData = [];
+				this.currentCommand = null;
+			} else if (line.startsWith("STAT ")) {
+				this.multilineData.push(line);
+			} else if (
+				line.startsWith("ERROR") ||
+				line.startsWith("CLIENT_ERROR") ||
+				line.startsWith("SERVER_ERROR")
+			) {
+				this.currentCommand.reject(new Error(line));
+				this.currentCommand = null;
+			}
+			return;
+		}
+
+		if (this.currentCommand.isMultiline) {
+			if (line.startsWith("VALUE ")) {
+				const parts = line.split(" ");
+				const bytes = parseInt(parts[3], 10);
+				this.readValue(bytes);
+			} else if (line === "END") {
+				const result =
+					this.multilineData.length > 0 ? this.multilineData : null;
+				this.currentCommand.resolve(result);
+				this.multilineData = [];
+				this.currentCommand = null;
+			} else if (
+				line.startsWith("ERROR") ||
+				line.startsWith("CLIENT_ERROR") ||
+				line.startsWith("SERVER_ERROR")
+			) {
+				this.currentCommand.reject(new Error(line));
+				this.multilineData = [];
+				this.currentCommand = null;
+			}
+		} else {
+			if (
+				line === "STORED" ||
+				line === "DELETED" ||
+				line === "OK" ||
+				line === "TOUCHED" ||
+				line === "EXISTS" ||
+				line === "NOT_FOUND"
+			) {
+				this.currentCommand.resolve(line);
+			} else if (line === "NOT_STORED") {
+				this.currentCommand.resolve(false);
+			} else if (
+				line.startsWith("ERROR") ||
+				line.startsWith("CLIENT_ERROR") ||
+				line.startsWith("SERVER_ERROR")
+			) {
+				this.currentCommand.reject(new Error(line));
+			} else if (/^\d+$/.test(line)) {
+				this.currentCommand.resolve(parseInt(line, 10));
+			} else {
+				this.currentCommand.resolve(line);
+			}
+			this.currentCommand = null;
+		}
+	}
+
+	private readValue(bytes: number): void {
+		const valueEnd = this.buffer.indexOf("\r\n");
+		if (valueEnd >= bytes) {
+			const value = this.buffer.substring(0, bytes);
+			this.buffer = this.buffer.substring(bytes + 2);
+			this.multilineData.push(value);
+		}
+	}
+
+	private sendCommand(
+		command: string,
+		isMultiline: boolean = false,
+		isStats: boolean = false,
+	): Promise<any> {
+		return new Promise((resolve, reject) => {
+			if (!this.connected || !this.socket) {
+				reject(new Error("Not connected to memcache server"));
+				return;
+			}
+
+			this.commandQueue.push({
+				command,
+				resolve,
+				reject,
+				isMultiline,
+				isStats,
+			});
+			this.socket.write(command + "\r\n");
+		});
+	}
+
+	private rejectPendingCommands(error: Error): void {
+		if (this.currentCommand) {
+			this.currentCommand.reject(error);
+			this.currentCommand = null;
+		}
+		while (this.commandQueue.length > 0) {
+			const cmd = this.commandQueue.shift();
+			if (cmd) {
+				cmd.reject(error);
+			}
+		}
 	}
 
 	private validateKey(key: string): void {
