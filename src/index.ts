@@ -324,6 +324,7 @@ export class Memcache extends Hookified {
 		if (this.connected && this.socket) {
 			try {
 				await this.sendCommand("quit");
+				// biome-ignore lint/correctness/noUnusedVariables: expected to be used
 			} catch (error) {
 				// Ignore errors from quit command as the server closes the connection
 			}
