@@ -34,6 +34,17 @@ describe("Memcache", () => {
 			});
 			expect(customClient).toBeInstanceOf(Memcache);
 		});
+
+		it("should allow setting timeout via setter", () => {
+			const testClient = new Memcache();
+			expect(testClient.timeout).toBe(5000); // Default timeout
+
+			testClient.timeout = 10000;
+			expect(testClient.timeout).toBe(10000);
+
+			testClient.timeout = 2000;
+			expect(testClient.timeout).toBe(2000);
+		});
 	});
 
 	describe("Key Validation", () => {
