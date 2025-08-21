@@ -144,47 +144,47 @@ export class Memcache extends Hookified {
 
 	public async connect(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			if (this.connected) {
+			if (this._connected) {
 				resolve();
 				return;
 			}
 
-			this.socket = createConnection({
-				host: this.host,
-				port: this.port,
-				keepAlive: this.keepAlive,
-				keepAliveInitialDelay: this.keepAliveDelay,
+			this._socket = createConnection({
+				host: this._host,
+				port: this._port,
+				keepAlive: this._keepAlive,
+				keepAliveInitialDelay: this._keepAliveDelay,
 			});
 
-			this.socket.setTimeout(this.timeout);
-			this.socket.setEncoding("utf8");
+			this._socket.setTimeout(this._timeout);
+			this._socket.setEncoding("utf8");
 
-			this.socket.on("connect", () => {
-				this.connected = true;
+			this._socket.on("connect", () => {
+				this._connected = true;
 				this.emit("connect");
 				resolve();
 			});
 
-			this.socket.on("data", (data: string) => {
+			this._socket.on("data", (data: string) => {
 				this.handleData(data);
 			});
 
-			this.socket.on("error", (error: Error) => {
+			this._socket.on("error", (error: Error) => {
 				this.emit("error", error);
-				if (!this.connected) {
+				if (!this._connected) {
 					reject(error);
 				}
 			});
 
-			this.socket.on("close", () => {
-				this.connected = false;
+			this._socket.on("close", () => {
+				this._connected = false;
 				this.emit("close");
 				this.rejectPendingCommands(new Error("Connection closed"));
 			});
 
-			this.socket.on("timeout", () => {
+			this._socket.on("timeout", () => {
 				this.emit("timeout");
-				this.socket?.destroy();
+				this._socket?.destroy();
 				reject(new Error("Connection timeout"));
 			});
 		});
@@ -321,40 +321,40 @@ export class Memcache extends Hookified {
 	}
 
 	public async quit(): Promise<void> {
-		if (this.connected && this.socket) {
+		if (this._connected && this._socket) {
 			try {
 				await this.sendCommand("quit");
 				// biome-ignore lint/correctness/noUnusedVariables: expected to be used
 			} catch (error) {
 				// Ignore errors from quit command as the server closes the connection
 			}
-			this.socket.end();
-			this.connected = false;
+			this._socket.end();
+			this._connected = false;
 		}
 	}
 
 	public disconnect(): void {
-		if (this.socket) {
-			this.socket.destroy();
-			this.socket = null;
-			this.connected = false;
+		if (this._socket) {
+			this._socket.destroy();
+			this._socket = null;
+			this._connected = false;
 		}
 	}
 
 	public isConnected(): boolean {
-		return this.connected;
+		return this._connected;
 	}
 
 	// Private methods
 	private handleData(data: string): void {
-		this.buffer += data;
+		this._buffer += data;
 
 		while (true) {
-			const lineEnd = this.buffer.indexOf("\r\n");
+			const lineEnd = this._buffer.indexOf("\r\n");
 			if (lineEnd === -1) break;
 
-			const line = this.buffer.substring(0, lineEnd);
-			this.buffer = this.buffer.substring(lineEnd + 2);
+			const line = this._buffer.substring(0, lineEnd);
+			this._buffer = this._buffer.substring(lineEnd + 2);
 
 			this.processLine(line);
 		}
@@ -420,21 +420,21 @@ export class Memcache extends Hookified {
 				line === "EXISTS" ||
 				line === "NOT_FOUND"
 			) {
-				this.currentCommand.resolve(line);
+				this._currentCommand.resolve(line);
 			} else if (line === "NOT_STORED") {
-				this.currentCommand.resolve(false);
+				this._currentCommand.resolve(false);
 			} else if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||
 				line.startsWith("SERVER_ERROR")
 			) {
-				this.currentCommand.reject(new Error(line));
+				this._currentCommand.reject(new Error(line));
 			} else if (/^\d+$/.test(line)) {
-				this.currentCommand.resolve(parseInt(line, 10));
+				this._currentCommand.resolve(parseInt(line, 10));
 			} else {
-				this.currentCommand.resolve(line);
+				this._currentCommand.resolve(line);
 			}
-			this.currentCommand = null;
+			this._currentCommand = null;
 		}
 	}
 
@@ -464,6 +464,7 @@ export class Memcache extends Hookified {
 				isMultiline,
 				isStats,
 			});
+			// biome-ignore lint/style/noNonNullAssertion: socket is checked
 			this.socket!.write(command + "\r\n");
 		});
 	}
