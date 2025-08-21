@@ -16,8 +16,8 @@
     "lint": "biome check --write",
     "test": "pnpm lint && vitest run --coverage",
     "test:ci": "biome check && vitest run --coverage",
-    "test:services:start": "docker-compose up -d",
-    "test:services:stop": "docker-compose down",
+    "test:services:start": "docker compose up -d",
+    "test:services:stop": "docker compose down",
     "clean": "rimraf ./node_modules ./coverage ./dist"
   },
   "keywords": [
