@@ -138,14 +138,14 @@ describe("Memcache", () => {
 
 		it("should allow setting socket property", () => {
 			const testClient = new Memcache();
-			expect(testClient.socket).toBe(null); // Default socket
+			expect(testClient.socket).toBe(undefined); // Default socket
 
 			const mockSocket = { fake: "socket" } as any;
 			testClient.socket = mockSocket;
 			expect(testClient.socket).toBe(mockSocket);
 
-			testClient.socket = null;
-			expect(testClient.socket).toBe(null);
+			testClient.socket = undefined;
+			expect(testClient.socket).toBe(undefined);
 		});
 
 		it("should allow setting connected property", () => {
@@ -368,7 +368,7 @@ describe("Memcache", () => {
 
 			// Verify the current command was rejected
 			expect(mockCommand.reject).toHaveBeenCalledWith(new Error("Test error"));
-			expect(privateClient.currentCommand).toBe(null);
+			expect(privateClient.currentCommand).toBe(undefined);
 
 			client17.disconnect();
 		});
@@ -577,7 +577,7 @@ describe("Memcache", () => {
 			expect(deleteResult).toBe(true);
 
 			const getValue = await client.get(key);
-			expect(getValue).toBe(null);
+			expect(getValue).toBe(undefined);
 		});
 
 		it("should increment and decrement values", async () => {
@@ -652,8 +652,8 @@ describe("Memcache", () => {
 
 			const getValue1 = await client.get("flush1");
 			const getValue2 = await client.get("flush2");
-			expect(getValue1).toBe(null);
-			expect(getValue2).toBe(null);
+			expect(getValue1).toBe(undefined);
+			expect(getValue2).toBe(undefined);
 		});
 
 		it("should handle flushAll with delay", async () => {

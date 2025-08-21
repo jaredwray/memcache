@@ -24,7 +24,7 @@ export type CommandQueueItem = {
 };
 
 export class Memcache extends Hookified {
-	private _socket: Socket | null = null;
+	private _socket: Socket | undefined = undefined;
 	private _host: string;
 	private _port: number;
 	private _timeout: number;
@@ -33,7 +33,7 @@ export class Memcache extends Hookified {
 	private _connected: boolean = false;
 	private _commandQueue: CommandQueueItem[] = [];
 	private _buffer: string = "";
-	private _currentCommand: CommandQueueItem | null = null;
+	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
 
 	constructor(options: MemcacheOptions = {}) {
@@ -46,11 +46,11 @@ export class Memcache extends Hookified {
 	}
 
 	// Getters and Setters
-	public get socket(): Socket | null {
+	public get socket(): Socket | undefined {
 		return this._socket;
 	}
 
-	public set socket(value: Socket | null) {
+	public set socket(value: Socket | undefined) {
 		this._socket = value;
 	}
 
@@ -118,11 +118,11 @@ export class Memcache extends Hookified {
 		this._buffer = value;
 	}
 
-	public get currentCommand(): CommandQueueItem | null {
+	public get currentCommand(): CommandQueueItem | undefined {
 		return this._currentCommand;
 	}
 
-	public set currentCommand(value: CommandQueueItem | null) {
+	public set currentCommand(value: CommandQueueItem | undefined) {
 		this._currentCommand = value;
 	}
 
@@ -182,10 +182,10 @@ export class Memcache extends Hookified {
 		});
 	}
 
-	public async get(key: string): Promise<string | null> {
+	public async get(key: string): Promise<string | undefined> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true);
-		return result && result.length > 0 ? result[0] : null;
+		return result && result.length > 0 ? result[0] : undefined;
 	}
 
 	public async gets(keys: string[]): Promise<Map<string, string>> {
@@ -195,7 +195,7 @@ export class Memcache extends Hookified {
 		const keysStr = keys.join(" ");
 		const results = (await this.sendCommand(`get ${keysStr}`, true)) as
 			| string[]
-			| null;
+			| undefined;
 		const map = new Map<string, string>();
 
 		if (results) {
@@ -273,16 +273,22 @@ export class Memcache extends Hookified {
 		return result === "DELETED";
 	}
 
-	public async incr(key: string, value: number = 1): Promise<number | null> {
+	public async incr(
+		key: string,
+		value: number = 1,
+	): Promise<number | undefined> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`incr ${key} ${value}`);
-		return typeof result === "number" ? result : null;
+		return typeof result === "number" ? result : undefined;
 	}
 
-	public async decr(key: string, value: number = 1): Promise<number | null> {
+	public async decr(
+		key: string,
+		value: number = 1,
+	): Promise<number | undefined> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`decr ${key} ${value}`);
-		return typeof result === "number" ? result : null;
+		return typeof result === "number" ? result : undefined;
 	}
 
 	public async touch(key: string, exptime: number): Promise<boolean> {
@@ -328,7 +334,7 @@ export class Memcache extends Hookified {
 	public disconnect(): void {
 		if (this._socket) {
 			this._socket.destroy();
-			this._socket = null;
+			this._socket = undefined;
 			this._connected = false;
 		}
 	}
@@ -354,7 +360,7 @@ export class Memcache extends Hookified {
 
 	private processLine(line: string): void {
 		if (!this._currentCommand) {
-			this._currentCommand = this._commandQueue.shift() || null;
+			this._currentCommand = this._commandQueue.shift();
 			if (!this._currentCommand) return;
 		}
 
@@ -369,7 +375,7 @@ export class Memcache extends Hookified {
 				}
 				this._currentCommand.resolve(stats);
 				this._multilineData = [];
-				this._currentCommand = null;
+				this._currentCommand = undefined;
 			} else if (line.startsWith("STAT ")) {
 				this._multilineData.push(line);
 			} else if (
@@ -378,7 +384,7 @@ export class Memcache extends Hookified {
 				line.startsWith("SERVER_ERROR")
 			) {
 				this._currentCommand.reject(new Error(line));
-				this._currentCommand = null;
+				this._currentCommand = undefined;
 			}
 			return;
 		}
@@ -390,10 +396,10 @@ export class Memcache extends Hookified {
 				this.readValue(bytes);
 			} else if (line === "END") {
 				const result =
-					this.multilineData.length > 0 ? this.multilineData : null;
+					this.multilineData.length > 0 ? this.multilineData : undefined;
 				this._currentCommand.resolve(result);
 				this._multilineData = [];
-				this._currentCommand = null;
+				this._currentCommand = undefined;
 			} else if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||
@@ -401,7 +407,7 @@ export class Memcache extends Hookified {
 			) {
 				this._currentCommand.reject(new Error(line));
 				this._multilineData = [];
-				this._currentCommand = null;
+				this._currentCommand = undefined;
 			}
 		} else {
 			if (
@@ -426,7 +432,7 @@ export class Memcache extends Hookified {
 			} else {
 				this._currentCommand.resolve(line);
 			}
-			this._currentCommand = null;
+			this._currentCommand = undefined;
 		}
 	}
 
@@ -465,7 +471,7 @@ export class Memcache extends Hookified {
 	private rejectPendingCommands(error: Error): void {
 		if (this._currentCommand) {
 			this._currentCommand.reject(error);
-			this._currentCommand = null;
+			this._currentCommand = undefined;
 		}
 		while (this._commandQueue.length > 0) {
 			const cmd = this._commandQueue.shift();
