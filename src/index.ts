@@ -51,87 +51,87 @@ export class Memcache extends Hookified {
 	}
 
 	// Getters and Setters
-	get socket(): Socket | null {
+	public get socket(): Socket | null {
 		return this._socket;
 	}
 
-	set socket(value: Socket | null) {
+	public set socket(value: Socket | null) {
 		this._socket = value;
 	}
 
-	get host(): string {
+	public get host(): string {
 		return this._host;
 	}
 
-	set host(value: string) {
+	public set host(value: string) {
 		this._host = value;
 	}
 
-	get port(): number {
+	public get port(): number {
 		return this._port;
 	}
 
-	set port(value: number) {
+	public set port(value: number) {
 		this._port = value;
 	}
 
-	get timeout(): number {
+	public get timeout(): number {
 		return this._timeout;
 	}
 
-	set timeout(value: number) {
+	public set timeout(value: number) {
 		this._timeout = value;
 	}
 
-	get retries(): number {
+	public get retries(): number {
 		return this._retries;
 	}
 
-	set retries(value: number) {
+	public set retries(value: number) {
 		this._retries = value;
 	}
 
-	get retry(): boolean {
+	public get retry(): boolean {
 		return this._retry;
 	}
 
-	set retry(value: boolean) {
+	public set retry(value: boolean) {
 		this._retry = value;
 	}
 
-	get retryDelay(): number {
+	public get retryDelay(): number {
 		return this._retryDelay;
 	}
 
-	set retryDelay(value: number) {
+	public set retryDelay(value: number) {
 		this._retryDelay = value;
 	}
 
-	get keepAlive(): boolean {
+	public get keepAlive(): boolean {
 		return this._keepAlive;
 	}
 
-	set keepAlive(value: boolean) {
+	public set keepAlive(value: boolean) {
 		this._keepAlive = value;
 	}
 
-	get keepAliveDelay(): number {
+	public get keepAliveDelay(): number {
 		return this._keepAliveDelay;
 	}
 
-	set keepAliveDelay(value: number) {
+	public set keepAliveDelay(value: number) {
 		this._keepAliveDelay = value;
 	}
 
-	get connected(): boolean {
+	public get connected(): boolean {
 		return this._connected;
 	}
 
-	set connected(value: boolean) {
+	public set connected(value: boolean) {
 		this._connected = value;
 	}
 
-	get commandQueue(): Array<{
+	public get commandQueue(): Array<{
 		command: string;
 		resolve: (value: any) => void;
 		reject: (reason?: any) => void;
@@ -141,7 +141,7 @@ export class Memcache extends Hookified {
 		return this._commandQueue;
 	}
 
-	set commandQueue(value: Array<{
+	public set commandQueue(value: Array<{
 		command: string;
 		resolve: (value: any) => void;
 		reject: (reason?: any) => void;
@@ -151,31 +151,31 @@ export class Memcache extends Hookified {
 		this._commandQueue = value;
 	}
 
-	get buffer(): string {
+	public get buffer(): string {
 		return this._buffer;
 	}
 
-	set buffer(value: string) {
+	public set buffer(value: string) {
 		this._buffer = value;
 	}
 
-	get currentCommand(): any {
+	public get currentCommand(): any {
 		return this._currentCommand;
 	}
 
-	set currentCommand(value: any) {
+	public set currentCommand(value: any) {
 		this._currentCommand = value;
 	}
 
-	get multilineData(): string[] {
+	public get multilineData(): string[] {
 		return this._multilineData;
 	}
 
-	set multilineData(value: string[]) {
+	public set multilineData(value: string[]) {
 		this._multilineData = value;
 	}
 
-	async connect(): Promise<void> {
+	public async connect(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (this.connected) {
 				resolve();
@@ -359,13 +359,13 @@ export class Memcache extends Hookified {
 		}
 	}
 
-	async get(key: string): Promise<string | null> {
+	public async get(key: string): Promise<string | null> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true);
 		return result && result.length > 0 ? result[0] : null;
 	}
 
-	async gets(keys: string[]): Promise<Map<string, string>> {
+	public async gets(keys: string[]): Promise<Map<string, string>> {
 		for (const key of keys) {
 			this.validateKey(key);
 		}
@@ -384,7 +384,7 @@ export class Memcache extends Hookified {
 		return map;
 	}
 
-	async set(
+	public async set(
 		key: string,
 		value: string,
 		exptime: number = 0,
@@ -398,7 +398,7 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
-	async add(
+	public async add(
 		key: string,
 		value: string,
 		exptime: number = 0,
@@ -412,7 +412,7 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
-	async replace(
+	public async replace(
 		key: string,
 		value: string,
 		exptime: number = 0,
@@ -426,7 +426,7 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
-	async append(key: string, value: string): Promise<boolean> {
+	public async append(key: string, value: string): Promise<boolean> {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
@@ -435,7 +435,7 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
-	async prepend(key: string, value: string): Promise<boolean> {
+	public async prepend(key: string, value: string): Promise<boolean> {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
@@ -444,52 +444,52 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
-	async delete(key: string): Promise<boolean> {
+	public async delete(key: string): Promise<boolean> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`delete ${key}`);
 		return result === "DELETED";
 	}
 
-	async incr(key: string, value: number = 1): Promise<number | null> {
+	public async incr(key: string, value: number = 1): Promise<number | null> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`incr ${key} ${value}`);
 		return typeof result === "number" ? result : null;
 	}
 
-	async decr(key: string, value: number = 1): Promise<number | null> {
+	public async decr(key: string, value: number = 1): Promise<number | null> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`decr ${key} ${value}`);
 		return typeof result === "number" ? result : null;
 	}
 
-	async touch(key: string, exptime: number): Promise<boolean> {
+	public async touch(key: string, exptime: number): Promise<boolean> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`touch ${key} ${exptime}`);
 		return result === "TOUCHED";
 	}
 
-	async flush(): Promise<boolean> {
+	public async flush(): Promise<boolean> {
 		const result = await this.sendCommand("flush_all");
 		return result === "OK";
 	}
 
-	async flushAll(delay?: number): Promise<boolean> {
+	public async flushAll(delay?: number): Promise<boolean> {
 		const command = delay !== undefined ? `flush_all ${delay}` : "flush_all";
 		const result = await this.sendCommand(command);
 		return result === "OK";
 	}
 
-	async stats(type?: string): Promise<MemcacheStats> {
+	public async stats(type?: string): Promise<MemcacheStats> {
 		const command = type ? `stats ${type}` : "stats";
 		return await this.sendCommand(command, false, true);
 	}
 
-	async version(): Promise<string> {
+	public async version(): Promise<string> {
 		const result = await this.sendCommand("version");
 		return result;
 	}
 
-	async quit(): Promise<void> {
+	public async quit(): Promise<void> {
 		if (this.connected && this.socket) {
 			try {
 				await this.sendCommand("quit");
@@ -501,7 +501,7 @@ export class Memcache extends Hookified {
 		}
 	}
 
-	disconnect(): void {
+	public disconnect(): void {
 		if (this.socket) {
 			this.socket.destroy();
 			this.socket = null;
@@ -509,7 +509,7 @@ export class Memcache extends Hookified {
 		}
 	}
 
-	isConnected(): boolean {
+	public isConnected(): boolean {
 		return this.connected;
 	}
 
