@@ -17,37 +17,162 @@ export interface MemcacheStats {
 }
 
 export class Memcache extends Hookified {
-	private socket: Socket | null = null;
-	private host: string;
-	private port: number;
-	private timeout: number;
-	private retries: number;
-	private retry: boolean;
-	private retryDelay: number;
-	private keepAlive: boolean;
-	private keepAliveDelay: number;
-	private connected: boolean = false;
-	private commandQueue: Array<{
+	private _socket: Socket | null = null;
+	private _host: string;
+	private _port: number;
+	private _timeout: number;
+	private _retries: number;
+	private _retry: boolean;
+	private _retryDelay: number;
+	private _keepAlive: boolean;
+	private _keepAliveDelay: number;
+	private _connected: boolean = false;
+	private _commandQueue: Array<{
 		command: string;
 		resolve: (value: any) => void;
 		reject: (reason?: any) => void;
 		isMultiline?: boolean;
 		isStats?: boolean;
 	}> = [];
-	private buffer: string = "";
-	private currentCommand: any = null;
-	private multilineData: string[] = [];
+	private _buffer: string = "";
+	private _currentCommand: any = null;
+	private _multilineData: string[] = [];
 
 	constructor(options: MemcacheOptions = {}) {
 		super();
-		this.host = options.host || "localhost";
-		this.port = options.port || 11211;
-		this.timeout = options.timeout || 5000;
-		this.retries = options.retries || 3;
-		this.retry = options.retry !== false;
-		this.retryDelay = options.retryDelay || 1000;
-		this.keepAlive = options.keepAlive !== false;
-		this.keepAliveDelay = options.keepAliveDelay || 1000;
+		this._host = options.host || "localhost";
+		this._port = options.port || 11211;
+		this._timeout = options.timeout || 5000;
+		this._retries = options.retries || 3;
+		this._retry = options.retry !== false;
+		this._retryDelay = options.retryDelay || 1000;
+		this._keepAlive = options.keepAlive !== false;
+		this._keepAliveDelay = options.keepAliveDelay || 1000;
+	}
+
+	// Getters and Setters
+	get socket(): Socket | null {
+		return this._socket;
+	}
+
+	set socket(value: Socket | null) {
+		this._socket = value;
+	}
+
+	get host(): string {
+		return this._host;
+	}
+
+	set host(value: string) {
+		this._host = value;
+	}
+
+	get port(): number {
+		return this._port;
+	}
+
+	set port(value: number) {
+		this._port = value;
+	}
+
+	get timeout(): number {
+		return this._timeout;
+	}
+
+	set timeout(value: number) {
+		this._timeout = value;
+	}
+
+	get retries(): number {
+		return this._retries;
+	}
+
+	set retries(value: number) {
+		this._retries = value;
+	}
+
+	get retry(): boolean {
+		return this._retry;
+	}
+
+	set retry(value: boolean) {
+		this._retry = value;
+	}
+
+	get retryDelay(): number {
+		return this._retryDelay;
+	}
+
+	set retryDelay(value: number) {
+		this._retryDelay = value;
+	}
+
+	get keepAlive(): boolean {
+		return this._keepAlive;
+	}
+
+	set keepAlive(value: boolean) {
+		this._keepAlive = value;
+	}
+
+	get keepAliveDelay(): number {
+		return this._keepAliveDelay;
+	}
+
+	set keepAliveDelay(value: number) {
+		this._keepAliveDelay = value;
+	}
+
+	get connected(): boolean {
+		return this._connected;
+	}
+
+	set connected(value: boolean) {
+		this._connected = value;
+	}
+
+	get commandQueue(): Array<{
+		command: string;
+		resolve: (value: any) => void;
+		reject: (reason?: any) => void;
+		isMultiline?: boolean;
+		isStats?: boolean;
+	}> {
+		return this._commandQueue;
+	}
+
+	set commandQueue(value: Array<{
+		command: string;
+		resolve: (value: any) => void;
+		reject: (reason?: any) => void;
+		isMultiline?: boolean;
+		isStats?: boolean;
+	}>) {
+		this._commandQueue = value;
+	}
+
+	get buffer(): string {
+		return this._buffer;
+	}
+
+	set buffer(value: string) {
+		this._buffer = value;
+	}
+
+	get currentCommand(): any {
+		return this._currentCommand;
+	}
+
+	set currentCommand(value: any) {
+		this._currentCommand = value;
+	}
+
+	get multilineData(): string[] {
+		return this._multilineData;
+	}
+
+	set multilineData(value: string[]) {
+		this._multilineData = value;
 	}
 
 	async connect(): Promise<void> {
