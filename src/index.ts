@@ -447,17 +447,16 @@ export class Memcache extends Hookified {
 		}
 	}
 
-	private sendCommand(
+	private async sendCommand(
 		command: string,
 		isMultiline: boolean = false,
 		isStats: boolean = false,
 	): Promise<any> {
-		return new Promise((resolve, reject) => {
-			if (!this.connected || !this.socket) {
-				reject(new Error("Not connected to memcache server"));
-				return;
-			}
+		if (!this.connected || !this.socket) {
+			throw new Error("Not connected to memcache server");
+		}
 
+		return new Promise((resolve, reject) => {
 			this.commandQueue.push({
 				command,
 				resolve,
@@ -465,7 +464,7 @@ export class Memcache extends Hookified {
 				isMultiline,
 				isStats,
 			});
-			this.socket.write(command + "\r\n");
+			this.socket!.write(command + "\r\n");
 		});
 	}
 
