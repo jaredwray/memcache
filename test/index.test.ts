@@ -45,6 +45,146 @@ describe("Memcache", () => {
 			testClient.timeout = 2000;
 			expect(testClient.timeout).toBe(2000);
 		});
+
+		it("should allow getting and setting host property", () => {
+			const testClient = new Memcache();
+			expect(testClient.host).toBe("localhost"); // Default host
+
+			testClient.host = "127.0.0.1";
+			expect(testClient.host).toBe("127.0.0.1");
+
+			testClient.host = "memcache.example.com";
+			expect(testClient.host).toBe("memcache.example.com");
+		});
+
+		it("should initialize with custom host", () => {
+			const testClient = new Memcache({ host: "192.168.1.100" });
+			expect(testClient.host).toBe("192.168.1.100");
+		});
+
+		it("should allow getting and setting port property", () => {
+			const testClient = new Memcache();
+			expect(testClient.port).toBe(11211); // Default port
+
+			testClient.port = 11212;
+			expect(testClient.port).toBe(11212);
+
+			testClient.port = 9999;
+			expect(testClient.port).toBe(9999);
+		});
+
+		it("should initialize with custom port", () => {
+			const testClient = new Memcache({ port: 11212 });
+			expect(testClient.port).toBe(11212);
+		});
+
+		it("should allow getting and setting keepAlive property", () => {
+			const testClient = new Memcache();
+			expect(testClient.keepAlive).toBe(true); // Default keepAlive
+
+			testClient.keepAlive = false;
+			expect(testClient.keepAlive).toBe(false);
+
+			testClient.keepAlive = true;
+			expect(testClient.keepAlive).toBe(true);
+		});
+
+		it("should initialize with custom keepAlive", () => {
+			const testClient = new Memcache({ keepAlive: false });
+			expect(testClient.keepAlive).toBe(false);
+
+			const testClient2 = new Memcache({ keepAlive: true });
+			expect(testClient2.keepAlive).toBe(true);
+		});
+
+		it("should allow getting and setting keepAliveDelay property", () => {
+			const testClient = new Memcache();
+			expect(testClient.keepAliveDelay).toBe(1000); // Default keepAliveDelay
+
+			testClient.keepAliveDelay = 3000;
+			expect(testClient.keepAliveDelay).toBe(3000);
+
+			testClient.keepAliveDelay = 100;
+			expect(testClient.keepAliveDelay).toBe(100);
+		});
+
+		it("should initialize with custom keepAliveDelay", () => {
+			const testClient = new Memcache({ keepAliveDelay: 2000 });
+			expect(testClient.keepAliveDelay).toBe(2000);
+		});
+
+		it("should allow getting and setting buffer property", () => {
+			const testClient = new Memcache();
+			expect(testClient.buffer).toBe(""); // Default buffer
+
+			testClient.buffer = "test data";
+			expect(testClient.buffer).toBe("test data");
+
+			testClient.buffer = "more data\r\n";
+			expect(testClient.buffer).toBe("more data\r\n");
+		});
+
+		it("should allow getting and setting multilineData property", () => {
+			const testClient = new Memcache();
+			expect(testClient.multilineData).toEqual([]); // Default empty array
+
+			testClient.multilineData = ["line1", "line2"];
+			expect(testClient.multilineData).toEqual(["line1", "line2"]);
+
+			testClient.multilineData = ["data1", "data2", "data3"];
+			expect(testClient.multilineData).toEqual(["data1", "data2", "data3"]);
+		});
+
+		it("should allow setting socket property", () => {
+			const testClient = new Memcache();
+			expect(testClient.socket).toBe(null); // Default socket
+
+			const mockSocket = { fake: "socket" } as any;
+			testClient.socket = mockSocket;
+			expect(testClient.socket).toBe(mockSocket);
+
+			testClient.socket = null;
+			expect(testClient.socket).toBe(null);
+		});
+
+		it("should allow setting connected property", () => {
+			const testClient = new Memcache();
+			expect(testClient.connected).toBe(false); // Default connected state
+
+			testClient.connected = true;
+			expect(testClient.connected).toBe(true);
+
+			testClient.connected = false;
+			expect(testClient.connected).toBe(false);
+		});
+
+		it("should allow setting commandQueue property", () => {
+			const testClient = new Memcache();
+			expect(testClient.commandQueue).toEqual([]); // Default empty queue
+
+			const mockQueue = [
+				{
+					command: "get test",
+					resolve: vi.fn(),
+					reject: vi.fn(),
+					isMultiline: true,
+				},
+			];
+			testClient.commandQueue = mockQueue;
+			expect(testClient.commandQueue).toEqual(mockQueue);
+
+			const anotherQueue = [
+				{
+					command: "set key value",
+					resolve: vi.fn(),
+					reject: vi.fn(),
+					isMultiline: false,
+					isStats: true,
+				},
+			];
+			testClient.commandQueue = anotherQueue;
+			expect(testClient.commandQueue).toEqual(anotherQueue);
+		});
 	});
 
 	describe("Key Validation", () => {
@@ -119,6 +259,39 @@ describe("Memcache", () => {
 			});
 
 			await expect(client14.connect()).rejects.toThrow("Connection timeout");
+		});
+
+		it("should handle error event before connection is established", async () => {
+			const client16 = new Memcache({
+				host: "localhost",
+				port: 99999, // Invalid port that will cause immediate error
+				timeout: 100,
+			});
+
+			// This should trigger an error immediately due to invalid port
+			await expect(client16.connect()).rejects.toThrow();
+		});
+
+		it("should reject on socket error before connection", async () => {
+			const client18 = new Memcache({
+				host: "localhost",
+				port: 11211,
+				timeout: 5000,
+			});
+
+			// Start connect and immediately simulate error
+			const connectPromise = client18.connect();
+
+			// Access the socket that was just created
+			const privateClient = client18 as any;
+			if (privateClient._socket) {
+				// Immediately emit an error before 'connect' event
+				process.nextTick(() => {
+					privateClient._socket.emit("error", new Error("Early socket error"));
+				});
+			}
+
+			await expect(connectPromise).rejects.toThrow("Early socket error");
 		});
 
 		it("should emit error events after connection", async () => {

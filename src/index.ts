@@ -5,9 +5,6 @@ export interface MemcacheOptions {
 	host?: string;
 	port?: number;
 	timeout?: number;
-	retries?: number;
-	retry?: boolean;
-	retryDelay?: number;
 	keepAlive?: boolean;
 	keepAliveDelay?: number;
 }
@@ -21,9 +18,6 @@ export class Memcache extends Hookified {
 	private _host: string;
 	private _port: number;
 	private _timeout: number;
-	private _retries: number;
-	private _retry: boolean;
-	private _retryDelay: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _connected: boolean = false;
@@ -43,9 +37,6 @@ export class Memcache extends Hookified {
 		this._host = options.host || "localhost";
 		this._port = options.port || 11211;
 		this._timeout = options.timeout || 5000;
-		this._retries = options.retries || 3;
-		this._retry = options.retry !== false;
-		this._retryDelay = options.retryDelay || 1000;
 		this._keepAlive = options.keepAlive !== false;
 		this._keepAliveDelay = options.keepAliveDelay || 1000;
 	}
@@ -81,30 +72,6 @@ export class Memcache extends Hookified {
 
 	public set timeout(value: number) {
 		this._timeout = value;
-	}
-
-	public get retries(): number {
-		return this._retries;
-	}
-
-	public set retries(value: number) {
-		this._retries = value;
-	}
-
-	public get retry(): boolean {
-		return this._retry;
-	}
-
-	public set retry(value: boolean) {
-		this._retry = value;
-	}
-
-	public get retryDelay(): number {
-		return this._retryDelay;
-	}
-
-	public set retryDelay(value: number) {
-		this._retryDelay = value;
 	}
 
 	public get keepAlive(): boolean {
