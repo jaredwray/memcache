@@ -2,10 +2,30 @@ import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
 
 export interface MemcacheOptions {
+	/**
+	 * The hostname of the Memcache server.
+	 * @default "localhost"
+	 */
 	host?: string;
+	/**
+	 * The port of the Memcache server.
+	 * @default 11211
+	 */
 	port?: number;
+	/**
+	 * The timeout for Memcache operations.
+	 * @default 5000
+	 */
 	timeout?: number;
+	/**
+	 * Whether to keep the connection alive.
+	 * @default true
+	 */
 	keepAlive?: boolean;
+	/**
+	 * The delay before the connection is kept alive.
+	 * @default 1000
+	 */
 	keepAliveDelay?: number;
 }
 
@@ -45,95 +65,148 @@ export class Memcache extends Hookified {
 		this._keepAliveDelay = options.keepAliveDelay || 1000;
 	}
 
-	// Getters and Setters
+	/**
+	 * Get the socket connection.
+	 * @returns {Socket | undefined}
+	 */
 	public get socket(): Socket | undefined {
 		return this._socket;
 	}
 
+	/**
+	 * Set the socket connection.
+	 * @param {Socket | undefined} value
+	 */
 	public set socket(value: Socket | undefined) {
 		this._socket = value;
 	}
 
+	/**
+	 * Get the hostname of the Memcache server.
+	 * @returns {string}
+	 * @default "localhost"
+	 */
 	public get host(): string {
 		return this._host;
 	}
 
+	/**
+	 * Set the hostname of the Memcache server.
+	 * @param {string} value
+	 * @default "localhost"
+	 */
 	public set host(value: string) {
 		this._host = value;
 	}
 
+	/**
+	 * Get the port of the Memcache server.
+	 * @returns {number}
+	 * @default 11211
+	 */
 	public get port(): number {
 		return this._port;
 	}
 
+	/**
+	 * Set the port of the Memcache server.
+	 * @param {number} value
+	 * @default 11211
+	 */
 	public set port(value: number) {
 		this._port = value;
 	}
 
+	/**
+	 * Get the timeout for Memcache operations.
+	 * @returns {number}
+	 * @default 5000
+	 */
 	public get timeout(): number {
 		return this._timeout;
 	}
 
+	/**
+	 * Set the timeout for Memcache operations.
+	 * @param {number} value
+	 * @default 5000
+	 */
 	public set timeout(value: number) {
 		this._timeout = value;
 	}
 
+	/**
+	 * Get the keepAlive setting for the Memcache connection.
+	 * @returns {boolean}
+	 * @default true
+	 */
 	public get keepAlive(): boolean {
 		return this._keepAlive;
 	}
 
+	/**
+	 * Set the keepAlive setting for the Memcache connection.
+	 * @param {boolean} value
+	 * @default true
+	 */
 	public set keepAlive(value: boolean) {
 		this._keepAlive = value;
 	}
 
+	/**
+	 * Get the delay before the connection is kept alive.
+	 * @returns {number}
+	 * @default 1000
+	 */
 	public get keepAliveDelay(): number {
 		return this._keepAliveDelay;
 	}
 
+	/**
+	 * Set the delay before the connection is kept alive.
+	 * @param {number} value
+	 * @default 1000
+	 */
 	public set keepAliveDelay(value: number) {
 		this._keepAliveDelay = value;
 	}
 
-	public get connected(): boolean {
-		return this._connected;
-	}
-
-	public set connected(value: boolean) {
-		this._connected = value;
-	}
-
-	public get commandQueue(): CommandQueueItem[] {
-		return this._commandQueue;
-	}
-
-	public set commandQueue(value: CommandQueueItem[]) {
-		this._commandQueue = value;
-	}
-
-	public get buffer(): string {
-		return this._buffer;
-	}
-
-	public set buffer(value: string) {
-		this._buffer = value;
-	}
-
+	/**
+	 * Get the current command being processed.
+	 * @returns {CommandQueueItem | undefined}
+	 */
 	public get currentCommand(): CommandQueueItem | undefined {
 		return this._currentCommand;
 	}
 
+	/**
+	 * Set the current command being processed. This is for internal use
+	 * @param {CommandQueueItem | undefined} value
+	 */
 	public set currentCommand(value: CommandQueueItem | undefined) {
 		this._currentCommand = value;
 	}
 
-	public get multilineData(): string[] {
-		return this._multilineData;
+	/**
+	 * Get the command queue for the Memcache client.
+	 * @returns {CommandQueueItem[]}
+	 */
+	public get commandQueue(): CommandQueueItem[] {
+		return this._commandQueue;
 	}
 
-	public set multilineData(value: string[]) {
-		this._multilineData = value;
+	/**
+	 * Set the command queue for the Memcache client.
+	 * @param {CommandQueueItem[]} value
+	 */
+	public set commandQueue(value: CommandQueueItem[]) {
+		this._commandQueue = value;
 	}
 
+	/**
+	 * Connect to the Memcached server.
+	 * @returns {Promise<void>}
+	 */
 	public async connect(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (this._connected) {
@@ -182,12 +255,22 @@ export class Memcache extends Hookified {
 		});
 	}
 
+	/**
+	 * Get a value from the Memcache server.
+	 * @param {string} key
+	 * @returns {Promise<string | undefined>}
+	 */
 	public async get(key: string): Promise<string | undefined> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true);
 		return result && result.length > 0 ? result[0] : undefined;
 	}
 
+	/**
+	 * Get multiple values from the Memcache server.
+	 * @param keys {string[]}
+	 * @returns {Promise<Map<string, string>>}
+	 */
 	public async gets(keys: string[]): Promise<Map<string, string>> {
 		for (const key of keys) {
 			this.validateKey(key);
@@ -207,6 +290,14 @@ export class Memcache extends Hookified {
 		return map;
 	}
 
+	/**
+	 * Get a value from the Memcache server.
+	 * @param key {string}
+	 * @param value {string}
+	 * @param exptime {number}
+	 * @param flags {number}
+	 * @returns {Promise<boolean>}
+	 */
 	public async set(
 		key: string,
 		value: string,
@@ -221,6 +312,14 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
+	/**
+	 * Get a value from the Memcache server.
+	 * @param key {string}
+	 * @param value {string}
+	 * @param exptime {number}
+	 * @param flags {number}
+	 * @returns {Promise<boolean>}
+	 */
 	public async add(
 		key: string,
 		value: string,
@@ -235,6 +334,14 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
+	/**
+	 * Get a value from the Memcache server.
+	 * @param key {string}
+	 * @param value {string}
+	 * @param exptime {number}
+	 * @param flags {number}
+	 * @returns {Promise<boolean>}
+	 */
 	public async replace(
 		key: string,
 		value: string,
@@ -249,6 +356,12 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
+	/**
+	 * Append a value to an existing key in the Memcache server.
+	 * @param key {string}
+	 * @param value {string}
+	 * @returns {Promise<boolean>}
+	 */
 	public async append(key: string, value: string): Promise<boolean> {
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -258,6 +371,12 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
+	/**
+	 * Prepend a value to an existing key in the Memcache server.
+	 * @param key {string}
+	 * @param value {string}
+	 * @returns {Promise<boolean>}
+	 */
 	public async prepend(key: string, value: string): Promise<boolean> {
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -267,12 +386,23 @@ export class Memcache extends Hookified {
 		return result === "STORED";
 	}
 
+	/**
+	 * Delete a value from the Memcache server.
+	 * @param key {string}
+	 * @returns {Promise<boolean>}
+	 */
 	public async delete(key: string): Promise<boolean> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`delete ${key}`);
 		return result === "DELETED";
 	}
 
+	/**
+	 * Increment a value in the Memcache server.
+	 * @param key {string}
+	 * @param value {number}
+	 * @returns {Promise<number | undefined>}
+	 */
 	public async incr(
 		key: string,
 		value: number = 1,
@@ -282,6 +412,12 @@ export class Memcache extends Hookified {
 		return typeof result === "number" ? result : undefined;
 	}
 
+	/**
+	 * Decrement a value in the Memcache server.
+	 * @param key {string}
+	 * @param value {number}
+	 * @returns {Promise<number | undefined>}
+	 */
 	public async decr(
 		key: string,
 		value: number = 1,
@@ -291,33 +427,58 @@ export class Memcache extends Hookified {
 		return typeof result === "number" ? result : undefined;
 	}
 
+	/**
+	 * Touch a value in the Memcache server.
+	 * @param key {string}
+	 * @param exptime {number}
+	 * @returns {Promise<boolean>}
+	 */
 	public async touch(key: string, exptime: number): Promise<boolean> {
 		this.validateKey(key);
 		const result = await this.sendCommand(`touch ${key} ${exptime}`);
 		return result === "TOUCHED";
 	}
 
-	public async flush(): Promise<boolean> {
-		const result = await this.sendCommand("flush_all");
-		return result === "OK";
-	}
+	/**
+	 * Flush all values from the Memcache server.
+	 * @param delay {number}
+	 * @returns {Promise<boolean>}
+	 */
+	public async flush(delay?: number): Promise<boolean> {
+		let command = "flush_all";
 
-	public async flushAll(delay?: number): Promise<boolean> {
-		const command = delay !== undefined ? `flush_all ${delay}` : "flush_all";
+		// If a delay is specified, use the delayed flush command
+		if (delay !== undefined) {
+			command += ` ${delay}`;
+		}
+
 		const result = await this.sendCommand(command);
 		return result === "OK";
 	}
 
+	/**
+	 * Get statistics from the Memcache server.
+	 * @param type {string}
+	 * @returns {Promise<MemcacheStats>}
+	 */
 	public async stats(type?: string): Promise<MemcacheStats> {
 		const command = type ? `stats ${type}` : "stats";
 		return await this.sendCommand(command, false, true);
 	}
 
+	/**
+	 * Get the Memcache server version.
+	 * @returns {Promise<string>}
+	 */
 	public async version(): Promise<string> {
 		const result = await this.sendCommand("version");
 		return result;
 	}
 
+	/**
+	 * Quit the Memcache server and disconnect the socket.
+	 * @returns {Promise<void>}
+	 */
 	public async quit(): Promise<void> {
 		if (this._connected && this._socket) {
 			try {
@@ -326,12 +487,15 @@ export class Memcache extends Hookified {
 			} catch (error) {
 				// Ignore errors from quit command as the server closes the connection
 			}
-			this._socket.end();
-			this._connected = false;
+			await this.disconnect();
 		}
 	}
 
-	public disconnect(): void {
+	/**
+	 * Disconnect the socket from the Memcache server. Use quit for graceful disconnection.
+	 * @returns {Promise<void>}
+	 */
+	public async disconnect(): Promise<void> {
 		if (this._socket) {
 			this._socket.destroy();
 			this._socket = undefined;
@@ -339,6 +503,10 @@ export class Memcache extends Hookified {
 		}
 	}
 
+	/**
+	 * Check if the client is connected to the Memcache server.
+	 * @returns {boolean}
+	 */
 	public isConnected(): boolean {
 		return this._connected;
 	}
@@ -367,7 +535,7 @@ export class Memcache extends Hookified {
 		if (this._currentCommand.isStats) {
 			if (line === "END") {
 				const stats: MemcacheStats = {};
-				for (const statLine of this.multilineData) {
+				for (const statLine of this._multilineData) {
 					const [, key, value] = statLine.split(" ");
 					if (key && value) {
 						stats[key] = value;
@@ -396,7 +564,7 @@ export class Memcache extends Hookified {
 				this.readValue(bytes);
 			} else if (line === "END") {
 				const result =
-					this.multilineData.length > 0 ? this.multilineData : undefined;
+					this._multilineData.length > 0 ? this._multilineData : undefined;
 				this._currentCommand.resolve(result);
 				this._multilineData = [];
 				this._currentCommand = undefined;
@@ -437,11 +605,11 @@ export class Memcache extends Hookified {
 	}
 
 	private readValue(bytes: number): void {
-		const valueEnd = this.buffer.indexOf("\r\n");
+		const valueEnd = this._buffer.indexOf("\r\n");
 		if (valueEnd >= bytes) {
-			const value = this.buffer.substring(0, bytes);
-			this.buffer = this.buffer.substring(bytes + 2);
-			this.multilineData.push(value);
+			const value = this._buffer.substring(0, bytes);
+			this._buffer = this._buffer.substring(bytes + 2);
+			this._multilineData.push(value);
 		}
 	}
 

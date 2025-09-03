@@ -114,28 +114,6 @@ describe("Memcache", () => {
 			expect(testClient.keepAliveDelay).toBe(2000);
 		});
 
-		it("should allow getting and setting buffer property", () => {
-			const testClient = new Memcache();
-			expect(testClient.buffer).toBe(""); // Default buffer
-
-			testClient.buffer = "test data";
-			expect(testClient.buffer).toBe("test data");
-
-			testClient.buffer = "more data\r\n";
-			expect(testClient.buffer).toBe("more data\r\n");
-		});
-
-		it("should allow getting and setting multilineData property", () => {
-			const testClient = new Memcache();
-			expect(testClient.multilineData).toEqual([]); // Default empty array
-
-			testClient.multilineData = ["line1", "line2"];
-			expect(testClient.multilineData).toEqual(["line1", "line2"]);
-
-			testClient.multilineData = ["data1", "data2", "data3"];
-			expect(testClient.multilineData).toEqual(["data1", "data2", "data3"]);
-		});
-
 		it("should allow setting socket property", () => {
 			const testClient = new Memcache();
 			expect(testClient.socket).toBe(undefined); // Default socket
@@ -146,17 +124,6 @@ describe("Memcache", () => {
 
 			testClient.socket = undefined;
 			expect(testClient.socket).toBe(undefined);
-		});
-
-		it("should allow setting connected property", () => {
-			const testClient = new Memcache();
-			expect(testClient.connected).toBe(false); // Default connected state
-
-			testClient.connected = true;
-			expect(testClient.connected).toBe(true);
-
-			testClient.connected = false;
-			expect(testClient.connected).toBe(false);
 		});
 
 		it("should allow setting commandQueue property", () => {
@@ -538,7 +505,7 @@ describe("Memcache", () => {
 		});
 	});
 
-	describe("Integration Tests (requires memcached server)", () => {
+	describe("Memcached Integration Tests", () => {
 		it("should connect to memcached server", async () => {
 			await client.connect();
 			expect(client.isConnected()).toBe(true);
@@ -660,11 +627,11 @@ describe("Memcache", () => {
 			await client.connect();
 
 			// Test flushAll with delay parameter (just test the command works)
-			const flushResult = await client.flushAll(1);
+			const flushResult = await client.flush(1);
 			expect(flushResult).toBe(true);
 
 			// Also test without delay
-			const flushResultNoDelay = await client.flushAll();
+			const flushResultNoDelay = await client.flush();
 			expect(flushResultNoDelay).toBe(true);
 		});
 
