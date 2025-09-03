@@ -1,7 +1,7 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Memcache from "../src/index";
+import Memcache, { MemcacheEvents } from "../src/index";
 
 describe("Memcache", () => {
 	let client: Memcache;
@@ -673,6 +673,153 @@ describe("Memcache", () => {
 
 			client.disconnect();
 			expect(client.isConnected()).toBe(false);
+		});
+	});
+
+	describe("MemcacheEvents", () => {
+		it("should export MemcacheEvents enum with correct values", () => {
+			expect(MemcacheEvents.CONNECT).toBe("connect");
+			expect(MemcacheEvents.QUIT).toBe("quit");
+			expect(MemcacheEvents.HIT).toBe("hit");
+			expect(MemcacheEvents.MISS).toBe("miss");
+			expect(MemcacheEvents.ERROR).toBe("error");
+			expect(MemcacheEvents.WARN).toBe("warn");
+			expect(MemcacheEvents.INFO).toBe("info");
+			expect(MemcacheEvents.TIMEOUT).toBe("timeout");
+			expect(MemcacheEvents.CLOSE).toBe("close");
+		});
+
+		it("should emit connect event on connection", async () => {
+			let connectEmitted = false;
+			client.on(MemcacheEvents.CONNECT, () => {
+				connectEmitted = true;
+			});
+
+			await client.connect();
+			expect(connectEmitted).toBe(true);
+		});
+
+		it("should emit error event", async () => {
+			let errorEmitted = false;
+			let errorMessage = "";
+			client.on(MemcacheEvents.ERROR, (error: Error) => {
+				errorEmitted = true;
+				errorMessage = error.message;
+			});
+
+			await client.connect();
+			const socket = (client as any).socket as Socket;
+			socket.emit("error", new Error("Test error"));
+
+			expect(errorEmitted).toBe(true);
+			expect(errorMessage).toBe("Test error");
+		});
+
+		it("should emit timeout event", async () => {
+			let timeoutEmitted = false;
+			client.on(MemcacheEvents.TIMEOUT, () => {
+				timeoutEmitted = true;
+			});
+
+			const connectPromise = client.connect();
+			const socket = (client as any).socket as Socket;
+			socket.emit("timeout");
+
+			await expect(connectPromise).rejects.toThrow("Connection timeout");
+			expect(timeoutEmitted).toBe(true);
+		});
+
+		it("should emit close event", async () => {
+			let closeEmitted = false;
+			client.on(MemcacheEvents.CLOSE, () => {
+				closeEmitted = true;
+			});
+
+			await client.connect();
+			const socket = (client as any).socket as Socket;
+			socket.emit("close");
+
+			expect(closeEmitted).toBe(true);
+		});
+
+		it("should emit hit event with key and value on successful get", async () => {
+			let hitEmitted = false;
+			let hitKey = "";
+			let hitValue = "";
+
+			client.on(MemcacheEvents.HIT, (key: string, value: string) => {
+				hitEmitted = true;
+				hitKey = key;
+				hitValue = value;
+			});
+
+			await client.connect();
+			await client.set("test-hit", "test-value");
+			await client.get("test-hit");
+
+			expect(hitEmitted).toBe(true);
+			expect(hitKey).toBe("test-hit");
+			expect(hitValue).toBe("test-value");
+		});
+
+		it("should emit miss event with key on failed get", async () => {
+			let missEmitted = false;
+			let missKey = "";
+
+			client.on(MemcacheEvents.MISS, (key: string) => {
+				missEmitted = true;
+				missKey = key;
+			});
+
+			await client.connect();
+			await client.get("non-existent-key");
+
+			expect(missEmitted).toBe(true);
+			expect(missKey).toBe("non-existent-key");
+		});
+
+		it("should emit hit events for multiple gets with mixed results", async () => {
+			const hits: Array<{ key: string; value: string }> = [];
+			const misses: string[] = [];
+
+			client.on(MemcacheEvents.HIT, (key: string, value: string) => {
+				hits.push({ key, value });
+			});
+
+			client.on(MemcacheEvents.MISS, (key: string) => {
+				misses.push(key);
+			});
+
+			await client.connect();
+			await client.set("exists1", "value1");
+			await client.set("exists2", "value2");
+
+			await client.gets(["exists1", "non-existent", "exists2", "another-miss"]);
+
+			expect(hits).toHaveLength(2);
+			expect(hits[0]).toEqual({ key: "exists1", value: "value1" });
+			expect(hits[1]).toEqual({ key: "exists2", value: "value2" });
+			expect(misses).toEqual(["non-existent", "another-miss"]);
+		});
+
+		it("should emit miss events for all keys when gets returns no results", async () => {
+			const misses: string[] = [];
+
+			client.on(MemcacheEvents.MISS, (key: string) => {
+				misses.push(key);
+			});
+
+			await client.connect();
+
+			// Simulate gets with no results by mocking the response
+			const socket = (client as any).socket as Socket;
+			const getPromise = client.gets(["key1", "key2", "key3"]);
+
+			// Simulate END response with no VALUE lines (empty result)
+			socket.emit("data", "END\r\n");
+
+			await getPromise;
+			expect(misses).toEqual(["key1", "key2", "key3"]);
 		});
 	});
 });

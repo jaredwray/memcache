@@ -3,14 +3,14 @@ import { Hookified } from "hookified";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
-	QUIT = "quit", 
+	QUIT = "quit",
 	HIT = "hit",
 	MISS = "miss",
 	ERROR = "error",
 	WARN = "warn",
 	INFO = "info",
 	TIMEOUT = "timeout",
-	CLOSE = "close"
+	CLOSE = "close",
 }
 
 export interface MemcacheOptions {
@@ -53,6 +53,7 @@ export type CommandQueueItem = {
 	reject: (reason?: any) => void;
 	isMultiline?: boolean;
 	isStats?: boolean;
+	requestedKeys?: string[];
 };
 
 export class Memcache extends Hookified {
@@ -67,6 +68,7 @@ export class Memcache extends Hookified {
 	private _buffer: string = "";
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
+	private _foundKeys: string[] = [];
 
 	constructor(options: MemcacheOptions = {}) {
 		super();
@@ -274,8 +276,11 @@ export class Memcache extends Hookified {
 	 */
 	public async get(key: string): Promise<string | undefined> {
 		this.validateKey(key);
-		const result = await this.sendCommand(`get ${key}`, true);
-		return result && result.length > 0 ? result[0] : undefined;
+		const result = await this.sendCommand(`get ${key}`, true, false, [key]);
+		if (result && result.length > 0) {
+			return result[0];
+		}
+		return undefined;
 	}
 
 	/**
@@ -288,9 +293,12 @@ export class Memcache extends Hookified {
 			this.validateKey(key);
 		}
 		const keysStr = keys.join(" ");
-		const results = (await this.sendCommand(`get ${keysStr}`, true)) as
-			| string[]
-			| undefined;
+		const results = (await this.sendCommand(
+			`get ${keysStr}`,
+			true,
+			false,
+			keys,
+		)) as string[] | undefined;
 		const map = new Map<string, string>();
 
 		if (results) {
@@ -572,13 +580,36 @@ export class Memcache extends Hookified {
 		if (this._currentCommand.isMultiline) {
 			if (line.startsWith("VALUE ")) {
 				const parts = line.split(" ");
+				const key = parts[1];
 				const bytes = parseInt(parts[3], 10);
+				this._foundKeys.push(key);
 				this.readValue(bytes);
 			} else if (line === "END") {
 				const result =
 					this._multilineData.length > 0 ? this._multilineData : undefined;
+
+				// Emit hit/miss events if we have requested keys
+				if (this._currentCommand.requestedKeys) {
+					for (let i = 0; i < this._foundKeys.length; i++) {
+						this.emit(
+							MemcacheEvents.HIT,
+							this._foundKeys[i],
+							this._multilineData[i],
+						);
+					}
+
+					// Emit miss events for keys that weren't found
+					const missedKeys = this._currentCommand.requestedKeys.filter(
+						(key) => !this._foundKeys.includes(key),
+					);
+					for (const key of missedKeys) {
+						this.emit(MemcacheEvents.MISS, key);
+					}
+				}
+
 				this._currentCommand.resolve(result);
 				this._multilineData = [];
+				this._foundKeys = [];
 				this._currentCommand = undefined;
 			} else if (
 				line.startsWith("ERROR") ||
@@ -587,6 +618,7 @@ export class Memcache extends Hookified {
 			) {
 				this._currentCommand.reject(new Error(line));
 				this._multilineData = [];
+				this._foundKeys = [];
 				this._currentCommand = undefined;
 			}
 		} else {
@@ -629,6 +661,7 @@ export class Memcache extends Hookified {
 		command: string,
 		isMultiline: boolean = false,
 		isStats: boolean = false,
+		requestedKeys?: string[],
 		// biome-ignore lint/suspicious/noExplicitAny: expected
 	): Promise<any> {
 		if (!this._connected || !this._socket) {
@@ -642,6 +675,7 @@ export class Memcache extends Hookified {
 				reject,
 				isMultiline,
 				isStats,
+				requestedKeys,
 			});
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
 			this._socket!.write(`${command}\r\n`);
