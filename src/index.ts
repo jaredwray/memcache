@@ -1,6 +1,18 @@
 import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
 
+export enum MemcacheEvents {
+	CONNECT = "connect",
+	QUIT = "quit", 
+	HIT = "hit",
+	MISS = "miss",
+	ERROR = "error",
+	WARN = "warn",
+	INFO = "info",
+	TIMEOUT = "timeout",
+	CLOSE = "close"
+}
+
 export interface MemcacheOptions {
 	/**
 	 * The hostname of the Memcache server.
@@ -226,7 +238,7 @@ export class Memcache extends Hookified {
 
 			this._socket.on("connect", () => {
 				this._connected = true;
-				this.emit("connect");
+				this.emit(MemcacheEvents.CONNECT);
 				resolve();
 			});
 
@@ -235,7 +247,7 @@ export class Memcache extends Hookified {
 			});
 
 			this._socket.on("error", (error: Error) => {
-				this.emit("error", error);
+				this.emit(MemcacheEvents.ERROR, error);
 				if (!this._connected) {
 					reject(error);
 				}
@@ -243,12 +255,12 @@ export class Memcache extends Hookified {
 
 			this._socket.on("close", () => {
 				this._connected = false;
-				this.emit("close");
+				this.emit(MemcacheEvents.CLOSE);
 				this.rejectPendingCommands(new Error("Connection closed"));
 			});
 
 			this._socket.on("timeout", () => {
-				this.emit("timeout");
+				this.emit(MemcacheEvents.TIMEOUT);
 				this._socket?.destroy();
 				reject(new Error("Connection timeout"));
 			});
