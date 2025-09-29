@@ -389,12 +389,18 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
+		await this.beforeHook("replace", { key, value, exptime, flags });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("replace", { key, value, exptime, flags, success });
+
+		return success;
 	}
 
 	/**

@@ -1271,6 +1271,142 @@ describe("Memcache", () => {
 			expect(result).toBe(true);
 			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
+
+		it("should call beforeHook and afterHook for replace operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:replace", beforeHookMock);
+			client.onHook("after:replace", afterHookMock);
+
+			await client.connect();
+
+			// First replace should fail (key doesn't exist)
+			const result1 = await client.replace(
+				"replace-hook-test",
+				"replace-value",
+				3600,
+				15,
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-test",
+				value: "replace-value",
+				exptime: 3600,
+				flags: 15,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-test",
+				value: "replace-value",
+				exptime: 3600,
+				flags: 15,
+				success: false,
+			});
+
+			expect(result1).toBe(false);
+
+			// Set the key first
+			await client.set("replace-hook-test", "initial-value");
+
+			// Clear mocks
+			beforeHookMock.mockClear();
+			afterHookMock.mockClear();
+
+			// Now replace should succeed
+			const result2 = await client.replace(
+				"replace-hook-test",
+				"new-value",
+				1800,
+				20,
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-test",
+				value: "new-value",
+				exptime: 1800,
+				flags: 20,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-test",
+				value: "new-value",
+				exptime: 1800,
+				flags: 20,
+				success: true,
+			});
+
+			expect(result2).toBe(true);
+
+			// Verify the value was replaced
+			const getValue = await client.get("replace-hook-test");
+			expect(getValue).toBe("new-value");
+		});
+
+		it("should call replace hooks with default parameters", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:replace", beforeHookMock);
+			client.onHook("after:replace", afterHookMock);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("replace-hook-default", "initial");
+
+			const result = await client.replace(
+				"replace-hook-default",
+				"replaced-value",
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-default",
+				value: "replaced-value",
+				exptime: 0,
+				flags: 0,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "replace-hook-default",
+				value: "replaced-value",
+				exptime: 0,
+				flags: 0,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+		});
+
+		it("should handle async replace hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:replace", asyncBeforeHook);
+			client.onHook("after:replace", asyncAfterHook);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("async-replace-test", "initial");
+
+			const start = Date.now();
+			const result = await client.replace(
+				"async-replace-test",
+				"async-replaced",
+			);
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
 	});
 
 	describe("MemcacheEvents", () => {
