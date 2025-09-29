@@ -410,12 +410,18 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async append(key: string, value: string): Promise<boolean> {
+		await this.beforeHook("append", { key, value });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("append", { key, value, success });
+
+		return success;
 	}
 
 	/**

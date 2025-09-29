@@ -1407,6 +1407,113 @@ describe("Memcache", () => {
 			expect(result).toBe(true);
 			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
+
+		it("should call beforeHook and afterHook for append operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:append", beforeHookMock);
+			client.onHook("after:append", afterHookMock);
+
+			await client.connect();
+
+			// First append should fail (key doesn't exist)
+			const result1 = await client.append("append-hook-test", "-appended");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "append-hook-test",
+				value: "-appended",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "append-hook-test",
+				value: "-appended",
+				success: false,
+			});
+
+			expect(result1).toBe(false);
+
+			// Set the key first
+			await client.set("append-hook-test", "initial");
+
+			// Clear mocks
+			beforeHookMock.mockClear();
+			afterHookMock.mockClear();
+
+			// Now append should succeed
+			const result2 = await client.append("append-hook-test", "-appended");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "append-hook-test",
+				value: "-appended",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "append-hook-test",
+				value: "-appended",
+				success: true,
+			});
+
+			expect(result2).toBe(true);
+
+			// Verify the value was appended
+			const getValue = await client.get("append-hook-test");
+			expect(getValue).toBe("initial-appended");
+		});
+
+		it("should handle multiple append hooks", async () => {
+			const beforeHook1 = vi.fn();
+			const beforeHook2 = vi.fn();
+			const afterHook1 = vi.fn();
+			const afterHook2 = vi.fn();
+
+			client.onHook("before:append", beforeHook1);
+			client.onHook("before:append", beforeHook2);
+			client.onHook("after:append", afterHook1);
+			client.onHook("after:append", afterHook2);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("multi-append-hook", "start");
+			await client.append("multi-append-hook", "-end");
+
+			expect(beforeHook1).toHaveBeenCalled();
+			expect(beforeHook2).toHaveBeenCalled();
+			expect(afterHook1).toHaveBeenCalled();
+			expect(afterHook2).toHaveBeenCalled();
+		});
+
+		it("should handle async append hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:append", asyncBeforeHook);
+			client.onHook("after:append", asyncAfterHook);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("async-append-test", "initial");
+
+			const start = Date.now();
+			const result = await client.append("async-append-test", "-async");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+
+			// Verify the append worked
+			const getValue = await client.get("async-append-test");
+			expect(getValue).toBe("initial-async");
+		});
 	});
 
 	describe("MemcacheEvents", () => {
