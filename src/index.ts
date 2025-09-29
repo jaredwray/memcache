@@ -320,6 +320,43 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Check-And-Set: Store a value only if it hasn't been modified since last fetch.
+	 * @param key {string}
+	 * @param value {string}
+	 * @param casToken {string}
+	 * @param exptime {number}
+	 * @param flags {number}
+	 * @returns {Promise<boolean>}
+	 */
+	public async cas(
+		key: string,
+		value: string,
+		casToken: string,
+		exptime: number = 0,
+		flags: number = 0,
+	): Promise<boolean> {
+		await this.beforeHook("cas", { key, value, casToken, exptime, flags });
+
+		this.validateKey(key);
+		const valueStr = String(value);
+		const bytes = Buffer.byteLength(valueStr);
+		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
+		const result = await this.sendCommand(command);
+		const success = result === "STORED";
+
+		await this.afterHook("cas", {
+			key,
+			value,
+			casToken,
+			exptime,
+			flags,
+			success,
+		});
+
+		return success;
+	}
+
+	/**
 	 * Get a value from the Memcache server.
 	 * @param key {string}
 	 * @param value {string}

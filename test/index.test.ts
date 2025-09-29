@@ -631,6 +631,77 @@ describe("Memcache", () => {
 			expect(getValue).toBe("replaced");
 		});
 
+		it("should handle cas command successfully", async () => {
+			await client.connect();
+			const key = "cas-test";
+
+			const socket = (client as any).socket as Socket;
+
+			// Set initial value
+			await client.set(key, "initial");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			// CAS should succeed with mocked response
+			const casResult = await client.cas(key, "updated", "12345");
+			expect(casResult).toBe(true);
+
+			socket.write = originalWrite;
+		});
+
+		it("should handle cas with exptime and flags", async () => {
+			await client.connect();
+			const key = "cas-test-params";
+
+			const socket = (client as any).socket as Socket;
+
+			await client.set(key, "initial");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			const casResult = await client.cas(key, "updated", "67890", 3600, 42);
+			expect(casResult).toBe(true);
+
+			socket.write = originalWrite;
+		});
+
+		it("should handle cas with default parameters", async () => {
+			await client.connect();
+			const key = "cas-test-defaults";
+
+			const socket = (client as any).socket as Socket;
+
+			await client.set(key, "initial");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			const casResult = await client.cas(key, "updated", "11111");
+			expect(casResult).toBe(true);
+
+			socket.write = originalWrite;
+		});
+
 		it("should handle append and prepend", async () => {
 			await client.connect();
 			const key = "concat-test";
@@ -2070,6 +2141,192 @@ describe("Memcache", () => {
 			// Set a key first
 			await client.set("multi-touch-hook", "value");
 			await client.touch("multi-touch-hook", 900);
+
+			expect(beforeHook1).toHaveBeenCalled();
+			expect(beforeHook2).toHaveBeenCalled();
+			expect(afterHook1).toHaveBeenCalled();
+			expect(afterHook2).toHaveBeenCalled();
+		});
+
+		it("should call beforeHook and afterHook for cas operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:cas", beforeHookMock);
+			client.onHook("after:cas", afterHookMock);
+
+			await client.connect();
+
+			const socket = (client as any).socket as Socket;
+
+			// Set a key first
+			await client.set("cas-hook-test", "initial-value");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			// Perform CAS
+			const result = await client.cas(
+				"cas-hook-test",
+				"new-value",
+				"12345",
+				3600,
+				10,
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "cas-hook-test",
+				value: "new-value",
+				casToken: "12345",
+				exptime: 3600,
+				flags: 10,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "cas-hook-test",
+				value: "new-value",
+				casToken: "12345",
+				exptime: 3600,
+				flags: 10,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+
+			socket.write = originalWrite;
+		});
+
+		it("should call cas hooks with default parameters", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:cas", beforeHookMock);
+			client.onHook("after:cas", afterHookMock);
+
+			await client.connect();
+
+			const socket = (client as any).socket as Socket;
+
+			// Set a key first
+			await client.set("cas-hook-default", "initial");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			const result = await client.cas("cas-hook-default", "updated", "54321");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "cas-hook-default",
+				value: "updated",
+				casToken: "54321",
+				exptime: 0,
+				flags: 0,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "cas-hook-default",
+				value: "updated",
+				casToken: "54321",
+				exptime: 0,
+				flags: 0,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+
+			socket.write = originalWrite;
+		});
+
+		it("should handle async cas hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:cas", asyncBeforeHook);
+			client.onHook("after:cas", asyncAfterHook);
+
+			await client.connect();
+
+			const socket = (client as any).socket as Socket;
+
+			// Set a key first
+			await client.set("async-cas-test", "initial");
+
+			// Mock socket write to simulate STORED response for CAS
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "STORED\r\n");
+				});
+				return true;
+			});
+
+			const start = Date.now();
+			const result = await client.cas("async-cas-test", "updated", "99999");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+
+			socket.write = originalWrite;
+		});
+
+		it("should handle cas hook errors with throwHookErrors", async () => {
+			const errorClient = new Memcache({ host: "localhost", port: 11211 });
+			errorClient.throwHookErrors = true;
+
+			const errorHook = vi.fn().mockImplementation(() => {
+				throw new Error("CAS hook error");
+			});
+
+			errorClient.onHook("before:cas", errorHook);
+
+			await errorClient.connect();
+			await errorClient.set("error-cas-test", "value");
+
+			// Hook error should propagate and reject the promise
+			await expect(
+				errorClient.cas("error-cas-test", "new-value", "12345"),
+			).rejects.toThrow("CAS hook error");
+			expect(errorHook).toHaveBeenCalled();
+
+			await errorClient.disconnect();
+		});
+
+		it("should support multiple cas hook listeners", async () => {
+			const beforeHook1 = vi.fn();
+			const beforeHook2 = vi.fn();
+			const afterHook1 = vi.fn();
+			const afterHook2 = vi.fn();
+
+			client.onHook("before:cas", beforeHook1);
+			client.onHook("before:cas", beforeHook2);
+			client.onHook("after:cas", afterHook1);
+			client.onHook("after:cas", afterHook2);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("multi-cas-hook", "start");
+			await client.cas("multi-cas-hook", "end", "77777");
 
 			expect(beforeHook1).toHaveBeenCalled();
 			expect(beforeHook2).toHaveBeenCalled();
