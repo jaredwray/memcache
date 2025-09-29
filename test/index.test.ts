@@ -1720,6 +1720,117 @@ describe("Memcache", () => {
 
 			await errorClient.disconnect();
 		});
+
+		it("should call beforeHook and afterHook for incr operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:incr", beforeHookMock);
+			client.onHook("after:incr", afterHookMock);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("incr-hook-test", "10");
+
+			// Increment by 5
+			const result = await client.incr("incr-hook-test", 5);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-test",
+				value: 5,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-test",
+				value: 5,
+				newValue: 15,
+			});
+
+			expect(result).toBe(15);
+		});
+
+		it("should call incr hooks with default increment value", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:incr", beforeHookMock);
+			client.onHook("after:incr", afterHookMock);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("incr-hook-default", "20");
+
+			// Increment with default value (1)
+			const result = await client.incr("incr-hook-default");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-default",
+				value: 1,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-default",
+				value: 1,
+				newValue: 21,
+			});
+
+			expect(result).toBe(21);
+		});
+
+		it("should handle incr hooks when key doesn't exist", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:incr", beforeHookMock);
+			client.onHook("after:incr", afterHookMock);
+
+			await client.connect();
+
+			// Try to increment a non-existent key
+			const result = await client.incr("incr-hook-nonexistent", 3);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-nonexistent",
+				value: 3,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "incr-hook-nonexistent",
+				value: 3,
+				newValue: undefined,
+			});
+
+			expect(result).toBe(undefined);
+		});
+
+		it("should handle async incr hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:incr", asyncBeforeHook);
+			client.onHook("after:incr", asyncAfterHook);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("async-incr-test", "100");
+
+			const start = Date.now();
+			const result = await client.incr("async-incr-test", 10);
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(110);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
 	});
 
 	describe("MemcacheEvents", () => {
