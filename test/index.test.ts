@@ -1618,6 +1618,108 @@ describe("Memcache", () => {
 			await client.prepend("remove-prepend-hook", "another-");
 			expect(hookMock).toHaveBeenCalledTimes(1);
 		});
+
+		it("should call beforeHook and afterHook for delete operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:delete", beforeHookMock);
+			client.onHook("after:delete", afterHookMock);
+
+			await client.connect();
+
+			// First delete should fail (key doesn't exist)
+			const result1 = await client.delete("delete-hook-test");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "delete-hook-test",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "delete-hook-test",
+				success: false,
+			});
+
+			expect(result1).toBe(false);
+
+			// Set the key first
+			await client.set("delete-hook-test", "value-to-delete");
+
+			// Clear mocks
+			beforeHookMock.mockClear();
+			afterHookMock.mockClear();
+
+			// Now delete should succeed
+			const result2 = await client.delete("delete-hook-test");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "delete-hook-test",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "delete-hook-test",
+				success: true,
+			});
+
+			expect(result2).toBe(true);
+
+			// Verify the key was deleted
+			const getValue = await client.get("delete-hook-test");
+			expect(getValue).toBe(undefined);
+		});
+
+		it("should handle async delete hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:delete", asyncBeforeHook);
+			client.onHook("after:delete", asyncAfterHook);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("async-delete-test", "to-be-deleted");
+
+			const start = Date.now();
+			const result = await client.delete("async-delete-test");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+
+			// Verify the delete worked
+			const getValue = await client.get("async-delete-test");
+			expect(getValue).toBe(undefined);
+		});
+
+		it("should handle delete hook errors with throwHookErrors", async () => {
+			const errorClient = new Memcache({ host: "localhost", port: 11211 });
+			errorClient.throwHookErrors = true;
+
+			const errorHook = vi.fn().mockImplementation(() => {
+				throw new Error("Delete hook error");
+			});
+
+			errorClient.onHook("before:delete", errorHook);
+
+			await errorClient.connect();
+			await errorClient.set("error-delete-test", "value");
+
+			// Hook error should propagate and reject the promise
+			await expect(errorClient.delete("error-delete-test")).rejects.toThrow(
+				"Delete hook error",
+			);
+			expect(errorHook).toHaveBeenCalled();
+
+			await errorClient.disconnect();
+		});
 	});
 
 	describe("MemcacheEvents", () => {

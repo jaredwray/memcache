@@ -451,9 +451,15 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async delete(key: string): Promise<boolean> {
+		await this.beforeHook("delete", { key });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`delete ${key}`);
-		return result === "DELETED";
+		const success = result === "DELETED";
+
+		await this.afterHook("delete", { key, success });
+
+		return success;
 	}
 
 	/**
