@@ -422,17 +422,24 @@ describe("Memcache", () => {
 
 			const socket = (client6 as any).socket as Socket;
 
+			// Mock socket write to immediately emit CLIENT_ERROR
+			const originalWrite = socket.write;
+			socket.write = vi.fn().mockImplementation(() => {
+				setImmediate(() => {
+					socket.emit("data", "CLIENT_ERROR bad command\r\n");
+				});
+				return true;
+			});
+
 			// Send a command
 			const commandPromise = client6
 				.set("test", "value")
 				.catch((e) => e.message);
 
-			// Simulate a CLIENT_ERROR response
-			socket.emit("data", "CLIENT_ERROR bad command\r\n");
-
 			const result = await commandPromise;
 			expect(result).toBe("CLIENT_ERROR bad command");
 
+			socket.write = originalWrite;
 			client6.disconnect();
 		});
 
@@ -965,6 +972,93 @@ describe("Memcache", () => {
 				"after1",
 				"after2",
 			]);
+		});
+
+		it("should call beforeHook and afterHook for set operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:set", beforeHookMock);
+			client.onHook("after:set", afterHookMock);
+
+			await client.connect();
+
+			const result = await client.set(
+				"set-hook-test",
+				"set-hook-value",
+				3600,
+				42,
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "set-hook-test",
+				value: "set-hook-value",
+				exptime: 3600,
+				flags: 42,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "set-hook-test",
+				value: "set-hook-value",
+				exptime: 3600,
+				flags: 42,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+		});
+
+		it("should call set hooks with default parameters", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:set", beforeHookMock);
+			client.onHook("after:set", afterHookMock);
+
+			await client.connect();
+
+			const result = await client.set("set-hook-default", "default-value");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "set-hook-default",
+				value: "default-value",
+				exptime: 0,
+				flags: 0,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "set-hook-default",
+				value: "default-value",
+				exptime: 0,
+				flags: 0,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+		});
+
+		it("should handle async set hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:set", asyncBeforeHook);
+			client.onHook("after:set", asyncAfterHook);
+
+			await client.connect();
+
+			const start = Date.now();
+			const result = await client.set("async-set-test", "async-value");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
 	});
 
