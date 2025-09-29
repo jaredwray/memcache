@@ -275,8 +275,13 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<string | undefined>}
 	 */
 	public async get(key: string): Promise<string | undefined> {
+		await this.beforeHook("get", { key });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true, false, [key]);
+
+		await this.afterHook("get", { key, value: result });
+
 		if (result && result.length > 0) {
 			return result[0];
 		}
