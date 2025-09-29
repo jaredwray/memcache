@@ -1831,6 +1831,146 @@ describe("Memcache", () => {
 			expect(result).toBe(110);
 			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
+
+		it("should call beforeHook and afterHook for decr operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:decr", beforeHookMock);
+			client.onHook("after:decr", afterHookMock);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("decr-hook-test", "50");
+
+			// Decrement by 7
+			const result = await client.decr("decr-hook-test", 7);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-test",
+				value: 7,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-test",
+				value: 7,
+				newValue: 43,
+			});
+
+			expect(result).toBe(43);
+		});
+
+		it("should call decr hooks with default decrement value", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:decr", beforeHookMock);
+			client.onHook("after:decr", afterHookMock);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("decr-hook-default", "30");
+
+			// Decrement with default value (1)
+			const result = await client.decr("decr-hook-default");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-default",
+				value: 1,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-default",
+				value: 1,
+				newValue: 29,
+			});
+
+			expect(result).toBe(29);
+		});
+
+		it("should handle decr hooks when key doesn't exist", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:decr", beforeHookMock);
+			client.onHook("after:decr", afterHookMock);
+
+			await client.connect();
+
+			// Try to decrement a non-existent key
+			const result = await client.decr("decr-hook-nonexistent", 5);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-nonexistent",
+				value: 5,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "decr-hook-nonexistent",
+				value: 5,
+				newValue: undefined,
+			});
+
+			expect(result).toBe(undefined);
+		});
+
+		it("should handle async decr hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:decr", asyncBeforeHook);
+			client.onHook("after:decr", asyncAfterHook);
+
+			await client.connect();
+
+			// Set an initial numeric value
+			await client.set("async-decr-test", "200");
+
+			const start = Date.now();
+			const result = await client.decr("async-decr-test", 25);
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(175);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
+
+		it("should handle decr not going below zero", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:decr", beforeHookMock);
+			client.onHook("after:decr", afterHookMock);
+
+			await client.connect();
+
+			// Set a small value
+			await client.set("decr-zero-test", "5");
+
+			// Try to decrement by more than the value (memcached won't go below 0)
+			const result = await client.decr("decr-zero-test", 10);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "decr-zero-test",
+				value: 10,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "decr-zero-test",
+				value: 10,
+				newValue: 0, // Memcached stops at 0
+			});
+
+			expect(result).toBe(0);
+		});
 	});
 
 	describe("MemcacheEvents", () => {

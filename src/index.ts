@@ -493,9 +493,15 @@ export class Memcache extends Hookified {
 		key: string,
 		value: number = 1,
 	): Promise<number | undefined> {
+		await this.beforeHook("decr", { key, value });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`decr ${key} ${value}`);
-		return typeof result === "number" ? result : undefined;
+		const newValue = typeof result === "number" ? result : undefined;
+
+		await this.afterHook("decr", { key, value, newValue });
+
+		return newValue;
 	}
 
 	/**
