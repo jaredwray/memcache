@@ -275,8 +275,13 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<string | undefined>}
 	 */
 	public async get(key: string): Promise<string | undefined> {
+		await this.beforeHook("get", { key });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`get ${key}`, true, false, [key]);
+
+		await this.afterHook("get", { key, value: result });
+
 		if (result && result.length > 0) {
 			return result[0];
 		}
@@ -289,6 +294,8 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<Map<string, string>>}
 	 */
 	public async gets(keys: string[]): Promise<Map<string, string>> {
+		await this.beforeHook("gets", { keys });
+
 		for (const key of keys) {
 			this.validateKey(key);
 		}
@@ -307,6 +314,8 @@ export class Memcache extends Hookified {
 			}
 		}
 
+		await this.afterHook("gets", { keys, values: map });
+
 		return map;
 	}
 
@@ -324,12 +333,18 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
+		await this.beforeHook("set", { key, value, exptime, flags });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("set", { key, value, exptime, flags, success });
+
+		return success;
 	}
 
 	/**
@@ -346,12 +361,18 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
+		await this.beforeHook("add", { key, value, exptime, flags });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("add", { key, value, exptime, flags, success });
+
+		return success;
 	}
 
 	/**
@@ -368,12 +389,18 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
+		await this.beforeHook("replace", { key, value, exptime, flags });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("replace", { key, value, exptime, flags, success });
+
+		return success;
 	}
 
 	/**
@@ -383,12 +410,18 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async append(key: string, value: string): Promise<boolean> {
+		await this.beforeHook("append", { key, value });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("append", { key, value, success });
+
+		return success;
 	}
 
 	/**
@@ -398,12 +431,18 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async prepend(key: string, value: string): Promise<boolean> {
+		await this.beforeHook("prepend", { key, value });
+
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 		const result = await this.sendCommand(command);
-		return result === "STORED";
+		const success = result === "STORED";
+
+		await this.afterHook("prepend", { key, value, success });
+
+		return success;
 	}
 
 	/**
@@ -412,9 +451,15 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async delete(key: string): Promise<boolean> {
+		await this.beforeHook("delete", { key });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`delete ${key}`);
-		return result === "DELETED";
+		const success = result === "DELETED";
+
+		await this.afterHook("delete", { key, success });
+
+		return success;
 	}
 
 	/**
@@ -427,9 +472,15 @@ export class Memcache extends Hookified {
 		key: string,
 		value: number = 1,
 	): Promise<number | undefined> {
+		await this.beforeHook("incr", { key, value });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`incr ${key} ${value}`);
-		return typeof result === "number" ? result : undefined;
+		const newValue = typeof result === "number" ? result : undefined;
+
+		await this.afterHook("incr", { key, value, newValue });
+
+		return newValue;
 	}
 
 	/**
@@ -442,9 +493,15 @@ export class Memcache extends Hookified {
 		key: string,
 		value: number = 1,
 	): Promise<number | undefined> {
+		await this.beforeHook("decr", { key, value });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`decr ${key} ${value}`);
-		return typeof result === "number" ? result : undefined;
+		const newValue = typeof result === "number" ? result : undefined;
+
+		await this.afterHook("decr", { key, value, newValue });
+
+		return newValue;
 	}
 
 	/**
@@ -454,9 +511,15 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async touch(key: string, exptime: number): Promise<boolean> {
+		await this.beforeHook("touch", { key, exptime });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`touch ${key} ${exptime}`);
-		return result === "TOUCHED";
+		const success = result === "TOUCHED";
+
+		await this.afterHook("touch", { key, exptime, success });
+
+		return success;
 	}
 
 	/**
