@@ -1514,6 +1514,110 @@ describe("Memcache", () => {
 			const getValue = await client.get("async-append-test");
 			expect(getValue).toBe("initial-async");
 		});
+
+		it("should call beforeHook and afterHook for prepend operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:prepend", beforeHookMock);
+			client.onHook("after:prepend", afterHookMock);
+
+			await client.connect();
+
+			// First prepend should fail (key doesn't exist)
+			const result1 = await client.prepend("prepend-hook-test", "prefix-");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "prepend-hook-test",
+				value: "prefix-",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "prepend-hook-test",
+				value: "prefix-",
+				success: false,
+			});
+
+			expect(result1).toBe(false);
+
+			// Set the key first
+			await client.set("prepend-hook-test", "initial");
+
+			// Clear mocks
+			beforeHookMock.mockClear();
+			afterHookMock.mockClear();
+
+			// Now prepend should succeed
+			const result2 = await client.prepend("prepend-hook-test", "prefix-");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "prepend-hook-test",
+				value: "prefix-",
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "prepend-hook-test",
+				value: "prefix-",
+				success: true,
+			});
+
+			expect(result2).toBe(true);
+
+			// Verify the value was prepended
+			const getValue = await client.get("prepend-hook-test");
+			expect(getValue).toBe("prefix-initial");
+		});
+
+		it("should handle async prepend hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:prepend", asyncBeforeHook);
+			client.onHook("after:prepend", asyncAfterHook);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("async-prepend-test", "end");
+
+			const start = Date.now();
+			const result = await client.prepend("async-prepend-test", "start-");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+
+			// Verify the prepend worked
+			const getValue = await client.get("async-prepend-test");
+			expect(getValue).toBe("start-end");
+		});
+
+		it("should support removing prepend hooks", async () => {
+			const hookMock = vi.fn();
+
+			client.onHook("before:prepend", hookMock);
+
+			await client.connect();
+			await client.set("remove-prepend-hook", "value");
+
+			// First call should trigger the hook
+			await client.prepend("remove-prepend-hook", "pre-");
+			expect(hookMock).toHaveBeenCalledTimes(1);
+
+			// Remove the hook
+			client.removeHook("before:prepend", hookMock);
+
+			// Second call should not trigger the hook
+			await client.prepend("remove-prepend-hook", "another-");
+			expect(hookMock).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe("MemcacheEvents", () => {
