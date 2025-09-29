@@ -1971,6 +1971,111 @@ describe("Memcache", () => {
 
 			expect(result).toBe(0);
 		});
+
+		it("should call beforeHook and afterHook for touch operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:touch", beforeHookMock);
+			client.onHook("after:touch", afterHookMock);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("touch-hook-test", "value");
+
+			// Touch with new exptime
+			const result = await client.touch("touch-hook-test", 7200);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "touch-hook-test",
+				exptime: 7200,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "touch-hook-test",
+				exptime: 7200,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+		});
+
+		it("should handle touch hooks when key doesn't exist", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:touch", beforeHookMock);
+			client.onHook("after:touch", afterHookMock);
+
+			await client.connect();
+
+			// Try to touch a non-existent key
+			const result = await client.touch("touch-hook-nonexistent", 3600);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "touch-hook-nonexistent",
+				exptime: 3600,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "touch-hook-nonexistent",
+				exptime: 3600,
+				success: false,
+			});
+
+			expect(result).toBe(false);
+		});
+
+		it("should handle async touch hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:touch", asyncBeforeHook);
+			client.onHook("after:touch", asyncAfterHook);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("async-touch-test", "value");
+
+			const start = Date.now();
+			const result = await client.touch("async-touch-test", 1800);
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
+
+		it("should support multiple touch hook listeners", async () => {
+			const beforeHook1 = vi.fn();
+			const beforeHook2 = vi.fn();
+			const afterHook1 = vi.fn();
+			const afterHook2 = vi.fn();
+
+			client.onHook("before:touch", beforeHook1);
+			client.onHook("before:touch", beforeHook2);
+			client.onHook("after:touch", afterHook1);
+			client.onHook("after:touch", afterHook2);
+
+			await client.connect();
+
+			// Set a key first
+			await client.set("multi-touch-hook", "value");
+			await client.touch("multi-touch-hook", 900);
+
+			expect(beforeHook1).toHaveBeenCalled();
+			expect(beforeHook2).toHaveBeenCalled();
+			expect(afterHook1).toHaveBeenCalled();
+			expect(afterHook2).toHaveBeenCalled();
+		});
 	});
 
 	describe("MemcacheEvents", () => {

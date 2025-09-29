@@ -511,9 +511,15 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async touch(key: string, exptime: number): Promise<boolean> {
+		await this.beforeHook("touch", { key, exptime });
+
 		this.validateKey(key);
 		const result = await this.sendCommand(`touch ${key} ${exptime}`);
-		return result === "TOUCHED";
+		const success = result === "TOUCHED";
+
+		await this.afterHook("touch", { key, exptime, success });
+
+		return success;
 	}
 
 	/**
