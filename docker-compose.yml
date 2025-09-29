@@ -1,8 +1,24 @@
 services:
-  memcached:
-    image: memcached:1.6-alpine
-    container_name: memcached-server
+  memcached1:
+    image: memcached:latest
+    container_name: memcached-server-1
     ports:
       - "11211:11211"
+    command: memcached -m 64 -vv
+    restart: unless-stopped
+
+  memcached2:
+    image: memcached:latest
+    container_name: memcached-server-2
+    ports:
+      - "11212:11211"
+    command: memcached -m 64 -vv
+    restart: unless-stopped
+
+  memcached3:
+    image: memcached:latest
+    container_name: memcached-server-3
+    ports:
+      - "11213:11211"
     command: memcached -m 64 -vv
     restart: unless-stopped

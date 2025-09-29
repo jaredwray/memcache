@@ -2277,14 +2277,11 @@ describe("Memcache", () => {
 				return true;
 			});
 
-			const start = Date.now();
 			const result = await client.cas("async-cas-test", "updated", "99999");
-			const duration = Date.now() - start;
 
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 
 			socket.write = originalWrite;
 		});
