@@ -1154,6 +1154,123 @@ describe("Memcache", () => {
 			expect(result.get("async-gets-2")).toBe("value2");
 			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
+
+		it("should call beforeHook and afterHook for add operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:add", beforeHookMock);
+			client.onHook("after:add", afterHookMock);
+
+			await client.connect();
+
+			// First add should succeed
+			const result = await client.add("add-hook-test", "add-value", 3600, 10);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "add-hook-test",
+				value: "add-value",
+				exptime: 3600,
+				flags: 10,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "add-hook-test",
+				value: "add-value",
+				exptime: 3600,
+				flags: 10,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+
+			// Second add should fail (key already exists)
+			beforeHookMock.mockClear();
+			afterHookMock.mockClear();
+
+			const result2 = await client.add(
+				"add-hook-test",
+				"another-value",
+				1800,
+				5,
+			);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "add-hook-test",
+				value: "another-value",
+				exptime: 1800,
+				flags: 5,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "add-hook-test",
+				value: "another-value",
+				exptime: 1800,
+				flags: 5,
+				success: false,
+			});
+
+			expect(result2).toBe(false);
+		});
+
+		it("should call add hooks with default parameters", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:add", beforeHookMock);
+			client.onHook("after:add", afterHookMock);
+
+			await client.connect();
+
+			// Ensure key doesn't exist
+			await client.delete("add-hook-default");
+
+			const result = await client.add("add-hook-default", "default-value");
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				key: "add-hook-default",
+				value: "default-value",
+				exptime: 0,
+				flags: 0,
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				key: "add-hook-default",
+				value: "default-value",
+				exptime: 0,
+				flags: 0,
+				success: true,
+			});
+
+			expect(result).toBe(true);
+		});
+
+		it("should handle async add hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:add", asyncBeforeHook);
+			client.onHook("after:add", asyncAfterHook);
+
+			await client.connect();
+
+			// Ensure key doesn't exist
+			await client.delete("async-add-test");
+
+			const start = Date.now();
+			const result = await client.add("async-add-test", "async-value");
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result).toBe(true);
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
 	});
 
 	describe("MemcacheEvents", () => {
