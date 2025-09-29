@@ -294,6 +294,8 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<Map<string, string>>}
 	 */
 	public async gets(keys: string[]): Promise<Map<string, string>> {
+		await this.beforeHook("gets", { keys });
+
 		for (const key of keys) {
 			this.validateKey(key);
 		}
@@ -311,6 +313,8 @@ export class Memcache extends Hookified {
 				map.set(keys[i], results[i]);
 			}
 		}
+
+		await this.afterHook("gets", { keys, values: map });
 
 		return map;
 	}

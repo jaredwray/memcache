@@ -1060,6 +1060,100 @@ describe("Memcache", () => {
 			expect(result).toBe(true);
 			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
+
+		it("should call beforeHook and afterHook for gets operation", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:gets", beforeHookMock);
+			client.onHook("after:gets", afterHookMock);
+
+			await client.connect();
+
+			// Set some values first
+			await client.set("gets-hook-1", "value1");
+			await client.set("gets-hook-2", "value2");
+			await client.set("gets-hook-3", "value3");
+
+			const keys = [
+				"gets-hook-1",
+				"gets-hook-2",
+				"gets-hook-3",
+				"non-existent",
+			];
+			const result = await client.gets(keys);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				keys: ["gets-hook-1", "gets-hook-2", "gets-hook-3", "non-existent"],
+			});
+
+			const expectedMap = new Map([
+				["gets-hook-1", "value1"],
+				["gets-hook-2", "value2"],
+				["gets-hook-3", "value3"],
+			]);
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				keys: ["gets-hook-1", "gets-hook-2", "gets-hook-3", "non-existent"],
+				values: expectedMap,
+			});
+
+			expect(result.get("gets-hook-1")).toBe("value1");
+			expect(result.get("gets-hook-2")).toBe("value2");
+			expect(result.get("gets-hook-3")).toBe("value3");
+			expect(result.has("non-existent")).toBe(false);
+		});
+
+		it("should call gets hooks when all keys are missing", async () => {
+			const beforeHookMock = vi.fn();
+			const afterHookMock = vi.fn();
+
+			client.onHook("before:gets", beforeHookMock);
+			client.onHook("after:gets", afterHookMock);
+
+			await client.connect();
+
+			const keys = ["missing1", "missing2", "missing3"];
+			const result = await client.gets(keys);
+
+			expect(beforeHookMock).toHaveBeenCalledWith({
+				keys: ["missing1", "missing2", "missing3"],
+			});
+
+			expect(afterHookMock).toHaveBeenCalledWith({
+				keys: ["missing1", "missing2", "missing3"],
+				values: new Map(), // Empty map when no keys found
+			});
+
+			expect(result.size).toBe(0);
+		});
+
+		it("should handle async gets hooks", async () => {
+			const asyncBeforeHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			const asyncAfterHook = vi.fn().mockImplementation(async () => {
+				return new Promise((resolve) => setTimeout(resolve, 10));
+			});
+
+			client.onHook("before:gets", asyncBeforeHook);
+			client.onHook("after:gets", asyncAfterHook);
+
+			await client.connect();
+			await client.set("async-gets-1", "value1");
+			await client.set("async-gets-2", "value2");
+
+			const start = Date.now();
+			const result = await client.gets(["async-gets-1", "async-gets-2"]);
+			const duration = Date.now() - start;
+
+			expect(asyncBeforeHook).toHaveBeenCalled();
+			expect(asyncAfterHook).toHaveBeenCalled();
+			expect(result.get("async-gets-1")).toBe("value1");
+			expect(result.get("async-gets-2")).toBe("value2");
+			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+		});
 	});
 
 	describe("MemcacheEvents", () => {
