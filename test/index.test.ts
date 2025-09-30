@@ -34,11 +34,11 @@ describe("Memcache", () => {
 			expect(customClient).toBeInstanceOf(Memcache);
 		});
 
-		it("should initialize with empty hash ring", () => {
+		it("should initialize with default node localhost:11211", () => {
 			const testClient = new Memcache();
 			expect(testClient.ring).toBeDefined();
-			expect(testClient.ring.nodes.size).toBe(0);
-			expect(testClient.ring.clock.length).toBe(0);
+			expect(testClient.nodes).toHaveLength(1);
+			expect(testClient.nodes).toContain("localhost:11211");
 		});
 
 		it("should initialize with nodes from options", () => {
@@ -2486,8 +2486,8 @@ describe("Memcache", () => {
 			expect(client.ring).toBeDefined();
 		});
 
-		it("should return empty nodes array initially", () => {
-			expect(client.nodes).toEqual([]);
+		it("should return default node initially", () => {
+			expect(client.nodes).toEqual(["localhost:11211"]);
 		});
 
 		it("should return nodes as string array", () => {
@@ -2503,11 +2503,12 @@ describe("Memcache", () => {
 		});
 
 		it("should allow adding nodes to ring", () => {
+			// Client starts with default localhost:11211 node
 			client.ring.addNode("server1");
 			client.ring.addNode("server2");
 			client.ring.addNode("server3");
 
-			expect(client.ring.nodes.size).toBe(3);
+			expect(client.ring.nodes.size).toBe(4); // 3 + default
 			expect(client.ring.nodes.has("server1")).toBe(true);
 			expect(client.ring.nodes.has("server2")).toBe(true);
 			expect(client.ring.nodes.has("server3")).toBe(true);
@@ -2534,22 +2535,24 @@ describe("Memcache", () => {
 		});
 
 		it("should allow removing nodes from ring", () => {
+			// Client starts with default localhost:11211 node
 			client.ring.addNode("server1");
 			client.ring.addNode("server2");
 			client.ring.addNode("server3");
 
-			expect(client.ring.nodes.size).toBe(3);
+			expect(client.ring.nodes.size).toBe(4); // 3 + default
 
 			client.ring.removeNode("server2");
-			expect(client.ring.nodes.size).toBe(2);
+			expect(client.ring.nodes.size).toBe(3);
 			expect(client.ring.nodes.has("server2")).toBe(false);
 		});
 
 		it("should allow adding weighted nodes", () => {
+			// Client starts with default localhost:11211 node
 			client.ring.addNode("heavy-server", 3);
 			client.ring.addNode("light-server", 1);
 
-			expect(client.ring.nodes.size).toBe(2);
+			expect(client.ring.nodes.size).toBe(3); // 2 + default
 
 			// Heavy server should get more keys
 			const distribution = new Map<string, number>();
@@ -2579,12 +2582,13 @@ describe("Memcache", () => {
 			expect(uniqueReplicas.size).toBe(3);
 		});
 
-		it("should handle empty ring", () => {
+		it("should handle ring with only default node", () => {
+			// Client starts with default localhost:11211 node
 			const node = client.ring.getNode("test-key");
-			expect(node).toBeUndefined();
+			expect(node).toBe("localhost:11211");
 
 			const replicas = client.ring.getNodes("test-key", 3);
-			expect(replicas).toEqual([]);
+			expect(replicas).toEqual(["localhost:11211"]);
 		});
 	});
 

@@ -72,14 +72,17 @@ export class Memcache extends Hookified {
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._ring = new HashRing<string>();
 
-		// Add nodes to the ring if provided
-		if (options?.nodes) {
+		// Add nodes to the ring if provided, otherwise add default node
+		if (options?.nodes && options.nodes.length > 0) {
 			for (const nodeUri of options.nodes) {
 				const { host, port } = this.parseUri(nodeUri);
 				// Store as host:port format in the ring
 				const nodeKey = port === 0 ? host : `${host}:${port}`;
 				this._ring.addNode(nodeKey);
 			}
+		} else {
+			// Add default node if no nodes provided
+			this._ring.addNode("localhost:11211");
 		}
 	}
 
