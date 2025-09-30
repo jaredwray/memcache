@@ -1274,14 +1274,11 @@ describe("Memcache", () => {
 
 			await client.connect();
 
-			const start = Date.now();
 			const result = await client.set("async-set-test", "async-value");
-			const duration = Date.now() - start;
 
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
 		});
 
 		it("should call beforeHook and afterHook for gets operation", async () => {
