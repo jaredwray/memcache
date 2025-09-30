@@ -778,17 +778,18 @@ export class Memcache extends Hookified {
 					this._currentCommand.requestedKeys &&
 					this._currentCommand.foundKeys
 				) {
-					for (let i = 0; i < this._currentCommand.foundKeys.length; i++) {
+					const foundKeys = this._currentCommand.foundKeys;
+					for (let i = 0; i < foundKeys.length; i++) {
 						this.emit(
 							MemcacheEvents.HIT,
-							this._currentCommand.foundKeys[i],
+							foundKeys[i],
 							this._multilineData[i],
 						);
 					}
 
 					// Emit miss events for keys that weren't found
 					const missedKeys = this._currentCommand.requestedKeys.filter(
-						(key) => !this._currentCommand.foundKeys.includes(key),
+						(key) => !foundKeys.includes(key),
 					);
 					for (const key of missedKeys) {
 						this.emit(MemcacheEvents.MISS, key);
