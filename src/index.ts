@@ -179,6 +179,94 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Parse a URI string into host and port.
+	 * Supports multiple formats:
+	 * - Simple: "localhost:11211" or "localhost"
+	 * - Protocol: "memcache://localhost:11211", "memcached://localhost:11211", "tcp://localhost:11211"
+	 * - IPv6: "[::1]:11211" or "memcache://[2001:db8::1]:11212"
+	 * - Unix socket: "/var/run/memcached.sock" or "unix:///var/run/memcached.sock"
+	 *
+	 * @param {string} uri - URI string
+	 * @returns {{ host: string; port: number }} Object containing host and port (port is 0 for Unix sockets)
+	 * @throws {Error} If URI format is invalid
+	 */
+	public parseUri(uri: string): { host: string; port: number } {
+		// Handle Unix domain sockets
+		if (uri.startsWith("unix://")) {
+			return { host: uri.slice(7), port: 0 };
+		}
+		if (uri.startsWith("/")) {
+			return { host: uri, port: 0 };
+		}
+
+		// Remove protocol if present
+		let cleanUri = uri;
+		if (uri.includes("://")) {
+			const protocolParts = uri.split("://");
+			const protocol = protocolParts[0];
+			if (!["memcache", "memcached", "tcp"].includes(protocol)) {
+				throw new Error(
+					`Invalid protocol '${protocol}'. Supported protocols: memcache://, memcached://, tcp://, unix://`,
+				);
+			}
+			cleanUri = protocolParts[1];
+		}
+
+		// Handle IPv6 addresses with brackets [::1]:11211
+		if (cleanUri.startsWith("[")) {
+			const bracketEnd = cleanUri.indexOf("]");
+			if (bracketEnd === -1) {
+				throw new Error("Invalid IPv6 format: missing closing bracket");
+			}
+
+			const host = cleanUri.slice(1, bracketEnd);
+			if (!host) {
+				throw new Error("Invalid URI format: host is required");
+			}
+
+			// Check if there's a port after the bracket
+			const remainder = cleanUri.slice(bracketEnd + 1);
+			if (remainder === "") {
+				return { host, port: 11211 };
+			}
+			if (!remainder.startsWith(":")) {
+				throw new Error("Invalid IPv6 format: expected ':' after bracket");
+			}
+
+			const portStr = remainder.slice(1);
+			const port = Number.parseInt(portStr, 10);
+			if (Number.isNaN(port) || port <= 0 || port > 65535) {
+				throw new Error("Invalid port number");
+			}
+
+			return { host, port };
+		}
+
+		// Parse host and port for regular format
+		const parts = cleanUri.split(":");
+		if (parts.length === 0 || parts.length > 2) {
+			throw new Error("Invalid URI format");
+		}
+
+		const host = parts[0];
+		if (!host) {
+			throw new Error("Invalid URI format: host is required");
+		}
+
+		const port = parts.length === 2 ? Number.parseInt(parts[1], 10) : 11211;
+		if (Number.isNaN(port) || port < 0 || port > 65535) {
+			throw new Error("Invalid port number");
+		}
+
+		// Port 0 is only valid for Unix sockets (already handled above)
+		if (port === 0) {
+			throw new Error("Invalid port number");
+		}
+
+		return { host, port };
+	}
+
+	/**
 	 * Connect to a Memcache server.
 	 * @param {string} host - The hostname of the Memcache server
 	 * @param {number} port - The port of the Memcache server (default: 11211)

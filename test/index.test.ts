@@ -128,6 +128,149 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("parseUri", () => {
+		it("should parse host and port from simple format", () => {
+			const result = client.parseUri("localhost:11211");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host and port from memcache:// format", () => {
+			const result = client.parseUri("memcache://localhost:11211");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host and port from memcached:// format", () => {
+			const result = client.parseUri("memcached://localhost:11211");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host and port from tcp:// format", () => {
+			const result = client.parseUri("tcp://localhost:11211");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host with default port", () => {
+			const result = client.parseUri("localhost");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host with default port from memcache:// format", () => {
+			const result = client.parseUri("memcache://localhost");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host with default port from memcached:// format", () => {
+			const result = client.parseUri("memcached://localhost");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse host with default port from tcp:// format", () => {
+			const result = client.parseUri("tcp://localhost");
+			expect(result).toEqual({ host: "localhost", port: 11211 });
+		});
+
+		it("should parse IP address with port", () => {
+			const result = client.parseUri("127.0.0.1:11212");
+			expect(result).toEqual({ host: "127.0.0.1", port: 11212 });
+		});
+
+		it("should parse IPv6 address with brackets and port", () => {
+			const result = client.parseUri("[::1]:11211");
+			expect(result).toEqual({ host: "::1", port: 11211 });
+		});
+
+		it("should parse IPv6 address with brackets from memcache:// format", () => {
+			const result = client.parseUri("memcache://[2001:db8::1]:11212");
+			expect(result).toEqual({ host: "2001:db8::1", port: 11212 });
+		});
+
+		it("should parse IPv6 address with brackets and default port", () => {
+			const result = client.parseUri("[::1]");
+			expect(result).toEqual({ host: "::1", port: 11211 });
+		});
+
+		it("should parse domain with port", () => {
+			const result = client.parseUri("memcache.example.com:11213");
+			expect(result).toEqual({ host: "memcache.example.com", port: 11213 });
+		});
+
+		it("should parse Unix domain socket path", () => {
+			const result = client.parseUri("/var/run/memcached.sock");
+			expect(result).toEqual({ host: "/var/run/memcached.sock", port: 0 });
+		});
+
+		it("should parse Unix domain socket path from unix:// format", () => {
+			const result = client.parseUri("unix:///var/run/memcached.sock");
+			expect(result).toEqual({ host: "/var/run/memcached.sock", port: 0 });
+		});
+
+		it("should throw error for invalid protocol", () => {
+			expect(() => client.parseUri("http://localhost:11211")).toThrow(
+				"Invalid protocol",
+			);
+		});
+
+		it("should throw error for empty host", () => {
+			expect(() => client.parseUri(":11211")).toThrow(
+				"Invalid URI format: host is required",
+			);
+		});
+
+		it("should throw error for invalid port", () => {
+			expect(() => client.parseUri("localhost:abc")).toThrow(
+				"Invalid port number",
+			);
+		});
+
+		it("should throw error for negative port", () => {
+			expect(() => client.parseUri("localhost:-1")).toThrow(
+				"Invalid port number",
+			);
+		});
+
+		it("should throw error for port zero with network host", () => {
+			expect(() => client.parseUri("localhost:0")).toThrow(
+				"Invalid port number",
+			);
+		});
+
+		it("should throw error for port too large", () => {
+			expect(() => client.parseUri("localhost:65536")).toThrow(
+				"Invalid port number",
+			);
+		});
+
+		it("should throw error for IPv6 missing closing bracket", () => {
+			expect(() => client.parseUri("[::1:11211")).toThrow(
+				"Invalid IPv6 format: missing closing bracket",
+			);
+		});
+
+		it("should throw error for IPv6 with empty host", () => {
+			expect(() => client.parseUri("[]:11211")).toThrow(
+				"Invalid URI format: host is required",
+			);
+		});
+
+		it("should throw error for IPv6 with invalid format after bracket", () => {
+			expect(() => client.parseUri("[::1]abc")).toThrow(
+				"Invalid IPv6 format: expected ':' after bracket",
+			);
+		});
+
+		it("should throw error for IPv6 with invalid port", () => {
+			expect(() => client.parseUri("[::1]:99999")).toThrow(
+				"Invalid port number",
+			);
+		});
+
+		it("should throw error for too many colons in regular format", () => {
+			expect(() => client.parseUri("host:port:extra")).toThrow(
+				"Invalid URI format",
+			);
+		});
+	});
+
 	describe("Key Validation", () => {
 		it("should throw error for empty key", async () => {
 			await expect(async () => {
