@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
+import { HashRing } from "./ketama";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
@@ -69,6 +70,7 @@ export class Memcache extends Hookified {
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
 	private _foundKeys: string[] = [];
+	private _ring: HashRing<string>;
 
 	constructor(options: MemcacheOptions = {}) {
 		super();
@@ -77,6 +79,15 @@ export class Memcache extends Hookified {
 		this._timeout = options.timeout || 5000;
 		this._keepAlive = options.keepAlive !== false;
 		this._keepAliveDelay = options.keepAliveDelay || 1000;
+		this._ring = new HashRing<string>();
+	}
+
+	/**
+	 * Get the consistent hashing ring for distributing keys across nodes.
+	 * @returns {HashRing<string>}
+	 */
+	public get ring(): HashRing<string> {
+		return this._ring;
 	}
 
 	/**

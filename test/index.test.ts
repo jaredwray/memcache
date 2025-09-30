@@ -36,6 +36,13 @@ describe("Memcache", () => {
 			expect(customClient).toBeInstanceOf(Memcache);
 		});
 
+		it("should initialize with empty hash ring", () => {
+			const testClient = new Memcache();
+			expect(testClient.ring).toBeDefined();
+			expect(testClient.ring.nodes.size).toBe(0);
+			expect(testClient.ring.clock.length).toBe(0);
+		});
+
 		it("should allow setting timeout via setter", () => {
 			const testClient = new Memcache();
 			expect(testClient.timeout).toBe(5000); // Default timeout
@@ -2329,6 +2336,97 @@ describe("Memcache", () => {
 			expect(beforeHook2).toHaveBeenCalled();
 			expect(afterHook1).toHaveBeenCalled();
 			expect(afterHook2).toHaveBeenCalled();
+		});
+	});
+
+	describe("HashRing Integration", () => {
+		it("should expose ring property", () => {
+			expect(client.ring).toBeDefined();
+		});
+
+		it("should allow adding nodes to ring", () => {
+			client.ring.addNode("server1");
+			client.ring.addNode("server2");
+			client.ring.addNode("server3");
+
+			expect(client.ring.nodes.size).toBe(3);
+			expect(client.ring.nodes.has("server1")).toBe(true);
+			expect(client.ring.nodes.has("server2")).toBe(true);
+			expect(client.ring.nodes.has("server3")).toBe(true);
+		});
+
+		it("should allow getting node for a key", () => {
+			client.ring.addNode("server1");
+			client.ring.addNode("server2");
+			client.ring.addNode("server3");
+
+			const node = client.ring.getNode("test-key");
+			expect(node).toBeDefined();
+			expect(["server1", "server2", "server3"]).toContain(node);
+		});
+
+		it("should return consistent node for same key", () => {
+			client.ring.addNode("server1");
+			client.ring.addNode("server2");
+			client.ring.addNode("server3");
+
+			const node1 = client.ring.getNode("test-key");
+			const node2 = client.ring.getNode("test-key");
+			expect(node1).toBe(node2);
+		});
+
+		it("should allow removing nodes from ring", () => {
+			client.ring.addNode("server1");
+			client.ring.addNode("server2");
+			client.ring.addNode("server3");
+
+			expect(client.ring.nodes.size).toBe(3);
+
+			client.ring.removeNode("server2");
+			expect(client.ring.nodes.size).toBe(2);
+			expect(client.ring.nodes.has("server2")).toBe(false);
+		});
+
+		it("should allow adding weighted nodes", () => {
+			client.ring.addNode("heavy-server", 3);
+			client.ring.addNode("light-server", 1);
+
+			expect(client.ring.nodes.size).toBe(2);
+
+			// Heavy server should get more keys
+			const distribution = new Map<string, number>();
+			for (let i = 0; i < 100; i++) {
+				const node = client.ring.getNode(`key-${i}`);
+				if (node) {
+					distribution.set(node, (distribution.get(node) || 0) + 1);
+				}
+			}
+
+			const heavy = distribution.get("heavy-server") || 0;
+			const light = distribution.get("light-server") || 0;
+			expect(heavy).toBeGreaterThan(light);
+		});
+
+		it("should support getting multiple replica nodes", () => {
+			client.ring.addNode("server1");
+			client.ring.addNode("server2");
+			client.ring.addNode("server3");
+			client.ring.addNode("server4");
+
+			const replicas = client.ring.getNodes("test-key", 3);
+			expect(replicas).toHaveLength(3);
+
+			// All replicas should be unique
+			const uniqueReplicas = new Set(replicas);
+			expect(uniqueReplicas.size).toBe(3);
+		});
+
+		it("should handle empty ring", () => {
+			const node = client.ring.getNode("test-key");
+			expect(node).toBeUndefined();
+
+			const replicas = client.ring.getNodes("test-key", 3);
+			expect(replicas).toEqual([]);
 		});
 	});
 
