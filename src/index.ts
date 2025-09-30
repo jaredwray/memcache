@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
+import { HashRing } from "./ketama";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
@@ -15,15 +16,10 @@ export enum MemcacheEvents {
 
 export interface MemcacheOptions {
 	/**
-	 * The hostname of the Memcache server.
-	 * @default "localhost"
+	 * Array of node URIs to add to the consistent hashing ring.
+	 * Examples: ["localhost:11211", "memcache://192.168.1.100:11212", "server3:11213"]
 	 */
-	host?: string;
-	/**
-	 * The port of the Memcache server.
-	 * @default 11211
-	 */
-	port?: number;
+	nodes?: string[];
 	/**
 	 * The timeout for Memcache operations.
 	 * @default 5000
@@ -54,12 +50,11 @@ export type CommandQueueItem = {
 	isMultiline?: boolean;
 	isStats?: boolean;
 	requestedKeys?: string[];
+	foundKeys?: string[];
 };
 
 export class Memcache extends Hookified {
 	private _socket: Socket | undefined = undefined;
-	private _host: string;
-	private _port: number;
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
@@ -68,15 +63,43 @@ export class Memcache extends Hookified {
 	private _buffer: string = "";
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
-	private _foundKeys: string[] = [];
+	private _ring: HashRing<string>;
 
-	constructor(options: MemcacheOptions = {}) {
+	constructor(options?: MemcacheOptions) {
 		super();
-		this._host = options.host || "localhost";
-		this._port = options.port || 11211;
-		this._timeout = options.timeout || 5000;
-		this._keepAlive = options.keepAlive !== false;
-		this._keepAliveDelay = options.keepAliveDelay || 1000;
+		this._timeout = options?.timeout || 5000;
+		this._keepAlive = options?.keepAlive !== false;
+		this._keepAliveDelay = options?.keepAliveDelay || 1000;
+		this._ring = new HashRing<string>();
+
+		// Add nodes to the ring if provided, otherwise add default node
+		if (options?.nodes && options.nodes.length > 0) {
+			for (const nodeUri of options.nodes) {
+				const { host, port } = this.parseUri(nodeUri);
+				// Store as host:port format in the ring
+				const nodeKey = port === 0 ? host : `${host}:${port}`;
+				this._ring.addNode(nodeKey);
+			}
+		} else {
+			// Add default node if no nodes provided
+			this._ring.addNode("localhost:11211");
+		}
+	}
+
+	/**
+	 * Get the consistent hashing ring for distributing keys across nodes.
+	 * @returns {HashRing<string>}
+	 */
+	public get ring(): HashRing<string> {
+		return this._ring;
+	}
+
+	/**
+	 * Get the list of nodes in the ring as URI strings (e.g., ["localhost:11211", "127.0.0.1:11212"]).
+	 * @returns {string[]} Array of node URI strings
+	 */
+	public get nodes(): string[] {
+		return Array.from(this._ring.nodes.values());
 	}
 
 	/**
@@ -93,42 +116,6 @@ export class Memcache extends Hookified {
 	 */
 	public set socket(value: Socket | undefined) {
 		this._socket = value;
-	}
-
-	/**
-	 * Get the hostname of the Memcache server.
-	 * @returns {string}
-	 * @default "localhost"
-	 */
-	public get host(): string {
-		return this._host;
-	}
-
-	/**
-	 * Set the hostname of the Memcache server.
-	 * @param {string} value
-	 * @default "localhost"
-	 */
-	public set host(value: string) {
-		this._host = value;
-	}
-
-	/**
-	 * Get the port of the Memcache server.
-	 * @returns {number}
-	 * @default 11211
-	 */
-	public get port(): number {
-		return this._port;
-	}
-
-	/**
-	 * Set the port of the Memcache server.
-	 * @param {number} value
-	 * @default 11211
-	 */
-	public set port(value: number) {
-		this._port = value;
 	}
 
 	/**
@@ -218,10 +205,103 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Connect to the Memcached server.
+	 * Parse a URI string into host and port.
+	 * Supports multiple formats:
+	 * - Simple: "localhost:11211" or "localhost"
+	 * - Protocol: "memcache://localhost:11211", "memcached://localhost:11211", "tcp://localhost:11211"
+	 * - IPv6: "[::1]:11211" or "memcache://[2001:db8::1]:11212"
+	 * - Unix socket: "/var/run/memcached.sock" or "unix:///var/run/memcached.sock"
+	 *
+	 * @param {string} uri - URI string
+	 * @returns {{ host: string; port: number }} Object containing host and port (port is 0 for Unix sockets)
+	 * @throws {Error} If URI format is invalid
+	 */
+	public parseUri(uri: string): { host: string; port: number } {
+		// Handle Unix domain sockets
+		if (uri.startsWith("unix://")) {
+			return { host: uri.slice(7), port: 0 };
+		}
+		if (uri.startsWith("/")) {
+			return { host: uri, port: 0 };
+		}
+
+		// Remove protocol if present
+		let cleanUri = uri;
+		if (uri.includes("://")) {
+			const protocolParts = uri.split("://");
+			const protocol = protocolParts[0];
+			if (!["memcache", "memcached", "tcp"].includes(protocol)) {
+				throw new Error(
+					`Invalid protocol '${protocol}'. Supported protocols: memcache://, memcached://, tcp://, unix://`,
+				);
+			}
+			cleanUri = protocolParts[1];
+		}
+
+		// Handle IPv6 addresses with brackets [::1]:11211
+		if (cleanUri.startsWith("[")) {
+			const bracketEnd = cleanUri.indexOf("]");
+			if (bracketEnd === -1) {
+				throw new Error("Invalid IPv6 format: missing closing bracket");
+			}
+
+			const host = cleanUri.slice(1, bracketEnd);
+			if (!host) {
+				throw new Error("Invalid URI format: host is required");
+			}
+
+			// Check if there's a port after the bracket
+			const remainder = cleanUri.slice(bracketEnd + 1);
+			if (remainder === "") {
+				return { host, port: 11211 };
+			}
+			if (!remainder.startsWith(":")) {
+				throw new Error("Invalid IPv6 format: expected ':' after bracket");
+			}
+
+			const portStr = remainder.slice(1);
+			const port = Number.parseInt(portStr, 10);
+			if (Number.isNaN(port) || port <= 0 || port > 65535) {
+				throw new Error("Invalid port number");
+			}
+
+			return { host, port };
+		}
+
+		// Parse host and port for regular format
+		const parts = cleanUri.split(":");
+		if (parts.length === 0 || parts.length > 2) {
+			throw new Error("Invalid URI format");
+		}
+
+		const host = parts[0];
+		if (!host) {
+			throw new Error("Invalid URI format: host is required");
+		}
+
+		const port = parts.length === 2 ? Number.parseInt(parts[1], 10) : 11211;
+		if (Number.isNaN(port) || port < 0 || port > 65535) {
+			throw new Error("Invalid port number");
+		}
+
+		// Port 0 is only valid for Unix sockets (already handled above)
+		if (port === 0) {
+			throw new Error("Invalid port number");
+		}
+
+		return { host, port };
+	}
+
+	/**
+	 * Connect to a Memcache server.
+	 * @param {string} host - The hostname of the Memcache server
+	 * @param {number} port - The port of the Memcache server (default: 11211)
 	 * @returns {Promise<void>}
 	 */
-	public async connect(): Promise<void> {
+	public async connect(
+		host: string = "localhost",
+		port: number = 11211,
+	): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (this._connected) {
 				resolve();
@@ -229,8 +309,8 @@ export class Memcache extends Hookified {
 			}
 
 			this._socket = createConnection({
-				host: this._host,
-				port: this._port,
+				host,
+				port,
 				keepAlive: this._keepAlive,
 				keepAliveInitialDelay: this._keepAliveDelay,
 			});
@@ -678,29 +758,34 @@ export class Memcache extends Hookified {
 		}
 
 		if (this._currentCommand.isMultiline) {
+			// Track found keys locally for this command
+			if (!this._currentCommand.foundKeys) {
+				this._currentCommand.foundKeys = [];
+			}
+
 			if (line.startsWith("VALUE ")) {
 				const parts = line.split(" ");
 				const key = parts[1];
 				const bytes = parseInt(parts[3], 10);
-				this._foundKeys.push(key);
+				this._currentCommand.foundKeys.push(key);
 				this.readValue(bytes);
 			} else if (line === "END") {
 				const result =
 					this._multilineData.length > 0 ? this._multilineData : undefined;
 
 				// Emit hit/miss events if we have requested keys
-				if (this._currentCommand.requestedKeys) {
-					for (let i = 0; i < this._foundKeys.length; i++) {
-						this.emit(
-							MemcacheEvents.HIT,
-							this._foundKeys[i],
-							this._multilineData[i],
-						);
+				if (
+					this._currentCommand.requestedKeys &&
+					this._currentCommand.foundKeys
+				) {
+					const foundKeys = this._currentCommand.foundKeys;
+					for (let i = 0; i < foundKeys.length; i++) {
+						this.emit(MemcacheEvents.HIT, foundKeys[i], this._multilineData[i]);
 					}
 
 					// Emit miss events for keys that weren't found
 					const missedKeys = this._currentCommand.requestedKeys.filter(
-						(key) => !this._foundKeys.includes(key),
+						(key) => !foundKeys.includes(key),
 					);
 					for (const key of missedKeys) {
 						this.emit(MemcacheEvents.MISS, key);
@@ -709,7 +794,6 @@ export class Memcache extends Hookified {
 
 				this._currentCommand.resolve(result);
 				this._multilineData = [];
-				this._foundKeys = [];
 				this._currentCommand = undefined;
 			} else if (
 				line.startsWith("ERROR") ||
@@ -718,7 +802,6 @@ export class Memcache extends Hookified {
 			) {
 				this._currentCommand.reject(new Error(line));
 				this._multilineData = [];
-				this._foundKeys = [];
 				this._currentCommand = undefined;
 			}
 		} else {
