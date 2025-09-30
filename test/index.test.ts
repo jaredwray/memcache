@@ -2447,6 +2447,22 @@ describe("Memcache", () => {
 			expect(client.ring).toBeDefined();
 		});
 
+		it("should return empty nodes array initially", () => {
+			expect(client.nodes).toEqual([]);
+		});
+
+		it("should return nodes as string array", () => {
+			client.ring.addNode("localhost:11211");
+			client.ring.addNode("localhost:11212");
+			client.ring.addNode("127.0.0.1:11213");
+
+			const nodes = client.nodes;
+			expect(nodes).toHaveLength(3);
+			expect(nodes).toContain("localhost:11211");
+			expect(nodes).toContain("localhost:11212");
+			expect(nodes).toContain("127.0.0.1:11213");
+		});
+
 		it("should allow adding nodes to ring", () => {
 			client.ring.addNode("server1");
 			client.ring.addNode("server2");

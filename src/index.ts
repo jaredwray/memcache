@@ -77,6 +77,14 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Get the list of nodes in the ring as URI strings (e.g., ["localhost:11211", "127.0.0.1:11212"]).
+	 * @returns {string[]} Array of node URI strings
+	 */
+	public get nodes(): string[] {
+		return Array.from(this._ring.nodes.values());
+	}
+
+	/**
 	 * Get the socket connection.
 	 * @returns {Socket | undefined}
 	 */
