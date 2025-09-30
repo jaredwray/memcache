@@ -16,6 +16,11 @@ export enum MemcacheEvents {
 
 export interface MemcacheOptions {
 	/**
+	 * Array of node URIs to add to the consistent hashing ring.
+	 * Examples: ["localhost:11211", "memcache://192.168.1.100:11212", "server3:11213"]
+	 */
+	nodes?: string[];
+	/**
 	 * The timeout for Memcache operations.
 	 * @default 5000
 	 */
@@ -60,12 +65,22 @@ export class Memcache extends Hookified {
 	private _foundKeys: string[] = [];
 	private _ring: HashRing<string>;
 
-	constructor(options: MemcacheOptions = {}) {
+	constructor(options?: MemcacheOptions) {
 		super();
-		this._timeout = options.timeout || 5000;
-		this._keepAlive = options.keepAlive !== false;
-		this._keepAliveDelay = options.keepAliveDelay || 1000;
+		this._timeout = options?.timeout || 5000;
+		this._keepAlive = options?.keepAlive !== false;
+		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._ring = new HashRing<string>();
+
+		// Add nodes to the ring if provided
+		if (options?.nodes) {
+			for (const nodeUri of options.nodes) {
+				const { host, port } = this.parseUri(nodeUri);
+				// Store as host:port format in the ring
+				const nodeKey = port === 0 ? host : `${host}:${port}`;
+				this._ring.addNode(nodeKey);
+			}
+		}
 	}
 
 	/**
