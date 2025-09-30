@@ -219,7 +219,7 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 * starting from the primary node. If there are fewer nodes than replicas requested,
 	 * all nodes are returned.
 	 *
-	 * @param input - The key to find replica nodes for
+	 * @param input - The key to find replica nodes for (string or Buffer)
 	 * @param replicas - The number of replica nodes to return
 	 * @returns Array of nodes that should handle this key (length ≤ replicas)
 	 *
@@ -236,7 +236,11 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 * // Returns ['server1', 'server2', 'server3', 'server4']
 	 * ```
 	 */
-	public getNodes(input: string, replicas: number): TNode[] {
+	public getNodes(input: string | Buffer, replicas: number): TNode[] {
+		if (this.clock.length === 0) {
+			return [];
+		}
+
 		if (replicas >= this.nodes.size) {
 			return [...this.nodes.values()];
 		}
