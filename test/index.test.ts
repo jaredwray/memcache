@@ -28,8 +28,6 @@ describe("Memcache", () => {
 
 		it("should create instance with custom options", () => {
 			const customClient = new Memcache({
-				host: "127.0.0.1",
-				port: 11212,
 				timeout: 10000,
 				keepAlive: false,
 			});
@@ -52,38 +50,6 @@ describe("Memcache", () => {
 
 			testClient.timeout = 2000;
 			expect(testClient.timeout).toBe(2000);
-		});
-
-		it("should allow getting and setting host property", () => {
-			const testClient = new Memcache();
-			expect(testClient.host).toBe("localhost"); // Default host
-
-			testClient.host = "127.0.0.1";
-			expect(testClient.host).toBe("127.0.0.1");
-
-			testClient.host = "memcache.example.com";
-			expect(testClient.host).toBe("memcache.example.com");
-		});
-
-		it("should initialize with custom host", () => {
-			const testClient = new Memcache({ host: "192.168.1.100" });
-			expect(testClient.host).toBe("192.168.1.100");
-		});
-
-		it("should allow getting and setting port property", () => {
-			const testClient = new Memcache();
-			expect(testClient.port).toBe(11211); // Default port
-
-			testClient.port = 11212;
-			expect(testClient.port).toBe(11212);
-
-			testClient.port = 9999;
-			expect(testClient.port).toBe(9999);
-		});
-
-		it("should initialize with custom port", () => {
-			const testClient = new Memcache({ port: 11212 });
-			expect(testClient.port).toBe(11212);
 		});
 
 		it("should allow getting and setting keepAlive property", () => {
@@ -218,44 +184,38 @@ describe("Memcache", () => {
 
 		it("should handle connection errors", async () => {
 			const client13 = new Memcache({
-				host: "0.0.0.0",
-				port: 99999, // Invalid port
 				timeout: 100,
 			});
 
-			await expect(client13.connect()).rejects.toThrow();
+			await expect(client13.connect("0.0.0.0", 99999)).rejects.toThrow();
 		});
 
 		it("should handle connection timeout", async () => {
 			const client14 = new Memcache({
-				host: "192.0.2.0", // Non-routable IP address that will timeout
-				port: 11211,
 				timeout: 100, // Very short timeout
 			});
 
-			await expect(client14.connect()).rejects.toThrow("Connection timeout");
+			await expect(client14.connect("192.0.2.0", 11211)).rejects.toThrow(
+				"Connection timeout",
+			);
 		});
 
 		it("should handle error event before connection is established", async () => {
 			const client16 = new Memcache({
-				host: "localhost",
-				port: 99999, // Invalid port that will cause immediate error
 				timeout: 100,
 			});
 
 			// This should trigger an error immediately due to invalid port
-			await expect(client16.connect()).rejects.toThrow();
+			await expect(client16.connect("localhost", 99999)).rejects.toThrow();
 		});
 
 		it("should reject on socket error before connection", async () => {
 			const client18 = new Memcache({
-				host: "localhost",
-				port: 11211,
 				timeout: 5000,
 			});
 
 			// Start connect and immediately simulate error
-			const connectPromise = client18.connect();
+			const connectPromise = client18.connect("localhost", 11211);
 
 			// Access the socket that was just created
 			const privateClient = client18 as any;

@@ -16,16 +16,6 @@ export enum MemcacheEvents {
 
 export interface MemcacheOptions {
 	/**
-	 * The hostname of the Memcache server.
-	 * @default "localhost"
-	 */
-	host?: string;
-	/**
-	 * The port of the Memcache server.
-	 * @default 11211
-	 */
-	port?: number;
-	/**
 	 * The timeout for Memcache operations.
 	 * @default 5000
 	 */
@@ -59,8 +49,6 @@ export type CommandQueueItem = {
 
 export class Memcache extends Hookified {
 	private _socket: Socket | undefined = undefined;
-	private _host: string;
-	private _port: number;
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
@@ -74,8 +62,6 @@ export class Memcache extends Hookified {
 
 	constructor(options: MemcacheOptions = {}) {
 		super();
-		this._host = options.host || "localhost";
-		this._port = options.port || 11211;
 		this._timeout = options.timeout || 5000;
 		this._keepAlive = options.keepAlive !== false;
 		this._keepAliveDelay = options.keepAliveDelay || 1000;
@@ -104,42 +90,6 @@ export class Memcache extends Hookified {
 	 */
 	public set socket(value: Socket | undefined) {
 		this._socket = value;
-	}
-
-	/**
-	 * Get the hostname of the Memcache server.
-	 * @returns {string}
-	 * @default "localhost"
-	 */
-	public get host(): string {
-		return this._host;
-	}
-
-	/**
-	 * Set the hostname of the Memcache server.
-	 * @param {string} value
-	 * @default "localhost"
-	 */
-	public set host(value: string) {
-		this._host = value;
-	}
-
-	/**
-	 * Get the port of the Memcache server.
-	 * @returns {number}
-	 * @default 11211
-	 */
-	public get port(): number {
-		return this._port;
-	}
-
-	/**
-	 * Set the port of the Memcache server.
-	 * @param {number} value
-	 * @default 11211
-	 */
-	public set port(value: number) {
-		this._port = value;
 	}
 
 	/**
@@ -229,10 +179,15 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Connect to the Memcached server.
+	 * Connect to a Memcache server.
+	 * @param {string} host - The hostname of the Memcache server
+	 * @param {number} port - The port of the Memcache server (default: 11211)
 	 * @returns {Promise<void>}
 	 */
-	public async connect(): Promise<void> {
+	public async connect(
+		host: string = "localhost",
+		port: number = 11211,
+	): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (this._connected) {
 				resolve();
@@ -240,8 +195,8 @@ export class Memcache extends Hookified {
 			}
 
 			this._socket = createConnection({
-				host: this._host,
-				port: this._port,
+				host,
+				port,
 				keepAlive: this._keepAlive,
 				keepAliveInitialDelay: this._keepAliveDelay,
 			});
