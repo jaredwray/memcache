@@ -8,8 +8,6 @@ describe("Memcache", () => {
 
 	beforeEach(() => {
 		client = new Memcache({
-			host: "localhost",
-			port: 11211,
 			timeout: 5000,
 		});
 	});
@@ -1054,7 +1052,7 @@ describe("Memcache", () => {
 
 		it("should handle hook errors based on throwHookErrors setting", async () => {
 			// Test with throwHookErrors = true (should throw)
-			const errorClient = new Memcache({ host: "localhost", port: 11211 });
+			const errorClient = new Memcache();
 			errorClient.throwHookErrors = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
@@ -1075,7 +1073,7 @@ describe("Memcache", () => {
 			await errorClient.disconnect();
 
 			// Test with throwHookErrors = false (should not throw)
-			const noErrorClient = new Memcache({ host: "localhost", port: 11211 });
+			const noErrorClient = new Memcache();
 			noErrorClient.throwHookErrors = false;
 
 			const errorHook2 = vi.fn().mockImplementation(() => {
@@ -1920,7 +1918,7 @@ describe("Memcache", () => {
 		});
 
 		it("should handle delete hook errors with throwHookErrors", async () => {
-			const errorClient = new Memcache({ host: "localhost", port: 11211 });
+			const errorClient = new Memcache();
 			errorClient.throwHookErrors = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
@@ -2436,7 +2434,7 @@ describe("Memcache", () => {
 		});
 
 		it("should handle cas hook errors with throwHookErrors", async () => {
-			const errorClient = new Memcache({ host: "localhost", port: 11211 });
+			const errorClient = new Memcache();
 			errorClient.throwHookErrors = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
