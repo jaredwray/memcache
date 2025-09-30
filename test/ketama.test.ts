@@ -349,4 +349,56 @@ describe("HashRing", () => {
 			HashRing.baseWeight = originalWeight;
 		});
 	});
+
+	describe("getters", () => {
+		it("should expose clock getter", () => {
+			const ring = new HashRing(["node1", "node2"]);
+			const clock = ring.clock;
+			expect(Array.isArray(clock)).toBe(true);
+			expect(clock.length).toBeGreaterThan(0);
+			// Each entry should be [hash, nodeKey]
+			expect(clock[0]).toHaveLength(2);
+			expect(typeof clock[0][0]).toBe("number");
+			expect(typeof clock[0][1]).toBe("string");
+		});
+
+		it("should expose nodes getter", () => {
+			const ring = new HashRing(["node1", "node2", "node3"]);
+			const nodes = ring.nodes;
+			expect(nodes instanceof Map).toBe(true);
+			expect(nodes.size).toBe(3);
+			expect(nodes.has("node1")).toBe(true);
+			expect(nodes.has("node2")).toBe(true);
+			expect(nodes.has("node3")).toBe(true);
+		});
+
+		it("should return empty clock for empty ring", () => {
+			const ring = new HashRing<string>();
+			expect(ring.clock).toEqual([]);
+		});
+
+		it("should return empty nodes map for empty ring", () => {
+			const ring = new HashRing<string>();
+			expect(ring.nodes.size).toBe(0);
+		});
+
+		it("should return sorted clock entries", () => {
+			const ring = new HashRing(["node1", "node2"]);
+			const clock = ring.clock;
+			// Verify clock is sorted by hash value
+			for (let i = 1; i < clock.length; i++) {
+				expect(clock[i][0]).toBeGreaterThanOrEqual(clock[i - 1][0]);
+			}
+		});
+
+		it("should return nodes map with object nodes", () => {
+			const node1 = { key: "server1", host: "localhost", port: 11211 };
+			const node2 = { key: "server2", host: "localhost", port: 11212 };
+			const ring = new HashRing([node1, node2]);
+			const nodes = ring.nodes;
+			expect(nodes.size).toBe(2);
+			expect(nodes.get("server1")).toEqual(node1);
+			expect(nodes.get("server2")).toEqual(node2);
+		});
+	});
 });

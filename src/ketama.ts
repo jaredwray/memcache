@@ -76,10 +76,26 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	private readonly hashFn: HashFunction;
 
 	/** The sorted array of [hash, node key] tuples representing virtual nodes on the ring */
-	private clock: HashClock = [];
+	private _clock: HashClock = [];
 
 	/** Map of node keys to actual node objects */
-	private nodes = new Map<string, TNode>();
+	private _nodes = new Map<string, TNode>();
+
+	/**
+	 * Gets the sorted array of [hash, node key] tuples representing virtual nodes on the ring.
+	 * @returns The hash clock array
+	 */
+	public get clock(): HashClock {
+		return this._clock;
+	}
+
+	/**
+	 * Gets the map of node keys to actual node objects.
+	 * @returns The nodes map
+	 */
+	public get nodes(): ReadonlyMap<string, TNode> {
+		return this._nodes;
+	}
 
 	/**
 	 * Creates a new HashRing instance.
@@ -142,7 +158,7 @@ export class HashRing<TNode extends string | { key: string } = string> {
 		} else {
 			this.removeNode(node);
 			const key = keyFor(node);
-			this.nodes.set(key, node);
+			this._nodes.set(key, node);
 			this.addNodeToClock(key, Math.round(weight * HashRing.baseWeight));
 		}
 	}
@@ -161,8 +177,8 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 */
 	public removeNode(node: TNode) {
 		const key = keyFor(node);
-		if (this.nodes.delete(key)) {
-			this.clock = this.clock.filter(([, n]) => n !== key);
+		if (this._nodes.delete(key)) {
+			this._clock = this._clock.filter(([, n]) => n !== key);
 		}
 	}
 
@@ -187,15 +203,15 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 * ```
 	 */
 	public getNode(input: string | Buffer): TNode | undefined {
-		if (this.clock.length === 0) {
+		if (this._clock.length === 0) {
 			return undefined;
 		}
 
 		const index = this.getIndexForInput(input);
 		const key =
-			index === this.clock.length ? this.clock[0][1] : this.clock[index][1];
+			index === this._clock.length ? this._clock[0][1] : this._clock[index][1];
 
-		return this.nodes.get(key);
+		return this._nodes.get(key);
 	}
 
 	/**
@@ -208,7 +224,7 @@ export class HashRing<TNode extends string | { key: string } = string> {
 		const hash = this.hashFn(
 			typeof input === "string" ? Buffer.from(input) : input,
 		);
-		return binarySearchRing(this.clock, hash);
+		return binarySearchRing(this._clock, hash);
 	}
 
 	/**
@@ -237,12 +253,12 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 * ```
 	 */
 	public getNodes(input: string | Buffer, replicas: number): TNode[] {
-		if (this.clock.length === 0) {
+		if (this._clock.length === 0) {
 			return [];
 		}
 
-		if (replicas >= this.nodes.size) {
-			return [...this.nodes.values()];
+		if (replicas >= this._nodes.size) {
+			return [...this._nodes.values()];
 		}
 
 		const chosen = new Set<string>();
@@ -250,10 +266,10 @@ export class HashRing<TNode extends string | { key: string } = string> {
 		// We know this will terminate, since we know there are at least as many
 		// unique nodes to be chosen as there are replicas
 		for (let i = this.getIndexForInput(input); chosen.size < replicas; i++) {
-			chosen.add(this.clock[i % this.clock.length][1]);
+			chosen.add(this._clock[i % this._clock.length][1]);
 		}
 
-		return [...chosen].map((c) => this.nodes.get(c) as TNode);
+		return [...chosen].map((c) => this._nodes.get(c) as TNode);
 	}
 
 	/**
@@ -266,10 +282,10 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	private addNodeToClock(key: string, weight: number) {
 		for (let i = weight; i > 0; i--) {
 			const hash = this.hashFn(Buffer.from(`${key}\0${i}`));
-			this.clock.push([hash, key]);
+			this._clock.push([hash, key]);
 		}
 
-		this.clock.sort((a, b) => a[0] - b[0]);
+		this._clock.sort((a, b) => a[0] - b[0]);
 	}
 }
 
