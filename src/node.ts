@@ -251,8 +251,11 @@ export class MemcacheNode extends EventEmitter {
 		}
 
 		if (this._currentCommand.isMultiline) {
-			// Track found keys locally for this command
-			if (!this._currentCommand.foundKeys) {
+			// Track found keys only if requestedKeys is provided
+			if (
+				this._currentCommand.requestedKeys &&
+				!this._currentCommand.foundKeys
+			) {
 				this._currentCommand.foundKeys = [];
 			}
 
@@ -260,11 +263,30 @@ export class MemcacheNode extends EventEmitter {
 				const parts = line.split(" ");
 				const key = parts[1];
 				const bytes = parseInt(parts[3], 10);
-				this._currentCommand.foundKeys.push(key);
+				if (this._currentCommand.requestedKeys) {
+					this._currentCommand.foundKeys?.push(key);
+				}
 				this.readValue(bytes);
 			} else if (line === "END") {
-				const result =
-					this._multilineData.length > 0 ? this._multilineData : undefined;
+				let result:
+					| string[]
+					| { values: string[] | undefined; foundKeys: string[] }
+					| undefined;
+
+				// If requestedKeys is present, return object with keys and values
+				if (
+					this._currentCommand.requestedKeys &&
+					this._currentCommand.foundKeys
+				) {
+					result = {
+						values:
+							this._multilineData.length > 0 ? this._multilineData : undefined,
+						foundKeys: this._currentCommand.foundKeys,
+					};
+				} else {
+					result =
+						this._multilineData.length > 0 ? this._multilineData : undefined;
+				}
 
 				// Emit hit/miss events if we have requested keys
 				/* v8 ignore next -- @preserve */

@@ -334,12 +334,14 @@ export class Memcache extends Hookified {
 			requestedKeys: [key],
 		});
 
-		await this.afterHook("get", { key, value: result });
-
-		if (result && result.length > 0) {
-			return result[0];
+		let value: string | undefined;
+		if (result?.values && result.values.length > 0) {
+			value = result.values[0];
 		}
-		return undefined;
+
+		await this.afterHook("get", { key, value });
+
+		return value;
 	}
 
 	/**
@@ -385,7 +387,7 @@ export class Memcache extends Hookified {
 					requestedKeys: nodeKeys,
 				});
 
-				return { nodeKeys, result };
+				return result;
 			},
 		);
 
@@ -394,10 +396,13 @@ export class Memcache extends Hookified {
 		// Merge results into Map
 		const map = new Map<string, string>();
 
-		for (const { nodeKeys, result } of results) {
-			if (Array.isArray(result)) {
-				for (let i = 0; i < nodeKeys.length && i < result.length; i++) {
-					map.set(nodeKeys[i], result[i]);
+		for (const result of results) {
+			if (result?.foundKeys && result.values) {
+				// Map found keys to their values
+				for (let i = 0; i < result.foundKeys.length; i++) {
+					if (result.values[i] !== undefined) {
+						map.set(result.foundKeys[i], result.values[i]);
+					}
 				}
 			}
 		}
