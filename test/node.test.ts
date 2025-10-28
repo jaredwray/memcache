@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemcacheNode } from "../src/node";
 
@@ -406,6 +407,127 @@ describe("MemcacheNode", () => {
 			expect(result).toBeDefined();
 			expect(result[0]).toBe(value);
 			expect(result[0].length).toBe(10000);
+		});
+	});
+
+	describe("Error Handling", () => {
+		it("should handle ERROR response for stats command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("stats invalid_type", {
+				isStats: true,
+			});
+
+			// Simulate server ERROR response
+			mockSocket.emit("data", "ERROR\r\n");
+
+			await expect(commandPromise).rejects.toThrow("ERROR");
+		});
+
+		it("should handle CLIENT_ERROR response for stats command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("stats", { isStats: true });
+
+			// Simulate server CLIENT_ERROR response
+			mockSocket.emit("data", "CLIENT_ERROR bad command\r\n");
+
+			await expect(commandPromise).rejects.toThrow("CLIENT_ERROR bad command");
+		});
+
+		it("should handle SERVER_ERROR response for stats command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("stats", { isStats: true });
+
+			// Simulate server SERVER_ERROR response
+			mockSocket.emit("data", "SERVER_ERROR out of memory\r\n");
+
+			await expect(commandPromise).rejects.toThrow(
+				"SERVER_ERROR out of memory",
+			);
+		});
+
+		it("should handle ERROR response for multiline get command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get test_key", {
+				isMultiline: true,
+				requestedKeys: ["test_key"],
+			});
+
+			// Simulate server ERROR response
+			mockSocket.emit("data", "ERROR\r\n");
+
+			await expect(commandPromise).rejects.toThrow("ERROR");
+		});
+
+		it("should handle CLIENT_ERROR response for multiline get command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get test_key", {
+				isMultiline: true,
+				requestedKeys: ["test_key"],
+			});
+
+			// Simulate server CLIENT_ERROR response
+			mockSocket.emit("data", "CLIENT_ERROR invalid key\r\n");
+
+			await expect(commandPromise).rejects.toThrow("CLIENT_ERROR invalid key");
+		});
+
+		it("should handle SERVER_ERROR response for multiline get command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get test_key", {
+				isMultiline: true,
+				requestedKeys: ["test_key"],
+			});
+
+			// Simulate server SERVER_ERROR response
+			mockSocket.emit("data", "SERVER_ERROR temporary failure\r\n");
+
+			await expect(commandPromise).rejects.toThrow(
+				"SERVER_ERROR temporary failure",
+			);
+		});
+
+		it("should reject current command on disconnect", async () => {
+			await node.connect();
+
+			// Start a command but don't let it complete
+			const commandPromise = node.command("get pending_key", {
+				isMultiline: true,
+			});
+
+			// Disconnect immediately
+			await node.disconnect();
+
+			// The command should be rejected
+			await expect(commandPromise).rejects.toThrow();
+		});
+
+		it("should reject queued commands on disconnect", async () => {
+			await node.connect();
+
+			// Queue multiple commands without responses
+			const promise1 = node.command("get key1", { isMultiline: true });
+			const promise2 = node.command("get key2", { isMultiline: true });
+			const promise3 = node.command("get key3", { isMultiline: true });
+
+			// Disconnect immediately
+			await node.disconnect();
+
+			// All commands should be rejected
+			await expect(promise1).rejects.toThrow();
+			await expect(promise2).rejects.toThrow();
+			await expect(promise3).rejects.toThrow();
 		});
 	});
 });

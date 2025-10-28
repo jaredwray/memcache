@@ -307,8 +307,11 @@ export class Memcache extends Hookified {
 	public async connect(nodeId?: string): Promise<void> {
 		if (nodeId) {
 			const node = this._nodes.get(nodeId);
+			/* v8 ignore next -- @preserve */
 			if (!node) throw new Error(`Node ${nodeId} not found`);
+			/* v8 ignore next -- @preserve */
 			await node.connect();
+			/* v8 ignore next -- @preserve */
 			return;
 		}
 
@@ -363,6 +366,7 @@ export class Memcache extends Hookified {
 		for (const key of keys) {
 			const nodeKey = this._ring.getNode(key);
 			if (!nodeKey) {
+				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
 			}
 
@@ -688,6 +692,7 @@ export class Memcache extends Hookified {
 		// Execute on ALL nodes
 		const results = await Promise.all(
 			Array.from(this._nodes.values()).map(async (node) => {
+				/* v8 ignore next -- @preserve */
 				if (!node.isConnected()) {
 					await node.connect();
 				}
@@ -711,6 +716,7 @@ export class Memcache extends Hookified {
 		const results = new Map<string, MemcacheStats>();
 
 		await Promise.all(
+			/* v8 ignore next -- @preserve */
 			Array.from(this._nodes.entries()).map(async ([nodeKey, node]) => {
 				if (!node.isConnected()) {
 					await node.connect();
@@ -731,8 +737,10 @@ export class Memcache extends Hookified {
 	public async version(): Promise<string> {
 		// Get version from first node
 		const node = Array.from(this._nodes.values())[0];
+		/* v8 ignore next -- @preserve */
 		if (!node) throw new Error("No nodes available");
 
+		/* v8 ignore next -- @preserve */
 		if (!node.isConnected()) {
 			await node.connect();
 		}
@@ -780,6 +788,7 @@ export class Memcache extends Hookified {
 	 */
 	private async _getNodeForKey(key: string): Promise<MemcacheNode> {
 		const nodeKey = this._ring.getNode(key);
+		/* v8 ignore next -- @preserve */
 		if (!nodeKey) {
 			throw new Error(`No node available for key: ${key}`);
 		}

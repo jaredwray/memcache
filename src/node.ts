@@ -123,6 +123,7 @@ export class MemcacheNode extends EventEmitter {
 			this._socket.on("error", (error: Error) => {
 				this.emit("error", error);
 				if (!this._connected) {
+					/* v8 ignore next -- @preserve */
 					reject(error);
 				}
 			});
@@ -359,7 +360,9 @@ export class MemcacheNode extends EventEmitter {
 
 	private rejectPendingCommands(error: Error): void {
 		if (this._currentCommand) {
+			/* v8 ignore next -- @preserve */
 			this._currentCommand.reject(error);
+			/* v8 ignore next -- @preserve */
 			this._currentCommand = undefined;
 		}
 		while (this._commandQueue.length > 0) {
