@@ -1,6 +1,6 @@
-import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
 import { HashRing } from "./ketama";
+import { MemcacheNode } from "./node";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
@@ -41,28 +41,11 @@ export interface MemcacheStats {
 	[key: string]: string;
 }
 
-export type CommandQueueItem = {
-	command: string;
-	// biome-ignore lint/suspicious/noExplicitAny: expected
-	resolve: (value: any) => void;
-	// biome-ignore lint/suspicious/noExplicitAny: expected
-	reject: (reason?: any) => void;
-	isMultiline?: boolean;
-	isStats?: boolean;
-	requestedKeys?: string[];
-	foundKeys?: string[];
-};
-
 export class Memcache extends Hookified {
-	private _socket: Socket | undefined = undefined;
+	private _nodes: Map<string, MemcacheNode> = new Map();
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
-	private _connected: boolean = false;
-	private _commandQueue: CommandQueueItem[] = [];
-	private _buffer: string = "";
-	private _currentCommand: CommandQueueItem | undefined = undefined;
-	private _multilineData: string[] = [];
 	private _ring: HashRing<string>;
 
 	constructor(options?: MemcacheOptions) {
@@ -73,16 +56,25 @@ export class Memcache extends Hookified {
 		this._ring = new HashRing<string>();
 
 		// Add nodes to the ring if provided, otherwise add default node
-		if (options?.nodes && options.nodes.length > 0) {
-			for (const nodeUri of options.nodes) {
-				const { host, port } = this.parseUri(nodeUri);
-				// Store as host:port format in the ring
-				const nodeKey = port === 0 ? host : `${host}:${port}`;
-				this._ring.addNode(nodeKey);
-			}
-		} else {
-			// Add default node if no nodes provided
-			this._ring.addNode("localhost:11211");
+		const nodeUris = options?.nodes || ["localhost:11211"];
+		for (const nodeUri of nodeUris) {
+			const { host, port } = this.parseUri(nodeUri);
+			const nodeKey = port === 0 ? host : `${host}:${port}`;
+
+			// Add to hash ring
+			this._ring.addNode(nodeKey);
+
+			// Create node instance
+			const node = new MemcacheNode(host, port, {
+				timeout: this._timeout,
+				keepAlive: this._keepAlive,
+				keepAliveDelay: this._keepAliveDelay,
+			});
+
+			// Forward node events to Memcache events
+			this._forwardNodeEvents(node);
+
+			this._nodes.set(nodeKey, node);
 		}
 	}
 
@@ -100,22 +92,6 @@ export class Memcache extends Hookified {
 	 */
 	public get nodes(): string[] {
 		return Array.from(this._ring.nodes.values());
-	}
-
-	/**
-	 * Get the socket connection.
-	 * @returns {Socket | undefined}
-	 */
-	public get socket(): Socket | undefined {
-		return this._socket;
-	}
-
-	/**
-	 * Set the socket connection.
-	 * @param {Socket | undefined} value
-	 */
-	public set socket(value: Socket | undefined) {
-		this._socket = value;
 	}
 
 	/**
@@ -173,35 +149,66 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the current command being processed.
-	 * @returns {CommandQueueItem | undefined}
+	 * Get a map of all MemcacheNode instances
+	 * @returns {Map<string, MemcacheNode>}
 	 */
-	public get currentCommand(): CommandQueueItem | undefined {
-		return this._currentCommand;
+	public getNodes(): Map<string, MemcacheNode> {
+		return new Map(this._nodes);
 	}
 
 	/**
-	 * Set the current command being processed. This is for internal use
-	 * @param {CommandQueueItem | undefined} value
+	 * Get the node responsible for a given key
+	 * @param {string} key
+	 * @returns {MemcacheNode | undefined}
 	 */
-	public set currentCommand(value: CommandQueueItem | undefined) {
-		this._currentCommand = value;
+	public getNode(key: string): MemcacheNode | undefined {
+		const nodeKey = this._ring.getNode(key);
+		if (!nodeKey) return undefined;
+		return this._nodes.get(nodeKey);
 	}
 
 	/**
-	 * Get the command queue for the Memcache client.
-	 * @returns {CommandQueueItem[]}
+	 * Add a new node to the cluster
+	 * @param {string} uri - Node URI (e.g., "localhost:11212")
+	 * @param {number} weight - Optional weight for consistent hashing
 	 */
-	public get commandQueue(): CommandQueueItem[] {
-		return this._commandQueue;
+	public async addNode(uri: string, weight?: number): Promise<void> {
+		const { host, port } = this.parseUri(uri);
+		const nodeKey = port === 0 ? host : `${host}:${port}`;
+
+		if (this._nodes.has(nodeKey)) {
+			throw new Error(`Node ${nodeKey} already exists`);
+		}
+
+		// Add to ring
+		this._ring.addNode(nodeKey, weight);
+
+		// Create and connect node
+		const node = new MemcacheNode(host, port, {
+			timeout: this._timeout,
+			keepAlive: this._keepAlive,
+			keepAliveDelay: this._keepAliveDelay,
+		});
+
+		this._forwardNodeEvents(node);
+		this._nodes.set(nodeKey, node);
 	}
 
 	/**
-	 * Set the command queue for the Memcache client.
-	 * @param {CommandQueueItem[]} value
+	 * Remove a node from the cluster
+	 * @param {string} uri - Node URI (e.g., "localhost:11212")
 	 */
-	public set commandQueue(value: CommandQueueItem[]) {
-		this._commandQueue = value;
+	public async removeNode(uri: string): Promise<void> {
+		const { host, port } = this.parseUri(uri);
+		const nodeKey = port === 0 ? host : `${host}:${port}`;
+
+		const node = this._nodes.get(nodeKey);
+		if (!node) return;
+
+		// Disconnect and remove
+		await node.disconnect();
+		this._nodes.delete(nodeKey);
+		this._ring.removeNode(nodeKey);
 	}
 
 	/**
@@ -293,60 +300,22 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Connect to a Memcache server.
-	 * @param {string} host - The hostname of the Memcache server
-	 * @param {number} port - The port of the Memcache server (default: 11211)
+	 * Connect to all Memcache servers or a specific node.
+	 * @param {string} nodeId - Optional node ID to connect to (e.g., "localhost:11211")
 	 * @returns {Promise<void>}
 	 */
-	public async connect(
-		host: string = "localhost",
-		port: number = 11211,
-	): Promise<void> {
-		return new Promise((resolve, reject) => {
-			if (this._connected) {
-				resolve();
-				return;
-			}
+	public async connect(nodeId?: string): Promise<void> {
+		if (nodeId) {
+			const node = this._nodes.get(nodeId);
+			if (!node) throw new Error(`Node ${nodeId} not found`);
+			await node.connect();
+			return;
+		}
 
-			this._socket = createConnection({
-				host,
-				port,
-				keepAlive: this._keepAlive,
-				keepAliveInitialDelay: this._keepAliveDelay,
-			});
-
-			this._socket.setTimeout(this._timeout);
-			this._socket.setEncoding("utf8");
-
-			this._socket.on("connect", () => {
-				this._connected = true;
-				this.emit(MemcacheEvents.CONNECT);
-				resolve();
-			});
-
-			this._socket.on("data", (data: string) => {
-				this.handleData(data);
-			});
-
-			this._socket.on("error", (error: Error) => {
-				this.emit(MemcacheEvents.ERROR, error);
-				if (!this._connected) {
-					reject(error);
-				}
-			});
-
-			this._socket.on("close", () => {
-				this._connected = false;
-				this.emit(MemcacheEvents.CLOSE);
-				this.rejectPendingCommands(new Error("Connection closed"));
-			});
-
-			this._socket.on("timeout", () => {
-				this.emit(MemcacheEvents.TIMEOUT);
-				this._socket?.destroy();
-				reject(new Error("Connection timeout"));
-			});
-		});
+		// Connect to all nodes
+		await Promise.all(
+			Array.from(this._nodes.values()).map((node) => node.connect()),
+		);
 	}
 
 	/**
@@ -358,7 +327,12 @@ export class Memcache extends Hookified {
 		await this.beforeHook("get", { key });
 
 		this.validateKey(key);
-		const result = await this.sendCommand(`get ${key}`, true, false, [key]);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(`get ${key}`, {
+			isMultiline: true,
+			requestedKeys: [key],
+		});
 
 		await this.afterHook("get", { key, value: result });
 
@@ -376,21 +350,55 @@ export class Memcache extends Hookified {
 	public async gets(keys: string[]): Promise<Map<string, string>> {
 		await this.beforeHook("gets", { keys });
 
+		// Validate all keys
 		for (const key of keys) {
 			this.validateKey(key);
 		}
-		const keysStr = keys.join(" ");
-		const results = (await this.sendCommand(
-			`get ${keysStr}`,
-			true,
-			false,
-			keys,
-		)) as string[] | undefined;
+
+		// Group keys by node
+		const keysByNode = new Map<string, string[]>();
+
+		for (const key of keys) {
+			const nodeKey = this._ring.getNode(key);
+			if (!nodeKey) {
+				throw new Error(`No node available for key: ${key}`);
+			}
+
+			if (!keysByNode.has(nodeKey)) {
+				keysByNode.set(nodeKey, []);
+			}
+			// biome-ignore lint/style/noNonNullAssertion: we just set it
+			keysByNode.get(nodeKey)!.push(key);
+		}
+
+		// Execute commands in parallel across nodes
+		const promises = Array.from(keysByNode.entries()).map(
+			async ([nodeKey, nodeKeys]) => {
+				const node = this._nodes.get(nodeKey);
+				if (!node) throw new Error(`Node ${nodeKey} not found`);
+
+				if (!node.isConnected()) await node.connect();
+
+				const keysStr = nodeKeys.join(" ");
+				const result = await node.command(`get ${keysStr}`, {
+					isMultiline: true,
+					requestedKeys: nodeKeys,
+				});
+
+				return { nodeKeys, result };
+			},
+		);
+
+		const results = await Promise.all(promises);
+
+		// Merge results into Map
 		const map = new Map<string, string>();
 
-		if (results) {
-			for (let i = 0; i < keys.length && i < results.length; i++) {
-				map.set(keys[i], results[i]);
+		for (const { nodeKeys, result } of results) {
+			if (Array.isArray(result)) {
+				for (let i = 0; i < nodeKeys.length && i < result.length; i++) {
+					map.set(nodeKeys[i], result[i]);
+				}
 			}
 		}
 
@@ -421,7 +429,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("cas", {
@@ -437,7 +447,7 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get a value from the Memcache server.
+	 * Set a value in the Memcache server.
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -456,7 +466,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("set", { key, value, exptime, flags, success });
@@ -465,7 +477,7 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get a value from the Memcache server.
+	 * Add a value to the Memcache server (only if key doesn't exist).
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -484,7 +496,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("add", { key, value, exptime, flags, success });
@@ -493,7 +507,7 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get a value from the Memcache server.
+	 * Replace a value in the Memcache server (only if key exists).
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -512,7 +526,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("replace", { key, value, exptime, flags, success });
@@ -533,7 +549,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("append", { key, value, success });
@@ -554,7 +572,9 @@ export class Memcache extends Hookified {
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
-		const result = await this.sendCommand(command);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(command);
 		const success = result === "STORED";
 
 		await this.afterHook("prepend", { key, value, success });
@@ -571,7 +591,9 @@ export class Memcache extends Hookified {
 		await this.beforeHook("delete", { key });
 
 		this.validateKey(key);
-		const result = await this.sendCommand(`delete ${key}`);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(`delete ${key}`);
 		const success = result === "DELETED";
 
 		await this.afterHook("delete", { key, success });
@@ -592,7 +614,9 @@ export class Memcache extends Hookified {
 		await this.beforeHook("incr", { key, value });
 
 		this.validateKey(key);
-		const result = await this.sendCommand(`incr ${key} ${value}`);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(`incr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
 		await this.afterHook("incr", { key, value, newValue });
@@ -613,7 +637,9 @@ export class Memcache extends Hookified {
 		await this.beforeHook("decr", { key, value });
 
 		this.validateKey(key);
-		const result = await this.sendCommand(`decr ${key} ${value}`);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(`decr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
 		await this.afterHook("decr", { key, value, newValue });
@@ -622,7 +648,7 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Touch a value in the Memcache server.
+	 * Touch a value in the Memcache server (update expiration time).
 	 * @param key {string}
 	 * @param exptime {number}
 	 * @returns {Promise<boolean>}
@@ -631,7 +657,9 @@ export class Memcache extends Hookified {
 		await this.beforeHook("touch", { key, exptime });
 
 		this.validateKey(key);
-		const result = await this.sendCommand(`touch ${key} ${exptime}`);
+
+		const node = await this._getNodeForKey(key);
+		const result = await node.command(`touch ${key} ${exptime}`);
 		const success = result === "TOUCHED";
 
 		await this.afterHook("touch", { key, exptime, success });
@@ -640,7 +668,7 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Flush all values from the Memcache server.
+	 * Flush all values from all Memcache servers.
 	 * @param delay {number}
 	 * @returns {Promise<boolean>}
 	 */
@@ -652,236 +680,130 @@ export class Memcache extends Hookified {
 			command += ` ${delay}`;
 		}
 
-		const result = await this.sendCommand(command);
-		return result === "OK";
+		// Execute on ALL nodes
+		const results = await Promise.all(
+			Array.from(this._nodes.values()).map(async (node) => {
+				if (!node.isConnected()) {
+					await node.connect();
+				}
+				return node.command(command);
+			}),
+		);
+
+		// All must return OK
+		return results.every((r) => r === "OK");
 	}
 
 	/**
-	 * Get statistics from the Memcache server.
+	 * Get statistics from all Memcache servers.
 	 * @param type {string}
-	 * @returns {Promise<MemcacheStats>}
+	 * @returns {Promise<Map<string, MemcacheStats>>}
 	 */
-	public async stats(type?: string): Promise<MemcacheStats> {
+	public async stats(type?: string): Promise<Map<string, MemcacheStats>> {
 		const command = type ? `stats ${type}` : "stats";
-		return await this.sendCommand(command, false, true);
+
+		// Get stats from ALL nodes
+		const results = new Map<string, MemcacheStats>();
+
+		await Promise.all(
+			Array.from(this._nodes.entries()).map(async ([nodeKey, node]) => {
+				if (!node.isConnected()) {
+					await node.connect();
+				}
+
+				const stats = await node.command(command, { isStats: true });
+				results.set(nodeKey, stats as MemcacheStats);
+			}),
+		);
+
+		return results;
 	}
 
 	/**
-	 * Get the Memcache server version.
+	 * Get the Memcache server version from the first available node.
 	 * @returns {Promise<string>}
 	 */
 	public async version(): Promise<string> {
-		const result = await this.sendCommand("version");
+		// Get version from first node
+		const node = Array.from(this._nodes.values())[0];
+		if (!node) throw new Error("No nodes available");
+
+		if (!node.isConnected()) {
+			await node.connect();
+		}
+
+		const result = await node.command("version");
 		return result;
 	}
 
 	/**
-	 * Quit the Memcache server and disconnect the socket.
+	 * Quit all connections gracefully.
 	 * @returns {Promise<void>}
 	 */
 	public async quit(): Promise<void> {
-		/* v8 ignore next -- @preserve */
-		if (this._connected && this._socket) {
-			try {
-				await this.sendCommand("quit");
-				// biome-ignore lint/correctness/noUnusedVariables: expected
-			} catch (error) {
-				// Ignore errors from quit command as the server closes the connection
-			}
-			await this.disconnect();
-		}
+		await Promise.all(
+			Array.from(this._nodes.values()).map(async (node) => {
+				if (node.isConnected()) {
+					await node.quit();
+				}
+			}),
+		);
 	}
 
 	/**
-	 * Disconnect the socket from the Memcache server. Use quit for graceful disconnection.
+	 * Disconnect all connections.
 	 * @returns {Promise<void>}
 	 */
 	public async disconnect(): Promise<void> {
-		/* v8 ignore next -- @preserve */
-		if (this._socket) {
-			this._socket.destroy();
-			this._socket = undefined;
-			this._connected = false;
-		}
+		await Promise.all(
+			Array.from(this._nodes.values()).map((node) => node.disconnect()),
+		);
 	}
 
 	/**
-	 * Check if the client is connected to the Memcache server.
+	 * Check if any node is connected to a Memcache server.
 	 * @returns {boolean}
 	 */
 	public isConnected(): boolean {
-		return this._connected;
+		return Array.from(this._nodes.values()).some((node) => node.isConnected());
 	}
 
 	// Private methods
-	private handleData(data: string): void {
-		this._buffer += data;
 
-		while (true) {
-			const lineEnd = this._buffer.indexOf("\r\n");
-			if (lineEnd === -1) break;
-
-			const line = this._buffer.substring(0, lineEnd);
-			this._buffer = this._buffer.substring(lineEnd + 2);
-
-			this.processLine(line);
+	/**
+	 * Get the node for a given key, with lazy connection
+	 */
+	private async _getNodeForKey(key: string): Promise<MemcacheNode> {
+		const nodeKey = this._ring.getNode(key);
+		if (!nodeKey) {
+			throw new Error(`No node available for key: ${key}`);
 		}
+
+		const node = this._nodes.get(nodeKey);
+		if (!node) throw new Error(`Node ${nodeKey} not found`);
+
+		// Lazy connect if not connected
+		if (!node.isConnected()) {
+			await node.connect();
+		}
+
+		return node;
 	}
 
-	private processLine(line: string): void {
-		if (!this._currentCommand) {
-			this._currentCommand = this._commandQueue.shift();
-			if (!this._currentCommand) return;
-		}
-
-		if (this._currentCommand.isStats) {
-			if (line === "END") {
-				const stats: MemcacheStats = {};
-				for (const statLine of this._multilineData) {
-					const [, key, value] = statLine.split(" ");
-					/* v8 ignore next -- @preserve */
-					if (key && value) {
-						stats[key] = value;
-					}
-				}
-				this._currentCommand.resolve(stats);
-				this._multilineData = [];
-				this._currentCommand = undefined;
-			} else if (line.startsWith("STAT ")) {
-				this._multilineData.push(line);
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this._currentCommand.reject(new Error(line));
-				this._currentCommand = undefined;
-			}
-			return;
-		}
-
-		if (this._currentCommand.isMultiline) {
-			// Track found keys locally for this command
-			if (!this._currentCommand.foundKeys) {
-				this._currentCommand.foundKeys = [];
-			}
-
-			if (line.startsWith("VALUE ")) {
-				const parts = line.split(" ");
-				const key = parts[1];
-				const bytes = parseInt(parts[3], 10);
-				this._currentCommand.foundKeys.push(key);
-				this.readValue(bytes);
-			} else if (line === "END") {
-				const result =
-					this._multilineData.length > 0 ? this._multilineData : undefined;
-
-				// Emit hit/miss events if we have requested keys
-				/* v8 ignore next -- @preserve */
-				if (
-					this._currentCommand.requestedKeys &&
-					this._currentCommand.foundKeys
-				) {
-					const foundKeys = this._currentCommand.foundKeys;
-					for (let i = 0; i < foundKeys.length; i++) {
-						this.emit(MemcacheEvents.HIT, foundKeys[i], this._multilineData[i]);
-					}
-
-					// Emit miss events for keys that weren't found
-					const missedKeys = this._currentCommand.requestedKeys.filter(
-						(key) => !foundKeys.includes(key),
-					);
-					for (const key of missedKeys) {
-						this.emit(MemcacheEvents.MISS, key);
-					}
-				}
-
-				this._currentCommand.resolve(result);
-				this._multilineData = [];
-				this._currentCommand = undefined;
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this._currentCommand.reject(new Error(line));
-				this._multilineData = [];
-				this._currentCommand = undefined;
-			}
-		} else {
-			if (
-				line === "STORED" ||
-				line === "DELETED" ||
-				line === "OK" ||
-				line === "TOUCHED" ||
-				line === "EXISTS" ||
-				line === "NOT_FOUND"
-			) {
-				this._currentCommand.resolve(line);
-			} else if (line === "NOT_STORED") {
-				this._currentCommand.resolve(false);
-			} else if (
-				line.startsWith("ERROR") ||
-				line.startsWith("CLIENT_ERROR") ||
-				line.startsWith("SERVER_ERROR")
-			) {
-				this._currentCommand.reject(new Error(line));
-			} else if (/^\d+$/.test(line)) {
-				this._currentCommand.resolve(parseInt(line, 10));
-			} else {
-				this._currentCommand.resolve(line);
-			}
-			this._currentCommand = undefined;
-		}
-	}
-
-	private readValue(bytes: number): void {
-		const valueEnd = this._buffer.indexOf("\r\n");
-		/* v8 ignore next -- @preserve */
-		if (valueEnd >= bytes) {
-			const value = this._buffer.substring(0, bytes);
-			this._buffer = this._buffer.substring(bytes + 2);
-			this._multilineData.push(value);
-		}
-	}
-
-	private async sendCommand(
-		command: string,
-		isMultiline: boolean = false,
-		isStats: boolean = false,
-		requestedKeys?: string[],
-		// biome-ignore lint/suspicious/noExplicitAny: expected
-	): Promise<any> {
-		if (!this._connected || !this._socket) {
-			throw new Error("Not connected to memcache server");
-		}
-
-		return new Promise((resolve, reject) => {
-			this._commandQueue.push({
-				command,
-				resolve,
-				reject,
-				isMultiline,
-				isStats,
-				requestedKeys,
-			});
-			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			this._socket!.write(`${command}\r\n`);
-		});
-	}
-
-	private rejectPendingCommands(error: Error): void {
-		if (this._currentCommand) {
-			this._currentCommand.reject(error);
-			this._currentCommand = undefined;
-		}
-		while (this._commandQueue.length > 0) {
-			const cmd = this._commandQueue.shift();
-			/* v8 ignore next -- @preserve */
-			if (cmd) {
-				cmd.reject(error);
-			}
-		}
+	/**
+	 * Forward events from a MemcacheNode to the Memcache instance
+	 */
+	private _forwardNodeEvents(node: MemcacheNode): void {
+		node.on("connect", () => this.emit(MemcacheEvents.CONNECT, node.id));
+		node.on("close", () => this.emit(MemcacheEvents.CLOSE, node.id));
+		node.on("error", (err: Error) =>
+			this.emit(MemcacheEvents.ERROR, node.id, err),
+		);
+		node.on("timeout", () => this.emit(MemcacheEvents.TIMEOUT, node.id));
+		node.on("hit", (key: string, value: string) =>
+			this.emit(MemcacheEvents.HIT, key, value),
+		);
+		node.on("miss", (key: string) => this.emit(MemcacheEvents.MISS, key));
 	}
 
 	private validateKey(key: string): void {
