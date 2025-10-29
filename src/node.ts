@@ -47,6 +47,7 @@ export class MemcacheNode extends EventEmitter {
 	private _buffer: string = "";
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
+	private _pendingValueBytes: number = 0;
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
 		super();
@@ -214,6 +215,7 @@ export class MemcacheNode extends EventEmitter {
 			this._buffer = "";
 			this._currentCommand = undefined;
 			this._multilineData = [];
+			this._pendingValueBytes = 0;
 		}
 
 		// Now establish a fresh connection
@@ -275,6 +277,19 @@ export class MemcacheNode extends EventEmitter {
 		this._buffer += data;
 
 		while (true) {
+			// If we're waiting for value data, try to read it first
+			if (this._pendingValueBytes > 0) {
+				if (this._buffer.length >= this._pendingValueBytes + 2) {
+					const value = this._buffer.substring(0, this._pendingValueBytes);
+					this._buffer = this._buffer.substring(this._pendingValueBytes + 2);
+					this._multilineData.push(value);
+					this._pendingValueBytes = 0;
+				} else {
+					// Not enough data yet, wait for more
+					break;
+				}
+			}
+
 			const lineEnd = this._buffer.indexOf("\r\n");
 			if (lineEnd === -1) break;
 
@@ -341,7 +356,8 @@ export class MemcacheNode extends EventEmitter {
 				if (this._currentCommand.requestedKeys) {
 					this._currentCommand.foundKeys?.push(key);
 				}
-				this.readValue(bytes);
+				// Set pending bytes so handleData will read the value
+				this._pendingValueBytes = bytes;
 			} else if (line === "END") {
 				let result:
 					| string[]
@@ -419,15 +435,6 @@ export class MemcacheNode extends EventEmitter {
 				this._currentCommand.resolve(line);
 			}
 			this._currentCommand = undefined;
-		}
-	}
-
-	private readValue(bytes: number): void {
-		// Check if we have enough data in the buffer (bytes + \r\n)
-		if (this._buffer.length >= bytes + 2) {
-			const value = this._buffer.substring(0, bytes);
-			this._buffer = this._buffer.substring(bytes + 2);
-			this._multilineData.push(value);
 		}
 	}
 
