@@ -5,6 +5,7 @@ export interface MemcacheNodeOptions {
 	timeout?: number;
 	keepAlive?: boolean;
 	keepAliveDelay?: number;
+	weight?: number;
 }
 
 export interface CommandOptions {
@@ -40,6 +41,7 @@ export class MemcacheNode extends EventEmitter {
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
+	private _weight: number;
 	private _connected: boolean = false;
 	private _commandQueue: CommandQueueItem[] = [];
 	private _buffer: string = "";
@@ -53,6 +55,7 @@ export class MemcacheNode extends EventEmitter {
 		this._timeout = options?.timeout || 5000;
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
+		this._weight = options?.weight || 1;
 	}
 
 	/**
@@ -81,6 +84,20 @@ export class MemcacheNode extends EventEmitter {
 	 */
 	public get socket(): Socket | undefined {
 		return this._socket;
+	}
+
+	/**
+	 * Get the weight of this node (used for consistent hashing distribution)
+	 */
+	public get weight(): number {
+		return this._weight;
+	}
+
+	/**
+	 * Set the weight of this node (used for consistent hashing distribution)
+	 */
+	public set weight(value: number) {
+		this._weight = value;
 	}
 
 	/**

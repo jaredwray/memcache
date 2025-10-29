@@ -38,6 +38,24 @@ describe("MemcacheNode", () => {
 			const testNode = new MemcacheNode("localhost", 11211);
 			expect(testNode).toBeInstanceOf(MemcacheNode);
 		});
+
+		it("should have default weight of 1", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.weight).toBe(1);
+		});
+
+		it("should accept weight in options", () => {
+			const testNode = new MemcacheNode("localhost", 11211, { weight: 5 });
+			expect(testNode.weight).toBe(5);
+		});
+
+		it("should allow getting and setting weight", () => {
+			const testNode = new MemcacheNode("localhost", 11211, { weight: 2 });
+			expect(testNode.weight).toBe(2);
+
+			testNode.weight = 10;
+			expect(testNode.weight).toBe(10);
+		});
 	});
 
 	describe("Connection Lifecycle", () => {
