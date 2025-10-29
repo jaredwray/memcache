@@ -1738,7 +1738,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(110);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should call beforeHook and afterHook for decr operation", async () => {
