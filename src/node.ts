@@ -172,6 +172,27 @@ export class MemcacheNode extends EventEmitter {
 	}
 
 	/**
+	 * Reconnect to the memcache server by disconnecting and connecting again
+	 */
+	public async reconnect(): Promise<void> {
+		// First disconnect if currently connected
+		if (this._connected || this._socket) {
+			await this.disconnect();
+			// Clear any pending commands with a reconnection error
+			this.rejectPendingCommands(
+				new Error("Connection reset for reconnection"),
+			);
+			// Clear the buffer and current command state
+			this._buffer = "";
+			this._currentCommand = undefined;
+			this._multilineData = [];
+		}
+
+		// Now establish a fresh connection
+		await this.connect();
+	}
+
+	/**
 	 * Gracefully quit the connection (send quit command then disconnect)
 	 */
 	public async quit(): Promise<void> {
