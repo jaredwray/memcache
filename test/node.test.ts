@@ -587,6 +587,22 @@ describe("MemcacheNode", () => {
 			);
 		});
 
+		it("should handle unexpected line in stats command response", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("stats", { isStats: true });
+
+			// Simulate unexpected response line (not STAT, not END, not ERROR)
+			mockSocket.emit("data", "UNEXPECTED_LINE\r\n");
+			// Then send END to complete the command
+			mockSocket.emit("data", "END\r\n");
+
+			// Should still resolve successfully, ignoring the unexpected line
+			const result = await commandPromise;
+			expect(result).toBeDefined();
+		});
+
 		it("should handle ERROR response for multiline get command", async () => {
 			await node.connect();
 
