@@ -117,6 +117,74 @@ describe("MemcacheNode", () => {
 			expect(node.isConnected()).toBe(false);
 		});
 
+		it("should reconnect successfully", async () => {
+			// First connection
+			await node.connect();
+			expect(node.isConnected()).toBe(true);
+
+			// Set a value to ensure connection is working
+			const key = "node-test-reconnect";
+			const value = "initial-value";
+			const bytes = Buffer.byteLength(value);
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			// Reconnect
+			await node.reconnect();
+			expect(node.isConnected()).toBe(true);
+
+			// Verify we can still execute commands after reconnect
+			const result = await node.command("version");
+			expect(result).toBeDefined();
+			expect(typeof result).toBe("string");
+			expect(result).toContain("VERSION");
+		});
+
+		it("should clear pending commands on reconnect", async () => {
+			await node.connect();
+
+			// Queue a command that won't complete
+			const promise = node.command("get slow-key", { isMultiline: true });
+
+			// Reconnect immediately (this will disconnect and clear pending commands)
+			setImmediate(async () => {
+				await node.reconnect();
+			});
+
+			// The pending command should be rejected
+			await expect(promise).rejects.toThrow(
+				"Connection reset for reconnection",
+			);
+		});
+
+		it("should reconnect when not initially connected", async () => {
+			// Don't connect first
+			expect(node.isConnected()).toBe(false);
+
+			// Reconnect should establish a connection
+			await node.reconnect();
+			expect(node.isConnected()).toBe(true);
+
+			// Verify connection works
+			const result = await node.command("version");
+			expect(result).toContain("VERSION");
+		});
+
+		it("should emit connect event on reconnect", async () => {
+			await node.connect();
+
+			let connectCount = 0;
+			node.on("connect", () => {
+				connectCount++;
+			});
+
+			// Reconnect
+			await node.reconnect();
+
+			// Should emit connect event for the new connection
+			expect(connectCount).toBe(1);
+			expect(node.isConnected()).toBe(true);
+		});
+
 		it("should reject connection to invalid host", async () => {
 			const badNode = new MemcacheNode("0.0.0.0", 99999, { timeout: 1000 });
 			await expect(badNode.connect()).rejects.toThrow();
