@@ -239,13 +239,13 @@ export class MemcacheNode extends EventEmitter {
 				this._multilineData = [];
 				this._currentCommand = undefined;
 				return;
-			} 
-			
+			}
+
 			if (line.startsWith("STAT ")) {
 				this._multilineData.push(line);
 				return;
 			}
-			
+
 			if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||
@@ -255,7 +255,7 @@ export class MemcacheNode extends EventEmitter {
 				this._currentCommand = undefined;
 				return;
 			}
-			
+
 			return;
 		}
 
