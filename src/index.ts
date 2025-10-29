@@ -123,11 +123,14 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Set the keepAlive setting for the Memcache connection.
+	 * Updates all existing nodes with the new value.
 	 * @param {boolean} value
 	 * @default true
 	 */
 	public set keepAlive(value: boolean) {
 		this._keepAlive = value;
+		// Update all existing nodes
+		this._updateNodes();
 	}
 
 	/**
@@ -141,11 +144,14 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Set the delay before the connection is kept alive.
+	 * Updates all existing nodes with the new value.
 	 * @param {number} value
 	 * @default 1000
 	 */
 	public set keepAliveDelay(value: number) {
 		this._keepAliveDelay = value;
+		// Update all existing nodes
+		this._updateNodes();
 	}
 
 	/**
@@ -792,6 +798,17 @@ export class Memcache extends Hookified {
 	}
 
 	// Private methods
+
+	/**
+	 * Update all nodes with current keepAlive settings
+	 */
+	private _updateNodes(): void {
+		// Update all nodes with the current keepAlive settings
+		for (const node of this._nodes.values()) {
+			node.keepAlive = this._keepAlive;
+			node.keepAliveDelay = this._keepAliveDelay;
+		}
+	}
 
 	/**
 	 * Get the node for a given key, with lazy connection

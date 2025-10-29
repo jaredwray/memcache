@@ -101,6 +101,34 @@ export class MemcacheNode extends EventEmitter {
 	}
 
 	/**
+	 * Get the keepAlive setting for this node
+	 */
+	public get keepAlive(): boolean {
+		return this._keepAlive;
+	}
+
+	/**
+	 * Set the keepAlive setting for this node
+	 */
+	public set keepAlive(value: boolean) {
+		this._keepAlive = value;
+	}
+
+	/**
+	 * Get the keepAliveDelay setting for this node
+	 */
+	public get keepAliveDelay(): number {
+		return this._keepAliveDelay;
+	}
+
+	/**
+	 * Set the keepAliveDelay setting for this node
+	 */
+	public set keepAliveDelay(value: number) {
+		this._keepAliveDelay = value;
+	}
+
+	/**
 	 * Get the command queue
 	 */
 	public get commandQueue(): CommandQueueItem[] {
