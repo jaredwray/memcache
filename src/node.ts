@@ -423,9 +423,8 @@ export class MemcacheNode extends EventEmitter {
 	}
 
 	private readValue(bytes: number): void {
-		const valueEnd = this._buffer.indexOf("\r\n");
-		/* v8 ignore next -- @preserve */
-		if (valueEnd >= bytes) {
+		// Check if we have enough data in the buffer (bytes + \r\n)
+		if (this._buffer.length >= bytes + 2) {
 			const value = this._buffer.substring(0, bytes);
 			this._buffer = this._buffer.substring(bytes + 2);
 			this._multilineData.push(value);
