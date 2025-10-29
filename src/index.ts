@@ -124,6 +124,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Set the keepAlive setting for the Memcache connection.
 	 * Updates all existing nodes with the new value.
+	 * Note: To apply the new value, you need to call reconnect() on the nodes.
 	 * @param {boolean} value
 	 * @default true
 	 */
@@ -145,6 +146,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Set the delay before the connection is kept alive.
 	 * Updates all existing nodes with the new value.
+	 * Note: To apply the new value, you need to call reconnect() on the nodes.
 	 * @param {number} value
 	 * @default 1000
 	 */
