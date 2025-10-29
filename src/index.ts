@@ -774,6 +774,16 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Reconnect all nodes by disconnecting and connecting them again.
+	 * @returns {Promise<void>}
+	 */
+	public async reconnect(): Promise<void> {
+		await Promise.all(
+			Array.from(this._nodes.values()).map((node) => node.reconnect()),
+		);
+	}
+
+	/**
 	 * Check if any node is connected to a Memcache server.
 	 * @returns {boolean}
 	 */
