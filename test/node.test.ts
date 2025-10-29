@@ -56,6 +56,56 @@ describe("MemcacheNode", () => {
 			testNode.weight = 10;
 			expect(testNode.weight).toBe(10);
 		});
+
+		it("should have default keepAlive of true", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.keepAlive).toBe(true);
+		});
+
+		it("should accept keepAlive in options", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAlive: false,
+			});
+			expect(testNode.keepAlive).toBe(false);
+		});
+
+		it("should allow getting and setting keepAlive", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAlive: true,
+			});
+			expect(testNode.keepAlive).toBe(true);
+
+			testNode.keepAlive = false;
+			expect(testNode.keepAlive).toBe(false);
+
+			testNode.keepAlive = true;
+			expect(testNode.keepAlive).toBe(true);
+		});
+
+		it("should have default keepAliveDelay of 1000", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.keepAliveDelay).toBe(1000);
+		});
+
+		it("should accept keepAliveDelay in options", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAliveDelay: 5000,
+			});
+			expect(testNode.keepAliveDelay).toBe(5000);
+		});
+
+		it("should allow getting and setting keepAliveDelay", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAliveDelay: 2000,
+			});
+			expect(testNode.keepAliveDelay).toBe(2000);
+
+			testNode.keepAliveDelay = 3000;
+			expect(testNode.keepAliveDelay).toBe(3000);
+
+			testNode.keepAliveDelay = 500;
+			expect(testNode.keepAliveDelay).toBe(500);
+		});
 	});
 
 	describe("Connection Lifecycle", () => {
