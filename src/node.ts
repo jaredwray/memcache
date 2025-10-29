@@ -47,6 +47,7 @@ export class MemcacheNode extends EventEmitter {
 	private _buffer: string = "";
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
+	private _pendingValueBytes: number = 0;
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
 		super();
@@ -98,6 +99,34 @@ export class MemcacheNode extends EventEmitter {
 	 */
 	public set weight(value: number) {
 		this._weight = value;
+	}
+
+	/**
+	 * Get the keepAlive setting for this node
+	 */
+	public get keepAlive(): boolean {
+		return this._keepAlive;
+	}
+
+	/**
+	 * Set the keepAlive setting for this node
+	 */
+	public set keepAlive(value: boolean) {
+		this._keepAlive = value;
+	}
+
+	/**
+	 * Get the keepAliveDelay setting for this node
+	 */
+	public get keepAliveDelay(): number {
+		return this._keepAliveDelay;
+	}
+
+	/**
+	 * Set the keepAliveDelay setting for this node
+	 */
+	public set keepAliveDelay(value: number) {
+		this._keepAliveDelay = value;
 	}
 
 	/**
@@ -172,6 +201,28 @@ export class MemcacheNode extends EventEmitter {
 	}
 
 	/**
+	 * Reconnect to the memcache server by disconnecting and connecting again
+	 */
+	public async reconnect(): Promise<void> {
+		// First disconnect if currently connected
+		if (this._connected || this._socket) {
+			await this.disconnect();
+			// Clear any pending commands with a reconnection error
+			this.rejectPendingCommands(
+				new Error("Connection reset for reconnection"),
+			);
+			// Clear the buffer and current command state
+			this._buffer = "";
+			this._currentCommand = undefined;
+			this._multilineData = [];
+			this._pendingValueBytes = 0;
+		}
+
+		// Now establish a fresh connection
+		await this.connect();
+	}
+
+	/**
 	 * Gracefully quit the connection (send quit command then disconnect)
 	 */
 	public async quit(): Promise<void> {
@@ -226,6 +277,19 @@ export class MemcacheNode extends EventEmitter {
 		this._buffer += data;
 
 		while (true) {
+			// If we're waiting for value data, try to read it first
+			if (this._pendingValueBytes > 0) {
+				if (this._buffer.length >= this._pendingValueBytes + 2) {
+					const value = this._buffer.substring(0, this._pendingValueBytes);
+					this._buffer = this._buffer.substring(this._pendingValueBytes + 2);
+					this._multilineData.push(value);
+					this._pendingValueBytes = 0;
+				} else {
+					// Not enough data yet, wait for more
+					break;
+				}
+			}
+
 			const lineEnd = this._buffer.indexOf("\r\n");
 			if (lineEnd === -1) break;
 
@@ -292,7 +356,8 @@ export class MemcacheNode extends EventEmitter {
 				if (this._currentCommand.requestedKeys) {
 					this._currentCommand.foundKeys?.push(key);
 				}
-				this.readValue(bytes);
+				// Set pending bytes so handleData will read the value
+				this._pendingValueBytes = bytes;
 			} else if (line === "END") {
 				let result:
 					| string[]
@@ -370,16 +435,6 @@ export class MemcacheNode extends EventEmitter {
 				this._currentCommand.resolve(line);
 			}
 			this._currentCommand = undefined;
-		}
-	}
-
-	private readValue(bytes: number): void {
-		const valueEnd = this._buffer.indexOf("\r\n");
-		/* v8 ignore next -- @preserve */
-		if (valueEnd >= bytes) {
-			const value = this._buffer.substring(0, bytes);
-			this._buffer = this._buffer.substring(bytes + 2);
-			this._multilineData.push(value);
 		}
 	}
 

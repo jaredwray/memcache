@@ -364,6 +364,116 @@ describe("Memcache", () => {
 		// Error events are now tested at the MemcacheNode level
 	});
 
+	describe("Reconnect", () => {
+		it("should reconnect all nodes successfully", async () => {
+			const testClient = new Memcache();
+
+			// First connection
+			await testClient.connect();
+			expect(testClient.isConnected()).toBe(true);
+
+			// Set a value to ensure connection is working
+			await testClient.set("reconnect-test", "initial-value");
+			const value1 = await testClient.get("reconnect-test");
+			expect(value1).toBe("initial-value");
+
+			// Reconnect
+			await testClient.reconnect();
+			expect(testClient.isConnected()).toBe(true);
+
+			// Verify we can still execute commands after reconnect
+			await testClient.set("reconnect-test", "new-value");
+			const value2 = await testClient.get("reconnect-test");
+			expect(value2).toBe("new-value");
+
+			await testClient.disconnect();
+		});
+
+		it("should reconnect multiple nodes in parallel", async () => {
+			const testClient = new Memcache({
+				nodes: ["localhost:11211"],
+			});
+
+			// Connect all nodes
+			await testClient.connect();
+			expect(testClient.isConnected()).toBe(true);
+
+			// Set values on different nodes
+			await testClient.set("key1", "value1");
+			await testClient.set("key2", "value2");
+
+			// Reconnect all nodes
+			await testClient.reconnect();
+			expect(testClient.isConnected()).toBe(true);
+
+			// Verify all nodes work after reconnect
+			const value1 = await testClient.get("key1");
+			const value2 = await testClient.get("key2");
+			expect(value1).toBe("value1");
+			expect(value2).toBe("value2");
+
+			await testClient.disconnect();
+		});
+
+		it("should handle reconnect when not initially connected", async () => {
+			const testClient = new Memcache();
+
+			// Don't connect first
+			expect(testClient.isConnected()).toBe(false);
+
+			// Reconnect should establish connections
+			await testClient.reconnect();
+			expect(testClient.isConnected()).toBe(true);
+
+			// Verify connections work
+			await testClient.set("reconnect-initial", "test-value");
+			const value = await testClient.get("reconnect-initial");
+			expect(value).toBe("test-value");
+
+			await testClient.disconnect();
+		});
+
+		it("should emit connect events for all nodes on reconnect", async () => {
+			const testClient = new Memcache();
+			await testClient.connect();
+
+			let connectCount = 0;
+			testClient.on(MemcacheEvents.CONNECT, () => {
+				connectCount++;
+			});
+
+			// Reconnect
+			await testClient.reconnect();
+
+			// Should emit connect event for each node
+			expect(connectCount).toBeGreaterThan(0);
+			expect(testClient.isConnected()).toBe(true);
+
+			await testClient.disconnect();
+		});
+
+		it("should clear state on reconnect", async () => {
+			const testClient = new Memcache();
+			await testClient.connect();
+
+			// Set some data
+			await testClient.set("clear-test", "value");
+
+			// Get the nodes to check internal state
+			const nodes = testClient.getNodes();
+			const firstNode = Array.from(nodes.values())[0];
+
+			// Reconnect
+			await testClient.reconnect();
+
+			// Command queue should be empty after reconnect
+			expect(firstNode.commandQueue.length).toBe(0);
+			expect(testClient.isConnected()).toBe(true);
+
+			await testClient.disconnect();
+		});
+	});
+
 	describe("Command Queue", () => {
 		it("should handle multiple commands with lazy connection", async () => {
 			const testClient = new Memcache();

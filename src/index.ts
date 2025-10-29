@@ -123,11 +123,15 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Set the keepAlive setting for the Memcache connection.
+	 * Updates all existing nodes with the new value.
+	 * Note: To apply the new value, you need to call reconnect() on the nodes.
 	 * @param {boolean} value
 	 * @default true
 	 */
 	public set keepAlive(value: boolean) {
 		this._keepAlive = value;
+		// Update all existing nodes
+		this._updateNodes();
 	}
 
 	/**
@@ -141,11 +145,15 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Set the delay before the connection is kept alive.
+	 * Updates all existing nodes with the new value.
+	 * Note: To apply the new value, you need to call reconnect() on the nodes.
 	 * @param {number} value
 	 * @default 1000
 	 */
 	public set keepAliveDelay(value: number) {
 		this._keepAliveDelay = value;
+		// Update all existing nodes
+		this._updateNodes();
 	}
 
 	/**
@@ -774,6 +782,16 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Reconnect all nodes by disconnecting and connecting them again.
+	 * @returns {Promise<void>}
+	 */
+	public async reconnect(): Promise<void> {
+		await Promise.all(
+			Array.from(this._nodes.values()).map((node) => node.reconnect()),
+		);
+	}
+
+	/**
 	 * Check if any node is connected to a Memcache server.
 	 * @returns {boolean}
 	 */
@@ -782,6 +800,17 @@ export class Memcache extends Hookified {
 	}
 
 	// Private methods
+
+	/**
+	 * Update all nodes with current keepAlive settings
+	 */
+	private _updateNodes(): void {
+		// Update all nodes with the current keepAlive settings
+		for (const node of this._nodes.values()) {
+			node.keepAlive = this._keepAlive;
+			node.keepAliveDelay = this._keepAliveDelay;
+		}
+	}
 
 	/**
 	 * Get the node for a given key, with lazy connection

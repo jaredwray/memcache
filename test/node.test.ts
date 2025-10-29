@@ -56,6 +56,56 @@ describe("MemcacheNode", () => {
 			testNode.weight = 10;
 			expect(testNode.weight).toBe(10);
 		});
+
+		it("should have default keepAlive of true", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.keepAlive).toBe(true);
+		});
+
+		it("should accept keepAlive in options", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAlive: false,
+			});
+			expect(testNode.keepAlive).toBe(false);
+		});
+
+		it("should allow getting and setting keepAlive", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAlive: true,
+			});
+			expect(testNode.keepAlive).toBe(true);
+
+			testNode.keepAlive = false;
+			expect(testNode.keepAlive).toBe(false);
+
+			testNode.keepAlive = true;
+			expect(testNode.keepAlive).toBe(true);
+		});
+
+		it("should have default keepAliveDelay of 1000", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.keepAliveDelay).toBe(1000);
+		});
+
+		it("should accept keepAliveDelay in options", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAliveDelay: 5000,
+			});
+			expect(testNode.keepAliveDelay).toBe(5000);
+		});
+
+		it("should allow getting and setting keepAliveDelay", () => {
+			const testNode = new MemcacheNode("localhost", 11211, {
+				keepAliveDelay: 2000,
+			});
+			expect(testNode.keepAliveDelay).toBe(2000);
+
+			testNode.keepAliveDelay = 3000;
+			expect(testNode.keepAliveDelay).toBe(3000);
+
+			testNode.keepAliveDelay = 500;
+			expect(testNode.keepAliveDelay).toBe(500);
+		});
 	});
 
 	describe("Connection Lifecycle", () => {
@@ -115,6 +165,74 @@ describe("MemcacheNode", () => {
 			await node.connect();
 			await node.quit();
 			expect(node.isConnected()).toBe(false);
+		});
+
+		it("should reconnect successfully", async () => {
+			// First connection
+			await node.connect();
+			expect(node.isConnected()).toBe(true);
+
+			// Set a value to ensure connection is working
+			const key = "node-test-reconnect";
+			const value = "initial-value";
+			const bytes = Buffer.byteLength(value);
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			// Reconnect
+			await node.reconnect();
+			expect(node.isConnected()).toBe(true);
+
+			// Verify we can still execute commands after reconnect
+			const result = await node.command("version");
+			expect(result).toBeDefined();
+			expect(typeof result).toBe("string");
+			expect(result).toContain("VERSION");
+		});
+
+		it("should clear pending commands on reconnect", async () => {
+			await node.connect();
+
+			// Queue a command that won't complete
+			const promise = node.command("get slow-key", { isMultiline: true });
+
+			// Reconnect immediately (this will disconnect and clear pending commands)
+			setImmediate(async () => {
+				await node.reconnect();
+			});
+
+			// The pending command should be rejected
+			await expect(promise).rejects.toThrow(
+				"Connection reset for reconnection",
+			);
+		});
+
+		it("should reconnect when not initially connected", async () => {
+			// Don't connect first
+			expect(node.isConnected()).toBe(false);
+
+			// Reconnect should establish a connection
+			await node.reconnect();
+			expect(node.isConnected()).toBe(true);
+
+			// Verify connection works
+			const result = await node.command("version");
+			expect(result).toContain("VERSION");
+		});
+
+		it("should emit connect event on reconnect", async () => {
+			await node.connect();
+
+			let connectCount = 0;
+			node.on("connect", () => {
+				connectCount++;
+			});
+
+			// Reconnect
+			await node.reconnect();
+
+			// Should emit connect event for the new connection
+			expect(connectCount).toBe(1);
+			expect(node.isConnected()).toBe(true);
 		});
 
 		it("should reject connection to invalid host", async () => {
@@ -467,6 +585,22 @@ describe("MemcacheNode", () => {
 			await expect(commandPromise).rejects.toThrow(
 				"SERVER_ERROR out of memory",
 			);
+		});
+
+		it("should handle unexpected line in stats command response", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("stats", { isStats: true });
+
+			// Simulate unexpected response line (not STAT, not END, not ERROR)
+			mockSocket.emit("data", "UNEXPECTED_LINE\r\n");
+			// Then send END to complete the command
+			mockSocket.emit("data", "END\r\n");
+
+			// Should still resolve successfully, ignoring the unexpected line
+			const result = await commandPromise;
+			expect(result).toBeDefined();
 		});
 
 		it("should handle ERROR response for multiline get command", async () => {
