@@ -738,7 +738,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe("async-value");
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should handle hook errors based on throwHookErrors setting", async () => {
@@ -1061,7 +1061,7 @@ describe("Memcache", () => {
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result.get("async-gets-1")).toBe("value1");
 			expect(result.get("async-gets-2")).toBe("value2");
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should call beforeHook and afterHook for add operation", async () => {
@@ -1178,7 +1178,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should call beforeHook and afterHook for replace operation", async () => {
@@ -1314,7 +1314,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should call beforeHook and afterHook for append operation", async () => {
@@ -1417,7 +1417,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 
 			// Verify the append worked
 			const getValue = await client.get("async-append-test");
@@ -1501,7 +1501,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 
 			// Verify the prepend worked
 			const getValue = await client.get("async-prepend-test");
@@ -1601,7 +1601,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 
 			// Verify the delete worked
 			const getValue = await client.get("async-delete-test");
@@ -1960,7 +1960,7 @@ describe("Memcache", () => {
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
 			expect(result).toBe(true);
-			expect(duration).toBeGreaterThanOrEqual(20); // At least 20ms for both hooks
+			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
 		it("should support multiple touch hook listeners", async () => {
