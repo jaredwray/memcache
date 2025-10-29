@@ -2248,5 +2248,69 @@ describe("Memcache", () => {
 
 			expect(misses).toEqual(["nonexist1", "nonexist2", "nonexist3"]);
 		});
+
+		it("should emit error event when node emits error", async () => {
+			let errorEmitted = false;
+			let errorNodeId = "";
+			let errorInstance: Error | undefined;
+
+			client.on(MemcacheEvents.ERROR, (nodeId: string, err: Error) => {
+				errorEmitted = true;
+				errorNodeId = nodeId;
+				errorInstance = err;
+			});
+
+			await client.connect();
+
+			// Get the node and trigger an error event
+			const nodes = client.getNodes();
+			const node = Array.from(nodes.values())[0];
+			const testError = new Error("Test error");
+			node.emit("error", testError);
+
+			expect(errorEmitted).toBe(true);
+			expect(errorNodeId).toBe("localhost:11211");
+			expect(errorInstance).toBe(testError);
+		});
+
+		it("should emit timeout event when node emits timeout", async () => {
+			let timeoutEmitted = false;
+			let timeoutNodeId = "";
+
+			client.on(MemcacheEvents.TIMEOUT, (nodeId: string) => {
+				timeoutEmitted = true;
+				timeoutNodeId = nodeId;
+			});
+
+			await client.connect();
+
+			// Get the node and trigger a timeout event
+			const nodes = client.getNodes();
+			const node = Array.from(nodes.values())[0];
+			node.emit("timeout");
+
+			expect(timeoutEmitted).toBe(true);
+			expect(timeoutNodeId).toBe("localhost:11211");
+		});
+
+		it("should emit close event when node emits close", async () => {
+			let closeEmitted = false;
+			let closeNodeId = "";
+
+			client.on(MemcacheEvents.CLOSE, (nodeId: string) => {
+				closeEmitted = true;
+				closeNodeId = nodeId;
+			});
+
+			await client.connect();
+
+			// Get the node and trigger a close event
+			const nodes = client.getNodes();
+			const node = Array.from(nodes.values())[0];
+			node.emit("close");
+
+			expect(closeEmitted).toBe(true);
+			expect(closeNodeId).toBe("localhost:11211");
+		});
 	});
 });
