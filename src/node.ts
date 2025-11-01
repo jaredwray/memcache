@@ -81,6 +81,13 @@ export class MemcacheNode extends EventEmitter {
 	}
 
 	/**
+	 * Get the full uri like memcache://localhost:11211
+	 */
+	public get uri(): string {
+		return `memcache://${this.id}`;
+	}
+
+	/**
 	 * Get the socket connection
 	 */
 	public get socket(): Socket | undefined {

@@ -405,49 +405,51 @@ describe("HashRing", () => {
 });
 
 describe("getNodeIndexForKey", () => {
-	it("should return a valid node index", () => {
+	it("should return an array with a valid node", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
-			{ node: new MemcacheNode("server4", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
+			new MemcacheNode("server4", 11211),
 		];
-		const index = getNodeIndexForKey("test-key", nodes);
-		expect(index).toBeGreaterThanOrEqual(0);
-		expect(index).toBeLessThan(nodes.length);
+		const selectedNodes = getNodeIndexForKey("test-key", nodes);
+		expect(Array.isArray(selectedNodes)).toBe(true);
+		expect(selectedNodes).toHaveLength(1);
+		expect(nodes).toContain(selectedNodes[0]);
 	});
 
-	it("should return consistent index for same key", () => {
+	it("should return consistent node for same key", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
-			{ node: new MemcacheNode("server4", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
+			new MemcacheNode("server4", 11211),
 		];
-		const index1 = getNodeIndexForKey("test-key", nodes);
-		const index2 = getNodeIndexForKey("test-key", nodes);
-		expect(index1).toBe(index2);
+		const selectedNodes1 = getNodeIndexForKey("test-key", nodes);
+		const selectedNodes2 = getNodeIndexForKey("test-key", nodes);
+		expect(selectedNodes1[0]).toBe(selectedNodes2[0]);
 	});
 
 	it("should distribute keys across all nodes", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
-			{ node: new MemcacheNode("server4", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
+			new MemcacheNode("server4", 11211),
 		];
-		const distribution = new Map<number, number>();
+		const distribution = new Map<MemcacheNode, number>();
 
 		for (let i = 0; i < 1000; i++) {
-			const index = getNodeIndexForKey(`key-${i}`, nodes);
-			distribution.set(index, (distribution.get(index) || 0) + 1);
+			const selectedNodes = getNodeIndexForKey(`key-${i}`, nodes);
+			const node = selectedNodes[0];
+			distribution.set(node, (distribution.get(node) || 0) + 1);
 		}
 
 		// Should use all nodes
 		expect(distribution.size).toBe(nodes.length);
 
 		// Each node should get roughly 250 keys (allow for some variance)
-		for (const [_index, count] of distribution) {
+		for (const [_node, count] of distribution) {
 			expect(count).toBeGreaterThan(150);
 			expect(count).toBeLessThan(350);
 		}
@@ -455,18 +457,19 @@ describe("getNodeIndexForKey", () => {
 
 	it("should respect node weights in distribution", () => {
 		const nodes = [
-			{ node: new MemcacheNode("heavy", 11211), weight: 3 },
-			{ node: new MemcacheNode("light", 11211), weight: 1 },
+			new MemcacheNode("heavy", 11211, { weight: 3 }),
+			new MemcacheNode("light", 11211, { weight: 1 }),
 		];
-		const distribution = new Map<number, number>();
+		const distribution = new Map<MemcacheNode, number>();
 
 		for (let i = 0; i < 1000; i++) {
-			const index = getNodeIndexForKey(`key-${i}`, nodes);
-			distribution.set(index, (distribution.get(index) || 0) + 1);
+			const selectedNodes = getNodeIndexForKey(`key-${i}`, nodes);
+			const node = selectedNodes[0];
+			distribution.set(node, (distribution.get(node) || 0) + 1);
 		}
 
-		const heavy = distribution.get(0) || 0;
-		const light = distribution.get(1) || 0;
+		const heavy = distribution.get(nodes[0]) || 0;
+		const light = distribution.get(nodes[1]) || 0;
 
 		// Heavy node should get roughly 3x more keys than light node
 		expect(heavy).toBeGreaterThan(light * 2);
@@ -475,128 +478,131 @@ describe("getNodeIndexForKey", () => {
 
 	it("should accept Buffer input", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
 		];
 		const buffer = Buffer.from("test-key");
-		const index = getNodeIndexForKey(buffer, nodes);
-		expect(index).toBeGreaterThanOrEqual(0);
-		expect(index).toBeLessThan(nodes.length);
+		const selectedNodes = getNodeIndexForKey(buffer, nodes);
+		expect(Array.isArray(selectedNodes)).toBe(true);
+		expect(selectedNodes).toHaveLength(1);
+		expect(nodes).toContain(selectedNodes[0]);
 	});
 
-	it("should return same index for string and buffer with same content", () => {
+	it("should return same node for string and buffer with same content", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
 		];
-		const stringIndex = getNodeIndexForKey("test-key", nodes);
-		const bufferIndex = getNodeIndexForKey(Buffer.from("test-key"), nodes);
-		expect(stringIndex).toBe(bufferIndex);
+		const stringNodes = getNodeIndexForKey("test-key", nodes);
+		const bufferNodes = getNodeIndexForKey(Buffer.from("test-key"), nodes);
+		expect(stringNodes[0]).toBe(bufferNodes[0]);
 	});
 
 	it("should work with single node", () => {
-		const nodes = [{ node: new MemcacheNode("server1", 11211), weight: 1 }];
-		const index = getNodeIndexForKey("test-key", nodes);
-		expect(index).toBe(0);
+		const nodes = [new MemcacheNode("server1", 11211)];
+		const selectedNodes = getNodeIndexForKey("test-key", nodes);
+		expect(selectedNodes).toHaveLength(1);
+		expect(selectedNodes[0]).toBe(nodes[0]);
 	});
 
 	it("should work with many nodes", () => {
-		const nodes = Array.from({ length: 100 }, (_, i) => ({
-			node: new MemcacheNode(`server${i}`, 11211),
-			weight: 1,
-		}));
-		const index = getNodeIndexForKey("test-key", nodes);
-		expect(index).toBeGreaterThanOrEqual(0);
-		expect(index).toBeLessThan(nodes.length);
+		const nodes = Array.from(
+			{ length: 100 },
+			(_, i) => new MemcacheNode(`server${i}`, 11211),
+		);
+		const selectedNodes = getNodeIndexForKey("test-key", nodes);
+		expect(selectedNodes).toHaveLength(1);
+		expect(nodes).toContain(selectedNodes[0]);
 	});
 
-	it("should throw error for empty nodes array", () => {
-		expect(() => getNodeIndexForKey("test-key", [])).toThrow(
-			"nodes array must not be empty",
-		);
+	it("should return first node for empty nodes array", () => {
+		const selectedNodes = getNodeIndexForKey("test-key", []);
+		expect(Array.isArray(selectedNodes)).toBe(true);
+		expect(selectedNodes).toHaveLength(1);
 	});
 
 	it("should use consistent hashing (same as HashRing)", () => {
 		// Verify that getNodeIndexForKey uses the same consistent hashing
 		// algorithm as HashRing by comparing results
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
-			{ node: new MemcacheNode("server4", 11211), weight: 1 },
-			{ node: new MemcacheNode("server5", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
+			new MemcacheNode("server4", 11211),
+			new MemcacheNode("server5", 11211),
 		];
 
 		// Create a HashRing with the same node ids
-		const nodeIds = nodes.map((n) => n.node.id);
+		const nodeIds = nodes.map((n) => n.id);
 		const ring = new HashRing(nodeIds);
 
 		for (let i = 0; i < 100; i++) {
 			const key = `key-${i}`;
-			const index = getNodeIndexForKey(key, nodes);
+			const selectedNodes = getNodeIndexForKey(key, nodes);
 			const nodeId = ring.getNode(key);
 
-			// The node id from HashRing should match the node at the returned index
-			expect(nodes[index].node.id).toBe(nodeId);
+			// The node id from HashRing should match the selected node
+			expect(selectedNodes[0].id).toBe(nodeId);
 		}
 	});
 
 	it("should distribute different keys differently", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 1 },
-			{ node: new MemcacheNode("server3", 11211), weight: 1 },
-			{ node: new MemcacheNode("server4", 11211), weight: 1 },
+			new MemcacheNode("server1", 11211),
+			new MemcacheNode("server2", 11211),
+			new MemcacheNode("server3", 11211),
+			new MemcacheNode("server4", 11211),
 		];
-		const indices = new Set<number>();
+		const selectedNodeSet = new Set<MemcacheNode>();
 
-		// Generate 20 different keys and collect their indices
+		// Generate 20 different keys and collect their selected nodes
 		for (let i = 0; i < 20; i++) {
-			const index = getNodeIndexForKey(`key-${i}`, nodes);
-			indices.add(index);
+			const selectedNodes = getNodeIndexForKey(`key-${i}`, nodes);
+			selectedNodeSet.add(selectedNodes[0]);
 		}
 
-		// Should have multiple different indices (not all keys going to same node)
-		expect(indices.size).toBeGreaterThan(1);
+		// Should have multiple different nodes (not all keys going to same node)
+		expect(selectedNodeSet.size).toBeGreaterThan(1);
 	});
 
 	it("should work with nodes on different ports", () => {
 		const nodes = [
-			{ node: new MemcacheNode("localhost", 11211), weight: 1 },
-			{ node: new MemcacheNode("localhost", 11212), weight: 1 },
-			{ node: new MemcacheNode("localhost", 11213), weight: 1 },
+			new MemcacheNode("localhost", 11211),
+			new MemcacheNode("localhost", 11212),
+			new MemcacheNode("localhost", 11213),
 		];
 
-		const index = getNodeIndexForKey("test-key", nodes);
-		expect(index).toBeGreaterThanOrEqual(0);
-		expect(index).toBeLessThan(nodes.length);
+		const selectedNodes = getNodeIndexForKey("test-key", nodes);
+		expect(selectedNodes).toHaveLength(1);
+		expect(nodes).toContain(selectedNodes[0]);
 
 		// Should be consistent
-		const index2 = getNodeIndexForKey("test-key", nodes);
-		expect(index).toBe(index2);
+		const selectedNodes2 = getNodeIndexForKey("test-key", nodes);
+		expect(selectedNodes[0]).toBe(selectedNodes2[0]);
 	});
 
 	it("should handle mixed weights", () => {
 		const nodes = [
-			{ node: new MemcacheNode("server1", 11211), weight: 1 },
-			{ node: new MemcacheNode("server2", 11211), weight: 2 },
-			{ node: new MemcacheNode("server3", 11211), weight: 3 },
+			new MemcacheNode("server1", 11211, { weight: 1 }),
+			new MemcacheNode("server2", 11211, { weight: 2 }),
+			new MemcacheNode("server3", 11211, { weight: 3 }),
 		];
-		const distribution = new Map<number, number>();
+		const distribution = new Map<MemcacheNode, number>();
 
 		for (let i = 0; i < 1000; i++) {
-			const index = getNodeIndexForKey(`key-${i}`, nodes);
-			distribution.set(index, (distribution.get(index) || 0) + 1);
+			const selectedNodes = getNodeIndexForKey(`key-${i}`, nodes);
+			const node = selectedNodes[0];
+			distribution.set(node, (distribution.get(node) || 0) + 1);
 		}
 
 		// All nodes should be used
 		expect(distribution.size).toBe(3);
 
 		// Higher weight nodes should get more keys
-		const node1 = distribution.get(0) || 0;
-		const node2 = distribution.get(1) || 0;
-		const node3 = distribution.get(2) || 0;
+		const node1 = distribution.get(nodes[0]) || 0;
+		const node2 = distribution.get(nodes[1]) || 0;
+		const node3 = distribution.get(nodes[2]) || 0;
 
 		// Node 3 (weight 3) should get more than node 1 (weight 1)
 		expect(node3).toBeGreaterThan(node1);

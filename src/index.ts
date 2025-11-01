@@ -1,6 +1,5 @@
 import { Hookified } from "hookified";
-import { getNodeIndexForKey } from "./ketama";
-import { MemcacheNode } from "./node";
+import { MemcacheNode } from "./node.js";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
@@ -12,6 +11,26 @@ export enum MemcacheEvents {
 	INFO = "info",
 	TIMEOUT = "timeout",
 	CLOSE = "close",
+}
+
+export interface DistributionHash {
+	name: string;
+	nodes: Array<MemcacheNode>;
+	addNode: (node: MemcacheNode) => void;
+	removeNode: (id: string) => void;
+	getNode: (id: string) => MemcacheNode;
+	getNodesByKey: (key:string) => Array<MemcacheNode>;
+}
+
+export type DistributionCachingOptions = {
+	ttl?: number;
+	lruSize?: number;
+}
+
+export type DistributionOptions = {
+	hash?: DistributionHash;
+	caching?: boolean | DistributionCachingOptions;
+	nonBlocking?: boolean;
 }
 
 export interface MemcacheOptions {
@@ -35,6 +54,16 @@ export interface MemcacheOptions {
 	 * @default 1000
 	 */
 	keepAliveDelay?: number;
+
+	/**
+	 * Distribution options such as the hash algorythm engine, caching, and nonBlocking settings.
+	 * By default the settings are:
+	 * @param hash: default is `KetamaDistributionHash` using md5 by default
+	 * @param caching: default is `true` with lruSize = 10_000 and no ttl
+	 * @param nonBlocking: default is `true` which will wait for only the first node to return which works for `ketama`
+	 * as by default ketama only returns a single node to distribute too.
+	 */
+	distribution?: DistributionOptions;
 }
 
 export interface MemcacheStats {
@@ -160,15 +189,9 @@ export class Memcache extends Hookified {
 		const nodesArray = Array.from(this._nodes.values());
 		if (nodesArray.length === 0) return undefined;
 
-		const nodeIndex = getNodeIndexForKey(
-			key,
-			nodesArray.map((n) => ({
-				node: n,
-				weight: n.weight,
-			})),
-		);
+		const selectedNodes = getNodeIndexForKey(key, nodesArray);
 
-		return nodesArray[nodeIndex];
+		return selectedNodes[0];
 	}
 
 	/**

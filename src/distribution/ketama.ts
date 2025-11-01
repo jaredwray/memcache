@@ -4,7 +4,7 @@
  * Thanks connor4312!
  */
 import { createHash } from "node:crypto";
-import type { MemcacheNode } from "./node";
+import type { MemcacheNode } from "../node.js";
 
 /**
  * Function that returns an int32 hash of the input (a number between
@@ -288,75 +288,6 @@ export class HashRing<TNode extends string | { key: string } = string> {
 
 		this._clock.sort((a, b) => a[0] - b[0]);
 	}
-}
-
-/**
- * Maps a key to a node index based on an array of MemcacheNode objects with weights using consistent hashing.
- * This function creates a temporary hash ring with the node ids and their weights, then returns which node
- * index (0 to nodes.length-1) the key should be assigned to.
- *
- * This uses the same Ketama consistent hashing algorithm with SHA-1 to ensure consistent
- * distribution and minimal redistribution when nodes are added or removed. Nodes with higher
- * weights will receive proportionally more keys.
- *
- * @param key - The key to map to a node index (string or Buffer)
- * @param nodes - Array of objects containing MemcacheNode instances and their weights
- * @returns The node index (0 to nodes.length-1) that should handle this key
- * @throws {Error} If nodes array is empty or if no node is found
- *
- * @example
- * ```typescript
- * // Create nodes with different weights
- * const nodes = [
- *   { node: new MemcacheNode('server1', 11211), weight: 1 },
- *   { node: new MemcacheNode('server2', 11211), weight: 2 },
- *   { node: new MemcacheNode('server3', 11211), weight: 1 }
- * ];
- *
- * // Map a key to one of the nodes
- * const index = getNodeIndexForKey('user:123', nodes); // Returns 0-2
- * const selectedNode = nodes[index].node; // Gets the MemcacheNode
- * ```
- */
-export function getNodeIndexForKey(
-	key: string | Buffer,
-	nodes: ReadonlyArray<{ node: MemcacheNode; weight: number }>,
-): number {
-	if (nodes.length === 0) {
-		throw new Error("nodes array must not be empty");
-	}
-
-	if (nodes.length === 1) {
-		return 0;
-	}
-
-	// Create a mapping of node id to array index
-	const nodeIdToIndex = new Map<string, number>();
-	const weightedNodes: Array<{ node: string; weight: number }> = [];
-
-	for (let i = 0; i < nodes.length; i++) {
-		const nodeId = nodes[i].node.id;
-		nodeIdToIndex.set(nodeId, i);
-		weightedNodes.push({ node: nodeId, weight: nodes[i].weight });
-	}
-
-	// Create hash ring with weighted node ids
-	const ring = new HashRing(weightedNodes);
-
-	// Get the node id responsible for this key
-	const nodeId = ring.getNode(key);
-
-	if (!nodeId) {
-		return 0;
-	}
-
-	// Return the index in the original array
-	const index = nodeIdToIndex.get(nodeId);
-	if (index === undefined) {
-		return 0;
-	}
-
-	return index;
 }
 
 /**
