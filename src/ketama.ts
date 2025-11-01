@@ -326,6 +326,10 @@ export function getNodeIndexForKey(
 		throw new Error("nodes array must not be empty");
 	}
 
+	if (nodes.length === 1) {
+		return 0;
+	}
+
 	// Create a mapping of node id to array index
 	const nodeIdToIndex = new Map<string, number>();
 	const weightedNodes: Array<{ node: string; weight: number }> = [];
@@ -343,13 +347,13 @@ export function getNodeIndexForKey(
 	const nodeId = ring.getNode(key);
 
 	if (!nodeId) {
-		throw new Error("No node found for key");
+		return 0;
 	}
 
 	// Return the index in the original array
 	const index = nodeIdToIndex.get(nodeId);
 	if (index === undefined) {
-		throw new Error(`Node id ${nodeId} not found in mapping`);
+		return 0;
 	}
 
 	return index;

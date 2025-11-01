@@ -1,5 +1,5 @@
 import { Hookified } from "hookified";
-import { HashRing } from "./ketama";
+import { getNodeIndexForKey } from "./ketama";
 import { MemcacheNode } from "./node";
 
 export enum MemcacheEvents {
@@ -46,23 +46,18 @@ export class Memcache extends Hookified {
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
-	private _ring: HashRing<string>;
 
 	constructor(options?: MemcacheOptions) {
 		super();
 		this._timeout = options?.timeout || 5000;
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
-		this._ring = new HashRing<string>();
 
-		// Add nodes to the ring if provided, otherwise add default node
+		// Add nodes if provided, otherwise add default node
 		const nodeUris = options?.nodes || ["localhost:11211"];
 		for (const nodeUri of nodeUris) {
 			const { host, port } = this.parseUri(nodeUri);
 			const nodeKey = port === 0 ? host : `${host}:${port}`;
-
-			// Add to hash ring
-			this._ring.addNode(nodeKey);
 
 			// Create node instance
 			const node = new MemcacheNode(host, port, {
@@ -79,19 +74,11 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the consistent hashing ring for distributing keys across nodes.
-	 * @returns {HashRing<string>}
-	 */
-	public get ring(): HashRing<string> {
-		return this._ring;
-	}
-
-	/**
-	 * Get the list of nodes in the ring as URI strings (e.g., ["localhost:11211", "127.0.0.1:11212"]).
+	 * Get the list of nodes as URI strings (e.g., ["localhost:11211", "127.0.0.1:11212"]).
 	 * @returns {string[]} Array of node URI strings
 	 */
 	public get nodes(): string[] {
-		return Array.from(this._ring.nodes.values());
+		return Array.from(this._nodes.keys());
 	}
 
 	/**
@@ -165,14 +152,32 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Get the node responsible for a given key using consistent hashing
+	 * @param {string} key
+	 * @returns {MemcacheNode | undefined}
+	 */
+	public getNodeByKey(key: string): MemcacheNode | undefined {
+		const nodesArray = Array.from(this._nodes.values());
+		if (nodesArray.length === 0) return undefined;
+
+		const nodeIndex = getNodeIndexForKey(
+			key,
+			nodesArray.map((n) => ({
+				node: n,
+				weight: n.weight,
+			})),
+		);
+
+		return nodesArray[nodeIndex];
+	}
+
+	/**
 	 * Get the node responsible for a given key
 	 * @param {string} key
 	 * @returns {MemcacheNode | undefined}
 	 */
 	public getNode(key: string): MemcacheNode | undefined {
-		const nodeKey = this._ring.getNode(key);
-		if (!nodeKey) return undefined;
-		return this._nodes.get(nodeKey);
+		return this.getNodeByKey(key);
 	}
 
 	/**
@@ -188,14 +193,12 @@ export class Memcache extends Hookified {
 			throw new Error(`Node ${nodeKey} already exists`);
 		}
 
-		// Add to ring
-		this._ring.addNode(nodeKey, weight);
-
 		// Create and connect node
 		const node = new MemcacheNode(host, port, {
 			timeout: this._timeout,
 			keepAlive: this._keepAlive,
 			keepAliveDelay: this._keepAliveDelay,
+			weight,
 		});
 
 		this._forwardNodeEvents(node);
@@ -216,7 +219,6 @@ export class Memcache extends Hookified {
 		// Disconnect and remove
 		await node.disconnect();
 		this._nodes.delete(nodeKey);
-		this._ring.removeNode(nodeKey);
 	}
 
 	/**
@@ -369,28 +371,25 @@ export class Memcache extends Hookified {
 		}
 
 		// Group keys by node
-		const keysByNode = new Map<string, string[]>();
+		const keysByNode = new Map<MemcacheNode, string[]>();
 
 		for (const key of keys) {
-			const nodeKey = this._ring.getNode(key);
-			if (!nodeKey) {
+			const node = this.getNodeByKey(key);
+			if (!node) {
 				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
 			}
 
-			if (!keysByNode.has(nodeKey)) {
-				keysByNode.set(nodeKey, []);
+			if (!keysByNode.has(node)) {
+				keysByNode.set(node, []);
 			}
 			// biome-ignore lint/style/noNonNullAssertion: we just set it
-			keysByNode.get(nodeKey)!.push(key);
+			keysByNode.get(node)!.push(key);
 		}
 
 		// Execute commands in parallel across nodes
 		const promises = Array.from(keysByNode.entries()).map(
-			async ([nodeKey, nodeKeys]) => {
-				const node = this._nodes.get(nodeKey);
-				if (!node) throw new Error(`Node ${nodeKey} not found`);
-
+			async ([node, nodeKeys]) => {
 				if (!node.isConnected()) await node.connect();
 
 				const keysStr = nodeKeys.join(" ");
@@ -816,14 +815,11 @@ export class Memcache extends Hookified {
 	 * Get the node for a given key, with lazy connection
 	 */
 	private async _getNodeForKey(key: string): Promise<MemcacheNode> {
-		const nodeKey = this._ring.getNode(key);
+		const node = this.getNodeByKey(key);
 		/* v8 ignore next -- @preserve */
-		if (!nodeKey) {
+		if (!node) {
 			throw new Error(`No node available for key: ${key}`);
 		}
-
-		const node = this._nodes.get(nodeKey);
-		if (!node) throw new Error(`Node ${nodeKey} not found`);
 
 		// Lazy connect if not connected
 		if (!node.isConnected()) {

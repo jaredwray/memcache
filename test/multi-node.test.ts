@@ -34,8 +34,8 @@ describe("Multi-Node Memcache", () => {
 		});
 
 		it("should have consistent hash ring configured", () => {
-			expect(client.ring).toBeDefined();
-			expect(client.ring.nodes.size).toBe(3);
+			expect(client.nodes).toHaveLength(3);
+			expect(client.getNodeByKey).toBeDefined();
 		});
 	});
 
