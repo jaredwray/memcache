@@ -4,7 +4,8 @@
  * Thanks connor4312!
  */
 import { createHash } from "node:crypto";
-import type { MemcacheNode } from "../node.js";
+import type { DistributionHash } from "./index.js";
+import type { MemcacheNode } from "./node.js";
 
 /**
  * Function that returns an int32 hash of the input (a number between
@@ -287,6 +288,136 @@ export class HashRing<TNode extends string | { key: string } = string> {
 		}
 
 		this._clock.sort((a, b) => a[0] - b[0]);
+	}
+}
+
+/**
+ * A distribution hash implementation using the Ketama consistent hashing algorithm.
+ * This class wraps the HashRing to implement the DistributionHash interface for use with Memcache.
+ *
+ * @example
+ * ```typescript
+ * const distribution = new KetamaDistributionHash();
+ * distribution.addNode(node1);
+ * distribution.addNode(node2);
+ * const targetNode = distribution.getNodesByKey('my-key')[0];
+ * ```
+ */
+export class KetamaDistributionHash implements DistributionHash {
+	/** The name of this distribution strategy */
+	public readonly name = "ketama";
+
+	/** Internal hash ring for consistent hashing */
+	private hashRing: HashRing<string>;
+
+	/** Map of node IDs to MemcacheNode instances */
+	private nodeMap: Map<string, MemcacheNode>;
+
+	/**
+	 * Creates a new KetamaDistributionHash instance.
+	 *
+	 * @param hashFn - Hash function to use (string algorithm name or custom function, defaults to "sha1")
+	 *
+	 * @example
+	 * ```typescript
+	 * // Use default SHA-1 hashing
+	 * const distribution = new KetamaDistributionHash();
+	 *
+	 * // Use MD5 hashing
+	 * const distribution = new KetamaDistributionHash('md5');
+	 * ```
+	 */
+	constructor(hashFn?: string | HashFunction) {
+		this.hashRing = new HashRing<string>([], hashFn);
+		this.nodeMap = new Map();
+	}
+
+	/**
+	 * Gets all nodes in the distribution.
+	 * @returns Array of all MemcacheNode instances
+	 */
+	public get nodes(): Array<MemcacheNode> {
+		return Array.from(this.nodeMap.values());
+	}
+
+	/**
+	 * Adds a node to the distribution with its weight for consistent hashing.
+	 *
+	 * @param node - The MemcacheNode to add
+	 *
+	 * @example
+	 * ```typescript
+	 * const node = new MemcacheNode('localhost', 11211, { weight: 2 });
+	 * distribution.addNode(node);
+	 * ```
+	 */
+	public addNode(node: MemcacheNode): void {
+		// Add to internal map for lookups
+		this.nodeMap.set(node.id, node);
+		// Add to hash ring with weight
+		this.hashRing.addNode(node.id, node.weight);
+	}
+
+	/**
+	 * Removes a node from the distribution by its ID.
+	 *
+	 * @param id - The node ID (e.g., "localhost:11211")
+	 *
+	 * @example
+	 * ```typescript
+	 * distribution.removeNode('localhost:11211');
+	 * ```
+	 */
+	public removeNode(id: string): void {
+		// Remove from internal map
+		this.nodeMap.delete(id);
+		// Remove from hash ring
+		this.hashRing.removeNode(id);
+	}
+
+	/**
+	 * Gets a specific node by its ID.
+	 *
+	 * @param id - The node ID (e.g., "localhost:11211")
+	 * @returns The MemcacheNode if found, undefined otherwise
+	 *
+	 * @example
+	 * ```typescript
+	 * const node = distribution.getNode('localhost:11211');
+	 * if (node) {
+	 *   console.log(`Found node: ${node.uri}`);
+	 * }
+	 * ```
+	 */
+	public getNode(id: string): MemcacheNode | undefined {
+		return this.nodeMap.get(id);
+	}
+
+	/**
+	 * Gets the nodes responsible for a given key using consistent hashing.
+	 * Currently returns a single node (the primary node for the key).
+	 *
+	 * @param key - The cache key to find the responsible node for
+	 * @returns Array containing the responsible node(s), empty if no nodes available
+	 *
+	 * @example
+	 * ```typescript
+	 * const nodes = distribution.getNodesByKey('user:123');
+	 * if (nodes.length > 0) {
+	 *   console.log(`Key will be stored on: ${nodes[0].id}`);
+	 * }
+	 * ```
+	 */
+	public getNodesByKey(key: string): Array<MemcacheNode> {
+		// Get the node from hash ring
+		const nodeId = this.hashRing.getNode(key);
+		if (!nodeId) {
+			return [];
+		}
+
+		// Map back to MemcacheNode
+		const node = this.nodeMap.get(nodeId);
+		return node ? [node] : [];
 	}
 }
 

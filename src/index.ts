@@ -1,4 +1,5 @@
 import { Hookified } from "hookified";
+import { KetamaDistributionHash } from "./ketama.js";
 import { MemcacheNode } from "./node.js";
 
 export enum MemcacheEvents {
@@ -18,20 +19,28 @@ export interface DistributionHash {
 	nodes: Array<MemcacheNode>;
 	addNode: (node: MemcacheNode) => void;
 	removeNode: (id: string) => void;
-	getNode: (id: string) => MemcacheNode;
-	getNodesByKey: (key:string) => Array<MemcacheNode>;
+	getNode: (id: string) => MemcacheNode | undefined;
+	getNodesByKey: (key: string) => Array<MemcacheNode>;
 }
 
 export type DistributionCachingOptions = {
 	ttl?: number;
 	lruSize?: number;
-}
+};
 
 export type DistributionOptions = {
 	hash?: DistributionHash;
 	caching?: boolean | DistributionCachingOptions;
 	nonBlocking?: boolean;
-}
+};
+
+export type Distribution = {
+	hash: DistributionHash;
+	cache?: Map<string, Array<MemcacheNode>>;
+	lruSize: number;
+	ttl?: undefined;
+	nonBlocking: boolean;
+};
 
 export interface MemcacheOptions {
 	/**
@@ -71,13 +80,22 @@ export interface MemcacheStats {
 }
 
 export class Memcache extends Hookified {
-	private _nodes: Map<string, MemcacheNode> = new Map();
+	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
+	private _distribution: Distribution;
 
 	constructor(options?: MemcacheOptions) {
 		super();
+
+		this._distribution = {
+			hash: new KetamaDistributionHash(),
+			cache: new Map(),
+			lruSize: 10_000,
+			nonBlocking: true,
+		};
+
 		this._timeout = options?.timeout || 5000;
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
@@ -86,7 +104,6 @@ export class Memcache extends Hookified {
 		const nodeUris = options?.nodes || ["localhost:11211"];
 		for (const nodeUri of nodeUris) {
 			const { host, port } = this.parseUri(nodeUri);
-			const nodeKey = port === 0 ? host : `${host}:${port}`;
 
 			// Create node instance
 			const node = new MemcacheNode(host, port, {
@@ -98,16 +115,20 @@ export class Memcache extends Hookified {
 			// Forward node events to Memcache events
 			this._forwardNodeEvents(node);
 
-			this._nodes.set(nodeKey, node);
+			this._nodes.push(node);
 		}
 	}
 
 	/**
-	 * Get the list of nodes as URI strings (e.g., ["localhost:11211", "127.0.0.1:11212"]).
-	 * @returns {string[]} Array of node URI strings
+	 * Get the list of nodes
+	 * @returns {Array<MemcacheNode>} Array of MemcacheNodes
 	 */
-	public get nodes(): string[] {
-		return Array.from(this._nodes.keys());
+	public get nodes(): Array<MemcacheNode> {
+		return this._nodes;
+	}
+
+	public get distribution(): Distribution {
+		return this._distribution;
 	}
 
 	/**
@@ -173,34 +194,20 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get a map of all MemcacheNode instances
-	 * @returns {Map<string, MemcacheNode>}
+	 * Get an array of all MemcacheNode instances
+	 * @returns {MemcacheNode[]}
 	 */
-	public getNodes(): Map<string, MemcacheNode> {
-		return new Map(this._nodes);
-	}
-
-	/**
-	 * Get the node responsible for a given key using consistent hashing
-	 * @param {string} key
-	 * @returns {MemcacheNode | undefined}
-	 */
-	public getNodeByKey(key: string): MemcacheNode | undefined {
-		const nodesArray = Array.from(this._nodes.values());
-		if (nodesArray.length === 0) return undefined;
-
-		const selectedNodes = getNodeIndexForKey(key, nodesArray);
-
-		return selectedNodes[0];
+	public getNodes(): MemcacheNode[] {
+		return [...this._nodes];
 	}
 
 	/**
 	 * Get the node responsible for a given key
-	 * @param {string} key
+	 * @param {string} id
 	 * @returns {MemcacheNode | undefined}
 	 */
-	public getNode(key: string): MemcacheNode | undefined {
-		return this.getNodeByKey(key);
+	public getNode(id: string): MemcacheNode | undefined {
+		return this._nodes.find((n) => n.id === id);
 	}
 
 	/**
@@ -212,7 +219,7 @@ export class Memcache extends Hookified {
 		const { host, port } = this.parseUri(uri);
 		const nodeKey = port === 0 ? host : `${host}:${port}`;
 
-		if (this._nodes.has(nodeKey)) {
+		if (this._nodes.some((n) => n.id === nodeKey)) {
 			throw new Error(`Node ${nodeKey} already exists`);
 		}
 
@@ -225,7 +232,9 @@ export class Memcache extends Hookified {
 		});
 
 		this._forwardNodeEvents(node);
-		this._nodes.set(nodeKey, node);
+		this._nodes.push(node);
+
+		this._distribution.hash.addNode(node);
 	}
 
 	/**
@@ -236,12 +245,13 @@ export class Memcache extends Hookified {
 		const { host, port } = this.parseUri(uri);
 		const nodeKey = port === 0 ? host : `${host}:${port}`;
 
-		const node = this._nodes.get(nodeKey);
+		const node = this._nodes.find((n) => n.id === nodeKey);
 		if (!node) return;
 
 		// Disconnect and remove
 		await node.disconnect();
-		this._nodes.delete(nodeKey);
+		this._nodes = this._nodes.filter((n) => n.id !== nodeKey);
+		this._distribution.hash.removeNode(node.id);
 	}
 
 	/**
@@ -339,7 +349,7 @@ export class Memcache extends Hookified {
 	 */
 	public async connect(nodeId?: string): Promise<void> {
 		if (nodeId) {
-			const node = this._nodes.get(nodeId);
+			const node = this._nodes.find((n) => n.id === nodeId);
 			/* v8 ignore next -- @preserve */
 			if (!node) throw new Error(`Node ${nodeId} not found`);
 			/* v8 ignore next -- @preserve */
@@ -349,9 +359,7 @@ export class Memcache extends Hookified {
 		}
 
 		// Connect to all nodes
-		await Promise.all(
-			Array.from(this._nodes.values()).map((node) => node.connect()),
-		);
+		await Promise.all(this._nodes.map((node) => node.connect()));
 	}
 
 	/**
@@ -397,7 +405,7 @@ export class Memcache extends Hookified {
 		const keysByNode = new Map<MemcacheNode, string[]>();
 
 		for (const key of keys) {
-			const node = this.getNodeByKey(key);
+			const node = this._distribution.hash.getNodesByKey(key)[0];
 			if (!node) {
 				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
@@ -721,7 +729,7 @@ export class Memcache extends Hookified {
 
 		// Execute on ALL nodes
 		const results = await Promise.all(
-			Array.from(this._nodes.values()).map(async (node) => {
+			this._nodes.map(async (node) => {
 				/* v8 ignore next -- @preserve */
 				if (!node.isConnected()) {
 					await node.connect();
@@ -747,13 +755,13 @@ export class Memcache extends Hookified {
 
 		await Promise.all(
 			/* v8 ignore next -- @preserve */
-			Array.from(this._nodes.entries()).map(async ([nodeKey, node]) => {
+			this._nodes.map(async (node) => {
 				if (!node.isConnected()) {
 					await node.connect();
 				}
 
 				const stats = await node.command(command, { isStats: true });
-				results.set(nodeKey, stats as MemcacheStats);
+				results.set(node.id, stats as MemcacheStats);
 			}),
 		);
 
@@ -766,7 +774,7 @@ export class Memcache extends Hookified {
 	 */
 	public async version(): Promise<string> {
 		// Get version from first node
-		const node = Array.from(this._nodes.values())[0];
+		const node = this._nodes[0];
 		/* v8 ignore next -- @preserve */
 		if (!node) throw new Error("No nodes available");
 
@@ -785,7 +793,7 @@ export class Memcache extends Hookified {
 	 */
 	public async quit(): Promise<void> {
 		await Promise.all(
-			Array.from(this._nodes.values()).map(async (node) => {
+			this._nodes.map(async (node) => {
 				if (node.isConnected()) {
 					await node.quit();
 				}
@@ -798,9 +806,7 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<void>}
 	 */
 	public async disconnect(): Promise<void> {
-		await Promise.all(
-			Array.from(this._nodes.values()).map((node) => node.disconnect()),
-		);
+		await Promise.all(this._nodes.map((node) => node.disconnect()));
 	}
 
 	/**
@@ -808,9 +814,7 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<void>}
 	 */
 	public async reconnect(): Promise<void> {
-		await Promise.all(
-			Array.from(this._nodes.values()).map((node) => node.reconnect()),
-		);
+		await Promise.all(this._nodes.map((node) => node.reconnect()));
 	}
 
 	/**
@@ -818,7 +822,7 @@ export class Memcache extends Hookified {
 	 * @returns {boolean}
 	 */
 	public isConnected(): boolean {
-		return Array.from(this._nodes.values()).some((node) => node.isConnected());
+		return this._nodes.some((node) => node.isConnected());
 	}
 
 	// Private methods
@@ -828,7 +832,7 @@ export class Memcache extends Hookified {
 	 */
 	private _updateNodes(): void {
 		// Update all nodes with the current keepAlive settings
-		for (const node of this._nodes.values()) {
+		for (const node of this._nodes) {
 			node.keepAlive = this._keepAlive;
 			node.keepAliveDelay = this._keepAliveDelay;
 		}
@@ -838,7 +842,7 @@ export class Memcache extends Hookified {
 	 * Get the node for a given key, with lazy connection
 	 */
 	private async _getNodeForKey(key: string): Promise<MemcacheNode> {
-		const node = this.getNodeByKey(key);
+		const node = this._distribution.hash.getNodesByKey(key)[0];
 		/* v8 ignore next -- @preserve */
 		if (!node) {
 			throw new Error(`No node available for key: ${key}`);
