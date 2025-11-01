@@ -116,15 +116,16 @@ export class Memcache extends Hookified {
 			this._forwardNodeEvents(node);
 
 			this._nodes.push(node);
+			this._distribution.hash.addNode(node);
 		}
 	}
 
 	/**
-	 * Get the list of nodes
-	 * @returns {Array<MemcacheNode>} Array of MemcacheNodes
+	 * Get the list of node IDs (e.g., ["localhost:11211", "127.0.0.1:11212"])
+	 * @returns {string[]} Array of node ID strings
 	 */
-	public get nodes(): Array<MemcacheNode> {
-		return this._nodes;
+	public get nodes(): string[] {
+		return this._nodes.map((node) => node.id);
 	}
 
 	public get distribution(): Distribution {
@@ -202,12 +203,22 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the node responsible for a given key
-	 * @param {string} id
+	 * Get a specific node by its ID
+	 * @param {string} id - The node ID (e.g., "localhost:11211")
 	 * @returns {MemcacheNode | undefined}
 	 */
 	public getNode(id: string): MemcacheNode | undefined {
 		return this._nodes.find((n) => n.id === id);
+	}
+
+	/**
+	 * Get the node responsible for a given cache key using consistent hashing
+	 * @param {string} key - The cache key
+	 * @returns {MemcacheNode | undefined}
+	 */
+	public getNodeByKey(key: string): MemcacheNode | undefined {
+		const nodes = this._distribution.hash.getNodesByKey(key);
+		return nodes[0];
 	}
 
 	/**

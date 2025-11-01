@@ -337,7 +337,7 @@ describe("Memcache", () => {
 				timeout: 100,
 			});
 
-			await expect(client13.connect("0.0.0.0", 99999)).rejects.toThrow();
+			await expect(client13.connect("0.0.0.0")).rejects.toThrow();
 		});
 
 		it("should handle connection timeout", async () => {
@@ -356,7 +356,7 @@ describe("Memcache", () => {
 			});
 
 			// This should trigger an error immediately due to invalid port
-			await expect(client16.connect("localhost", 99999)).rejects.toThrow();
+			await expect(client16.connect("localhost")).rejects.toThrow();
 		});
 
 		// Removed: socket error tests - these test internal implementation
@@ -2235,13 +2235,20 @@ describe("Memcache", () => {
 			expect(node?.id).toBe("localhost:11211");
 		});
 
-		it("should use getNode as alias for getNodeByKey", async () => {
+		it("should get node by ID using getNode", async () => {
 			await client.addNode("server1");
 			await client.addNode("server2");
 
-			const nodeByKey = client.getNodeByKey("test-key");
-			const node = client.getNode("test-key");
-			expect(node).toBe(nodeByKey);
+			const node = client.getNode("server1:11211");
+			expect(node).toBeDefined();
+			expect(node?.id).toBe("server1:11211");
+
+			const node2 = client.getNode("server2:11211");
+			expect(node2).toBeDefined();
+			expect(node2?.id).toBe("server2:11211");
+
+			const nonExistent = client.getNode("nonexistent");
+			expect(nonExistent).toBeUndefined();
 		});
 	});
 
