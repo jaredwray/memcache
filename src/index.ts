@@ -75,18 +75,6 @@ export class Memcache extends Hookified {
 		// Add nodes if provided, otherwise add default node
 		const nodeUris = options?.nodes || ["localhost:11211"];
 		for (const nodeUri of nodeUris) {
-			const { host, port } = this.parseUri(nodeUri);
-
-			// Create node instance
-			const node = new MemcacheNode(host, port, {
-				timeout: this._timeout,
-				keepAlive: this._keepAlive,
-				keepAliveDelay: this._keepAliveDelay,
-			});
-
-			// Forward node events to Memcache events
-			this._forwardNodeEvents(node);
-
 			this.addNode(nodeUri);
 		}
 	}
@@ -168,7 +156,7 @@ export class Memcache extends Hookified {
 	public set keepAlive(value: boolean) {
 		this._keepAlive = value;
 		// Update all existing nodes
-		this._updateNodes();
+		this.updateNodes();
 	}
 
 	/**
@@ -190,7 +178,7 @@ export class Memcache extends Hookified {
 	public set keepAliveDelay(value: number) {
 		this._keepAliveDelay = value;
 		// Update all existing nodes
-		this._updateNodes();
+		this.updateNodes();
 	}
 
 	/**
@@ -231,7 +219,7 @@ export class Memcache extends Hookified {
 			weight,
 		});
 
-		this._forwardNodeEvents(node);
+		this.forwardNodeEvents(node);
 		this._nodes.push(node);
 
 		this._hash.addNode(node);
@@ -923,7 +911,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Update all nodes with current keepAlive settings
 	 */
-	private _updateNodes(): void {
+	private updateNodes(): void {
 		// Update all nodes with the current keepAlive settings
 		for (const node of this._nodes) {
 			node.keepAlive = this._keepAlive;
@@ -934,7 +922,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Forward events from a MemcacheNode to the Memcache instance
 	 */
-	private _forwardNodeEvents(node: MemcacheNode): void {
+	private forwardNodeEvents(node: MemcacheNode): void {
 		node.on("connect", () => this.emit(MemcacheEvents.CONNECT, node.id));
 		node.on("close", () => this.emit(MemcacheEvents.CLOSE, node.id));
 		node.on("error", (err: Error) =>
