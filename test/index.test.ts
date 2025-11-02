@@ -1,6 +1,7 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache, { MemcacheEvents } from "../src/index";
+import { KetamaHash } from "../src/ketama";
 
 describe("Memcache", () => {
 	let client: Memcache;
@@ -127,6 +128,20 @@ describe("Memcache", () => {
 
 		// Removed: socket and commandQueue are now internal to MemcacheNode
 		// These were testing implementation details, not behavior
+
+		it("should allow getting and setting hash provider", () => {
+			const testClient = new Memcache();
+
+			// Test getter - should return KetamaHash instance
+			const hashProvider = testClient.hash;
+			expect(hashProvider).toBeDefined();
+			expect(hashProvider.name).toBe("ketama");
+
+			// Test setter - set a new hash provider
+			const customHashProvider = new KetamaHash();
+			testClient.hash = customHashProvider;
+			expect(testClient.hash).toBe(customHashProvider);
+		});
 	});
 
 	describe("parseUri", () => {
@@ -2172,6 +2187,21 @@ describe("Memcache", () => {
 			expect(nodes).toContain("server1:11211");
 			expect(nodes).toContain("server2:11211");
 			expect(nodes).toContain("server3:11211");
+		});
+
+		it("should throw error when adding duplicate node", async () => {
+			// Try to add the default node again
+			await expect(client.addNode("localhost:11211")).rejects.toThrow(
+				"Node localhost:11211 already exists",
+			);
+
+			// Add a new node
+			await client.addNode("server1:11212");
+
+			// Try to add the same node again
+			await expect(client.addNode("server1:11212")).rejects.toThrow(
+				"Node server1:11212 already exists",
+			);
 		});
 
 		it("should allow getting nodes for a key", async () => {
