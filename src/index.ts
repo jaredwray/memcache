@@ -364,6 +364,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Get a value from the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * queries all nodes and returns the first successful result.
 	 * @param {string} key
 	 * @returns {Promise<string | undefined>}
 	 */
@@ -373,16 +375,30 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`get ${key}`, {
-			isMultiline: true,
-			requestedKeys: [key],
+
+		// Query all nodes (supports replication strategies)
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`get ${key}`, {
+					isMultiline: true,
+					requestedKeys: [key],
+				});
+
+				if (result?.values && result.values.length > 0) {
+					return result.values[0];
+				}
+				return undefined;
+			} catch {
+				// If one node fails, try the others
+				return undefined;
+			}
 		});
 
-		let value: string | undefined;
-		if (result?.values && result.values.length > 0) {
-			value = result.values[0];
-		}
+		// Wait for all nodes to respond
+		const results = await Promise.all(promises);
+
+		// Return the first successful result
+		const value = results.find((v) => v !== undefined);
 
 		await this.afterHook("get", { key, value });
 
