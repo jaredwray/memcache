@@ -212,16 +212,6 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the node responsible for a given cache key using consistent hashing
-	 * @param {string} key - The cache key
-	 * @returns {MemcacheNode | undefined}
-	 */
-	public getNodeByKey(key: string): MemcacheNode | undefined {
-		const nodes = this._distribution.hash.getNodesByKey(key);
-		return nodes[0];
-	}
-
-	/**
 	 * Add a new node to the cluster
 	 * @param {string} uri - Node URI (e.g., "localhost:11212")
 	 * @param {number} weight - Optional weight for consistent hashing

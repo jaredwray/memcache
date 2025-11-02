@@ -2174,24 +2174,25 @@ describe("Memcache", () => {
 			expect(nodes).toContain("server3:11211");
 		});
 
-		it("should allow getting node for a key", async () => {
-			await client.addNode("server1");
-			await client.addNode("server2");
-			await client.addNode("server3");
+		it("should allow getting nodes for a key", async () => {
+			await client.addNode("localhost:11212");
+			await client.addNode("localhost:11213");
+			await client.addNode("localhost:11214");
 
-			const node = client.getNodeByKey("test-key");
-			expect(node).toBeDefined();
-			expect(node?.id).toBeDefined();
+			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes).toBeDefined();
+			expect(nodes.length).toBeGreaterThan(0);
+			expect(nodes[0].id).toBeDefined();
 		});
 
-		it("should return consistent node for same key", async () => {
-			await client.addNode("server1");
-			await client.addNode("server2");
-			await client.addNode("server3");
+		it("should return consistent nodes for same key", async () => {
+			await client.addNode("localhost:11212");
+			await client.addNode("localhost:11213");
+			await client.addNode("localhost:11214");
 
-			const node1 = client.getNodeByKey("test-key");
-			const node2 = client.getNodeByKey("test-key");
-			expect(node1).toBe(node2);
+			const nodes1 = client.distribution.hash.getNodesByKey("test-key");
+			const nodes2 = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes1[0]).toBe(nodes2[0]);
 		});
 
 		it("should allow removing nodes", async () => {
@@ -2209,30 +2210,34 @@ describe("Memcache", () => {
 
 		it("should allow adding weighted nodes", async () => {
 			// Client starts with default localhost:11211 node
-			await client.addNode("heavy-server", 3);
-			await client.addNode("light-server", 1);
+			await client.addNode("localhost:11212", 3);
+			await client.addNode("localhost:11213", 1);
 
 			expect(client.nodes).toHaveLength(3); // 2 + default
 
 			// Heavy server should get more keys
 			const distribution = new Map<string, number>();
 			for (let i = 0; i < 100; i++) {
-				const node = client.getNodeByKey(`key-${i}`);
-				if (node) {
-					distribution.set(node.id, (distribution.get(node.id) || 0) + 1);
+				const nodes = client.distribution.hash.getNodesByKey(`key-${i}`);
+				if (nodes.length > 0) {
+					distribution.set(
+						nodes[0].id,
+						(distribution.get(nodes[0].id) || 0) + 1,
+					);
 				}
 			}
 
-			const heavy = distribution.get("heavy-server:11211") || 0;
-			const light = distribution.get("light-server:11211") || 0;
+			const heavy = distribution.get("localhost:11212") || 0;
+			const light = distribution.get("localhost:11213") || 0;
 			expect(heavy).toBeGreaterThan(light);
 		});
 
 		it("should handle single default node", () => {
 			// Client starts with default localhost:11211 node
-			const node = client.getNodeByKey("test-key");
-			expect(node).toBeDefined();
-			expect(node?.id).toBe("localhost:11211");
+			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes).toBeDefined();
+			expect(nodes.length).toBeGreaterThan(0);
+			expect(nodes[0].id).toBe("localhost:11211");
 		});
 
 		it("should get node by ID using getNode", async () => {
