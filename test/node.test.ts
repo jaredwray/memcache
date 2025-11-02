@@ -34,6 +34,16 @@ describe("MemcacheNode", () => {
 			expect(testNode.id).toBe("/var/run/memcached.sock");
 		});
 
+		it("should generate correct uri for standard port", () => {
+			const testNode = new MemcacheNode("localhost", 11211);
+			expect(testNode.uri).toBe("memcache://localhost:11211");
+		});
+
+		it("should generate correct uri for Unix socket (port 0)", () => {
+			const testNode = new MemcacheNode("/var/run/memcached.sock", 0);
+			expect(testNode.uri).toBe("memcache:///var/run/memcached.sock");
+		});
+
 		it("should use default options if not provided", () => {
 			const testNode = new MemcacheNode("localhost", 11211);
 			expect(testNode).toBeInstanceOf(MemcacheNode);
@@ -350,6 +360,63 @@ describe("MemcacheNode", () => {
 			expect(result).toBe("OK");
 		});
 
+		it("should handle NOT_STORED response for add command", async () => {
+			const key = "node-test-add-duplicate";
+			const value = "test-value";
+			const bytes = Buffer.byteLength(value);
+
+			// First set the key
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			// Try to add the same key (should fail since it exists)
+			const result = await node.command(`add ${key} 0 0 ${bytes}\r\n${value}`);
+			expect(result).toBe(false);
+		});
+
+		it("should handle EXISTS response for cas command", async () => {
+			const key = "node-test-cas-exists";
+			const value = "test-value";
+			const bytes = Buffer.byteLength(value);
+
+			// Set initial value
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			// Get with cas to get the cas token
+			const getResult = await node.command(`gets ${key}`, {
+				isMultiline: true,
+			});
+			expect(getResult).toBeDefined();
+
+			// Modify the value to change cas
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			// Try cas with old token (should get EXISTS)
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command(
+				`cas ${key} 0 0 ${bytes} 12345\r\n${value}`,
+			);
+
+			// Simulate server EXISTS response
+			mockSocket.emit("data", "EXISTS\r\n");
+
+			const result = await commandPromise;
+			expect(result).toBe("EXISTS");
+		});
+
+		it("should handle NOT_FOUND response for delete command", async () => {
+			const key = "node-test-delete-nonexistent";
+
+			// Try to delete a key that doesn't exist
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command(`delete ${key}`);
+
+			// Simulate server NOT_FOUND response
+			mockSocket.emit("data", "NOT_FOUND\r\n");
+
+			const result = await commandPromise;
+			expect(result).toBe("NOT_FOUND");
+		});
+
 		it("should handle multiple sequential commands", async () => {
 			const key1 = "node-test-seq1";
 			const key2 = "node-test-seq2";
@@ -543,6 +610,33 @@ describe("MemcacheNode", () => {
 			expect(result).toBeDefined();
 			expect(result[0]).toBe(value);
 			expect(result[0].length).toBe(10000);
+		});
+
+		it("should handle partial data delivery for value bytes", async () => {
+			const key = "node-partial";
+			const value = "test-value-12345";
+			const bytes = Buffer.byteLength(value);
+
+			// Set the value first
+			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command(`get ${key}`, {
+				isMultiline: true,
+			});
+
+			// Simulate partial data delivery - send VALUE line first
+			mockSocket.emit("data", `VALUE ${key} 0 ${bytes}\r\n`);
+
+			// Send only part of the value bytes (not enough)
+			mockSocket.emit("data", value.substring(0, 5));
+
+			// Send rest of value and END
+			mockSocket.emit("data", `${value.substring(5)}\r\nEND\r\n`);
+
+			const result = await commandPromise;
+			expect(result).toBeDefined();
+			expect(result[0]).toBe(value);
 		});
 	});
 
