@@ -383,7 +383,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(`get ${key}`, {
 			isMultiline: true,
 			requestedKeys: [key],
@@ -488,7 +488,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -525,7 +525,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -555,7 +555,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -585,7 +585,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -608,7 +608,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -631,7 +631,7 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -650,7 +650,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(`delete ${key}`);
 		const success = result === "DELETED";
 
@@ -673,7 +673,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(`incr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
@@ -696,7 +696,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(`decr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
@@ -716,7 +716,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this._getNodeForKey(key);
+		const node = await this.getNodeForKey(key);
 		const result = await node.command(`touch ${key} ${exptime}`);
 		const success = result === "TOUCHED";
 
@@ -836,23 +836,14 @@ export class Memcache extends Hookified {
 		return this._nodes.some((node) => node.isConnected());
 	}
 
-	// Private methods
-
 	/**
-	 * Update all nodes with current keepAlive settings
+	 * Get the node for a given key using consistent hashing, with lazy connection.
+	 * This method will automatically connect to the node if it's not already connected.
+	 * @param {string} key - The cache key
+	 * @returns {Promise<MemcacheNode>} The node responsible for this key
+	 * @throws {Error} If no node is available for the key
 	 */
-	private _updateNodes(): void {
-		// Update all nodes with the current keepAlive settings
-		for (const node of this._nodes) {
-			node.keepAlive = this._keepAlive;
-			node.keepAliveDelay = this._keepAliveDelay;
-		}
-	}
-
-	/**
-	 * Get the node for a given key, with lazy connection
-	 */
-	private async _getNodeForKey(key: string): Promise<MemcacheNode> {
+	public async getNodeForKey(key: string): Promise<MemcacheNode> {
 		const node = this._distribution.hash.getNodesByKey(key)[0];
 		/* v8 ignore next -- @preserve */
 		if (!node) {
@@ -865,6 +856,19 @@ export class Memcache extends Hookified {
 		}
 
 		return node;
+	}
+
+	// Private methods
+
+	/**
+	 * Update all nodes with current keepAlive settings
+	 */
+	private _updateNodes(): void {
+		// Update all nodes with the current keepAlive settings
+		for (const node of this._nodes) {
+			node.keepAlive = this._keepAlive;
+			node.keepAliveDelay = this._keepAliveDelay;
+		}
 	}
 
 	/**
