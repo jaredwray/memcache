@@ -4,7 +4,8 @@
  * Thanks connor4312!
  */
 import { createHash } from "node:crypto";
-import type { MemcacheNode } from "./node";
+import type { DistributionHash } from "./index.js";
+import type { MemcacheNode } from "./node.js";
 
 /**
  * Function that returns an int32 hash of the input (a number between
@@ -291,68 +292,133 @@ export class HashRing<TNode extends string | { key: string } = string> {
 }
 
 /**
- * Maps a key to a node index based on an array of MemcacheNode objects with weights using consistent hashing.
- * This function creates a temporary hash ring with the node ids and their weights, then returns which node
- * index (0 to nodes.length-1) the key should be assigned to.
- *
- * This uses the same Ketama consistent hashing algorithm with SHA-1 to ensure consistent
- * distribution and minimal redistribution when nodes are added or removed. Nodes with higher
- * weights will receive proportionally more keys.
- *
- * @param key - The key to map to a node index (string or Buffer)
- * @param nodes - Array of objects containing MemcacheNode instances and their weights
- * @returns The node index (0 to nodes.length-1) that should handle this key
- * @throws {Error} If nodes array is empty or if no node is found
+ * A distribution hash implementation using the Ketama consistent hashing algorithm.
+ * This class wraps the HashRing to implement the DistributionHash interface for use with Memcache.
  *
  * @example
  * ```typescript
- * // Create nodes with different weights
- * const nodes = [
- *   { node: new MemcacheNode('server1', 11211), weight: 1 },
- *   { node: new MemcacheNode('server2', 11211), weight: 2 },
- *   { node: new MemcacheNode('server3', 11211), weight: 1 }
- * ];
- *
- * // Map a key to one of the nodes
- * const index = getNodeIndexForKey('user:123', nodes); // Returns 0-2
- * const selectedNode = nodes[index].node; // Gets the MemcacheNode
+ * const distribution = new KetamaDistributionHash();
+ * distribution.addNode(node1);
+ * distribution.addNode(node2);
+ * const targetNode = distribution.getNodesByKey('my-key')[0];
  * ```
  */
-export function getNodeIndexForKey(
-	key: string | Buffer,
-	nodes: ReadonlyArray<{ node: MemcacheNode; weight: number }>,
-): number {
-	if (nodes.length === 0) {
-		throw new Error("nodes array must not be empty");
+export class KetamaDistributionHash implements DistributionHash {
+	/** The name of this distribution strategy */
+	public readonly name = "ketama";
+
+	/** Internal hash ring for consistent hashing */
+	private hashRing: HashRing<string>;
+
+	/** Map of node IDs to MemcacheNode instances */
+	private nodeMap: Map<string, MemcacheNode>;
+
+	/**
+	 * Creates a new KetamaDistributionHash instance.
+	 *
+	 * @param hashFn - Hash function to use (string algorithm name or custom function, defaults to "sha1")
+	 *
+	 * @example
+	 * ```typescript
+	 * // Use default SHA-1 hashing
+	 * const distribution = new KetamaDistributionHash();
+	 *
+	 * // Use MD5 hashing
+	 * const distribution = new KetamaDistributionHash('md5');
+	 * ```
+	 */
+	constructor(hashFn?: string | HashFunction) {
+		this.hashRing = new HashRing<string>([], hashFn);
+		this.nodeMap = new Map();
 	}
 
-	// Create a mapping of node id to array index
-	const nodeIdToIndex = new Map<string, number>();
-	const weightedNodes: Array<{ node: string; weight: number }> = [];
-
-	for (let i = 0; i < nodes.length; i++) {
-		const nodeId = nodes[i].node.id;
-		nodeIdToIndex.set(nodeId, i);
-		weightedNodes.push({ node: nodeId, weight: nodes[i].weight });
+	/**
+	 * Gets all nodes in the distribution.
+	 * @returns Array of all MemcacheNode instances
+	 */
+	public get nodes(): Array<MemcacheNode> {
+		return Array.from(this.nodeMap.values());
 	}
 
-	// Create hash ring with weighted node ids
-	const ring = new HashRing(weightedNodes);
-
-	// Get the node id responsible for this key
-	const nodeId = ring.getNode(key);
-
-	if (!nodeId) {
-		throw new Error("No node found for key");
+	/**
+	 * Adds a node to the distribution with its weight for consistent hashing.
+	 *
+	 * @param node - The MemcacheNode to add
+	 *
+	 * @example
+	 * ```typescript
+	 * const node = new MemcacheNode('localhost', 11211, { weight: 2 });
+	 * distribution.addNode(node);
+	 * ```
+	 */
+	public addNode(node: MemcacheNode): void {
+		// Add to internal map for lookups
+		this.nodeMap.set(node.id, node);
+		// Add to hash ring with weight
+		this.hashRing.addNode(node.id, node.weight);
 	}
 
-	// Return the index in the original array
-	const index = nodeIdToIndex.get(nodeId);
-	if (index === undefined) {
-		throw new Error(`Node id ${nodeId} not found in mapping`);
+	/**
+	 * Removes a node from the distribution by its ID.
+	 *
+	 * @param id - The node ID (e.g., "localhost:11211")
+	 *
+	 * @example
+	 * ```typescript
+	 * distribution.removeNode('localhost:11211');
+	 * ```
+	 */
+	public removeNode(id: string): void {
+		// Remove from internal map
+		this.nodeMap.delete(id);
+		// Remove from hash ring
+		this.hashRing.removeNode(id);
 	}
 
-	return index;
+	/**
+	 * Gets a specific node by its ID.
+	 *
+	 * @param id - The node ID (e.g., "localhost:11211")
+	 * @returns The MemcacheNode if found, undefined otherwise
+	 *
+	 * @example
+	 * ```typescript
+	 * const node = distribution.getNode('localhost:11211');
+	 * if (node) {
+	 *   console.log(`Found node: ${node.uri}`);
+	 * }
+	 * ```
+	 */
+	public getNode(id: string): MemcacheNode | undefined {
+		return this.nodeMap.get(id);
+	}
+
+	/**
+	 * Gets the nodes responsible for a given key using consistent hashing.
+	 * Currently returns a single node (the primary node for the key).
+	 *
+	 * @param key - The cache key to find the responsible node for
+	 * @returns Array containing the responsible node(s), empty if no nodes available
+	 *
+	 * @example
+	 * ```typescript
+	 * const nodes = distribution.getNodesByKey('user:123');
+	 * if (nodes.length > 0) {
+	 *   console.log(`Key will be stored on: ${nodes[0].id}`);
+	 * }
+	 * ```
+	 */
+	public getNodesByKey(key: string): Array<MemcacheNode> {
+		// Get the node from hash ring
+		const nodeId = this.hashRing.getNode(key);
+		if (!nodeId) {
+			return [];
+		}
+
+		// Map back to MemcacheNode
+		const node = this.nodeMap.get(nodeId);
+		return node ? [node] : [];
+	}
 }
 
 /**

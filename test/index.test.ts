@@ -33,7 +33,6 @@ describe("Memcache", () => {
 
 		it("should initialize with default node localhost:11211", () => {
 			const testClient = new Memcache();
-			expect(testClient.ring).toBeDefined();
 			expect(testClient.nodes).toHaveLength(1);
 			expect(testClient.nodes).toContain("localhost:11211");
 		});
@@ -338,7 +337,7 @@ describe("Memcache", () => {
 				timeout: 100,
 			});
 
-			await expect(client13.connect("0.0.0.0", 99999)).rejects.toThrow();
+			await expect(client13.connect("0.0.0.0")).rejects.toThrow();
 		});
 
 		it("should handle connection timeout", async () => {
@@ -357,7 +356,7 @@ describe("Memcache", () => {
 			});
 
 			// This should trigger an error immediately due to invalid port
-			await expect(client16.connect("localhost", 99999)).rejects.toThrow();
+			await expect(client16.connect("localhost")).rejects.toThrow();
 		});
 
 		// Removed: socket error tests - these test internal implementation
@@ -2146,19 +2145,14 @@ describe("Memcache", () => {
 		});
 	});
 
-	describe("HashRing Integration", () => {
-		it("should expose ring property", () => {
-			expect(client.ring).toBeDefined();
-		});
-
+	describe("Consistent Hashing Integration", () => {
 		it("should return default node initially", () => {
 			expect(client.nodes).toEqual(["localhost:11211"]);
 		});
 
-		it("should return nodes as string array", () => {
-			client.ring.addNode("localhost:11211");
-			client.ring.addNode("localhost:11212");
-			client.ring.addNode("127.0.0.1:11213");
+		it("should return nodes as string array", async () => {
+			await client.addNode("localhost:11212");
+			await client.addNode("127.0.0.1:11213");
 
 			const nodes = client.nodes;
 			expect(nodes).toHaveLength(3);
@@ -2167,93 +2161,99 @@ describe("Memcache", () => {
 			expect(nodes).toContain("127.0.0.1:11213");
 		});
 
-		it("should allow adding nodes to ring", () => {
+		it("should allow adding nodes", async () => {
 			// Client starts with default localhost:11211 node
-			client.ring.addNode("server1");
-			client.ring.addNode("server2");
-			client.ring.addNode("server3");
+			await client.addNode("server1");
+			await client.addNode("server2");
+			await client.addNode("server3");
 
-			expect(client.ring.nodes.size).toBe(4); // 3 + default
-			expect(client.ring.nodes.has("server1")).toBe(true);
-			expect(client.ring.nodes.has("server2")).toBe(true);
-			expect(client.ring.nodes.has("server3")).toBe(true);
+			const nodes = client.nodes;
+			expect(nodes).toHaveLength(4); // 3 + default
+			expect(nodes).toContain("server1:11211");
+			expect(nodes).toContain("server2:11211");
+			expect(nodes).toContain("server3:11211");
 		});
 
-		it("should allow getting node for a key", () => {
-			client.ring.addNode("server1");
-			client.ring.addNode("server2");
-			client.ring.addNode("server3");
+		it("should allow getting nodes for a key", async () => {
+			await client.addNode("localhost:11212");
+			await client.addNode("localhost:11213");
+			await client.addNode("localhost:11214");
 
-			const node = client.ring.getNode("test-key");
-			expect(node).toBeDefined();
-			expect(["server1", "server2", "server3"]).toContain(node);
+			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes).toBeDefined();
+			expect(nodes.length).toBeGreaterThan(0);
+			expect(nodes[0].id).toBeDefined();
 		});
 
-		it("should return consistent node for same key", () => {
-			client.ring.addNode("server1");
-			client.ring.addNode("server2");
-			client.ring.addNode("server3");
+		it("should return consistent nodes for same key", async () => {
+			await client.addNode("localhost:11212");
+			await client.addNode("localhost:11213");
+			await client.addNode("localhost:11214");
 
-			const node1 = client.ring.getNode("test-key");
-			const node2 = client.ring.getNode("test-key");
-			expect(node1).toBe(node2);
+			const nodes1 = client.distribution.hash.getNodesByKey("test-key");
+			const nodes2 = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes1[0]).toBe(nodes2[0]);
 		});
 
-		it("should allow removing nodes from ring", () => {
+		it("should allow removing nodes", async () => {
 			// Client starts with default localhost:11211 node
-			client.ring.addNode("server1");
-			client.ring.addNode("server2");
-			client.ring.addNode("server3");
+			await client.addNode("server1");
+			await client.addNode("server2");
+			await client.addNode("server3");
 
-			expect(client.ring.nodes.size).toBe(4); // 3 + default
+			expect(client.nodes).toHaveLength(4); // 3 + default
 
-			client.ring.removeNode("server2");
-			expect(client.ring.nodes.size).toBe(3);
-			expect(client.ring.nodes.has("server2")).toBe(false);
+			await client.removeNode("server2");
+			expect(client.nodes).toHaveLength(3);
+			expect(client.nodes).not.toContain("server2");
 		});
 
-		it("should allow adding weighted nodes", () => {
+		it("should allow adding weighted nodes", async () => {
 			// Client starts with default localhost:11211 node
-			client.ring.addNode("heavy-server", 3);
-			client.ring.addNode("light-server", 1);
+			await client.addNode("localhost:11212", 3);
+			await client.addNode("localhost:11213", 1);
 
-			expect(client.ring.nodes.size).toBe(3); // 2 + default
+			expect(client.nodes).toHaveLength(3); // 2 + default
 
 			// Heavy server should get more keys
 			const distribution = new Map<string, number>();
 			for (let i = 0; i < 100; i++) {
-				const node = client.ring.getNode(`key-${i}`);
-				if (node) {
-					distribution.set(node, (distribution.get(node) || 0) + 1);
+				const nodes = client.distribution.hash.getNodesByKey(`key-${i}`);
+				if (nodes.length > 0) {
+					distribution.set(
+						nodes[0].id,
+						(distribution.get(nodes[0].id) || 0) + 1,
+					);
 				}
 			}
 
-			const heavy = distribution.get("heavy-server") || 0;
-			const light = distribution.get("light-server") || 0;
+			const heavy = distribution.get("localhost:11212") || 0;
+			const light = distribution.get("localhost:11213") || 0;
 			expect(heavy).toBeGreaterThan(light);
 		});
 
-		it("should support getting multiple replica nodes", () => {
-			client.ring.addNode("server1");
-			client.ring.addNode("server2");
-			client.ring.addNode("server3");
-			client.ring.addNode("server4");
-
-			const replicas = client.ring.getNodes("test-key", 3);
-			expect(replicas).toHaveLength(3);
-
-			// All replicas should be unique
-			const uniqueReplicas = new Set(replicas);
-			expect(uniqueReplicas.size).toBe(3);
+		it("should handle single default node", () => {
+			// Client starts with default localhost:11211 node
+			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			expect(nodes).toBeDefined();
+			expect(nodes.length).toBeGreaterThan(0);
+			expect(nodes[0].id).toBe("localhost:11211");
 		});
 
-		it("should handle ring with only default node", () => {
-			// Client starts with default localhost:11211 node
-			const node = client.ring.getNode("test-key");
-			expect(node).toBe("localhost:11211");
+		it("should get node by ID using getNode", async () => {
+			await client.addNode("server1");
+			await client.addNode("server2");
 
-			const replicas = client.ring.getNodes("test-key", 3);
-			expect(replicas).toEqual(["localhost:11211"]);
+			const node = client.getNode("server1:11211");
+			expect(node).toBeDefined();
+			expect(node?.id).toBe("server1:11211");
+
+			const node2 = client.getNode("server2:11211");
+			expect(node2).toBeDefined();
+			expect(node2?.id).toBe("server2:11211");
+
+			const nonExistent = client.getNode("nonexistent");
+			expect(nonExistent).toBeUndefined();
 		});
 	});
 
