@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HashRing, KetamaDistributionHash } from "../src/ketama.js";
+import { HashRing, KetamaHash } from "../src/ketama.js";
 import { MemcacheNode } from "../src/node.js";
 
 describe("HashRing", () => {
@@ -260,34 +260,34 @@ describe("HashRing", () => {
 	});
 });
 
-describe("KetamaDistributionHash", () => {
+describe("KetamaHash", () => {
 	describe("constructor", () => {
 		it("should create instance with default hash function", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			expect(distribution.name).toBe("ketama");
 			expect(distribution.nodes).toEqual([]);
 		});
 
 		it("should create instance with custom hash algorithm", () => {
-			const distribution = new KetamaDistributionHash("md5");
+			const distribution = new KetamaHash("md5");
 			expect(distribution.name).toBe("ketama");
 		});
 
 		it("should create instance with custom hash function", () => {
 			const customHash = (buf: Buffer) => buf.readInt32BE();
-			const distribution = new KetamaDistributionHash(customHash);
+			const distribution = new KetamaHash(customHash);
 			expect(distribution.name).toBe("ketama");
 		});
 	});
 
 	describe("nodes getter", () => {
 		it("should return empty array when no nodes added", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			expect(distribution.nodes).toEqual([]);
 		});
 
 		it("should return all added nodes", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("localhost", 11211);
 			const node2 = new MemcacheNode("localhost", 11212);
 
@@ -303,7 +303,7 @@ describe("KetamaDistributionHash", () => {
 
 	describe("addNode", () => {
 		it("should add node to distribution", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node = new MemcacheNode("localhost", 11211);
 
 			distribution.addNode(node);
@@ -312,7 +312,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should add node with custom weight", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node = new MemcacheNode("localhost", 11211, { weight: 3 });
 
 			distribution.addNode(node);
@@ -320,7 +320,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should handle multiple nodes", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("server1", 11211);
 			const node2 = new MemcacheNode("server2", 11211);
 
@@ -333,7 +333,7 @@ describe("KetamaDistributionHash", () => {
 
 	describe("removeNode", () => {
 		it("should remove node by ID", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node = new MemcacheNode("localhost", 11211);
 
 			distribution.addNode(node);
@@ -344,7 +344,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should be no-op when removing non-existent node", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node = new MemcacheNode("localhost", 11211);
 
 			distribution.addNode(node);
@@ -355,7 +355,7 @@ describe("KetamaDistributionHash", () => {
 
 	describe("getNode", () => {
 		it("should get node by ID", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node = new MemcacheNode("localhost", 11211);
 
 			distribution.addNode(node);
@@ -365,14 +365,14 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should return undefined for non-existent node", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const retrieved = distribution.getNode("nonexistent:11211");
 
 			expect(retrieved).toBeUndefined();
 		});
 
 		it("should distinguish between different node IDs", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("server1", 11211);
 			const node2 = new MemcacheNode("server2", 11211);
 
@@ -386,7 +386,7 @@ describe("KetamaDistributionHash", () => {
 
 	describe("getNodesByKey", () => {
 		it("should return node for given key", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("localhost", 11211);
 			const node2 = new MemcacheNode("localhost", 11212);
 
@@ -399,7 +399,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should return consistent node for same key", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("localhost", 11211);
 			const node2 = new MemcacheNode("localhost", 11212);
 
@@ -412,13 +412,13 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should return empty array when no nodes available", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const nodes = distribution.getNodesByKey("test-key");
 			expect(nodes).toEqual([]);
 		});
 
 		it("should distribute keys across nodes", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("server1", 11211);
 			const node2 = new MemcacheNode("server2", 11211);
 			const node3 = new MemcacheNode("server3", 11211);
@@ -443,7 +443,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should handle weighted nodes", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const heavyNode = new MemcacheNode("heavy", 11211, { weight: 3 });
 			const lightNode = new MemcacheNode("light", 11211, { weight: 1 });
 
@@ -471,7 +471,7 @@ describe("KetamaDistributionHash", () => {
 
 	describe("integration", () => {
 		it("should handle add, get, and remove operations", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("server1", 11211);
 			const node2 = new MemcacheNode("server2", 11211);
 
@@ -495,7 +495,7 @@ describe("KetamaDistributionHash", () => {
 		});
 
 		it("should redistribute keys when nodes are removed", () => {
-			const distribution = new KetamaDistributionHash();
+			const distribution = new KetamaHash();
 			const node1 = new MemcacheNode("server1", 11211);
 			const node2 = new MemcacheNode("server2", 11211);
 

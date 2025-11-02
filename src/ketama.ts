@@ -4,7 +4,7 @@
  * Thanks connor4312!
  */
 import { createHash } from "node:crypto";
-import type { DistributionHash } from "./index.js";
+import type { HashProvider } from "./index.js";
 import type { MemcacheNode } from "./node.js";
 
 /**
@@ -303,7 +303,7 @@ export class HashRing<TNode extends string | { key: string } = string> {
  * const targetNode = distribution.getNodesByKey('my-key')[0];
  * ```
  */
-export class KetamaDistributionHash implements DistributionHash {
+export class KetamaHash implements HashProvider {
 	/** The name of this distribution strategy */
 	public readonly name = "ketama";
 

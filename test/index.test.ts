@@ -2179,7 +2179,7 @@ describe("Memcache", () => {
 			await client.addNode("localhost:11213");
 			await client.addNode("localhost:11214");
 
-			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			const nodes = client.hash.getNodesByKey("test-key");
 			expect(nodes).toBeDefined();
 			expect(nodes.length).toBeGreaterThan(0);
 			expect(nodes[0].id).toBeDefined();
@@ -2190,8 +2190,8 @@ describe("Memcache", () => {
 			await client.addNode("localhost:11213");
 			await client.addNode("localhost:11214");
 
-			const nodes1 = client.distribution.hash.getNodesByKey("test-key");
-			const nodes2 = client.distribution.hash.getNodesByKey("test-key");
+			const nodes1 = client.hash.getNodesByKey("test-key");
+			const nodes2 = client.hash.getNodesByKey("test-key");
 			expect(nodes1[0]).toBe(nodes2[0]);
 		});
 
@@ -2218,7 +2218,7 @@ describe("Memcache", () => {
 			// Heavy server should get more keys
 			const distribution = new Map<string, number>();
 			for (let i = 0; i < 100; i++) {
-				const nodes = client.distribution.hash.getNodesByKey(`key-${i}`);
+				const nodes = client.hash.getNodesByKey(`key-${i}`);
 				if (nodes.length > 0) {
 					distribution.set(
 						nodes[0].id,
@@ -2234,7 +2234,7 @@ describe("Memcache", () => {
 
 		it("should handle single default node", () => {
 			// Client starts with default localhost:11211 node
-			const nodes = client.distribution.hash.getNodesByKey("test-key");
+			const nodes = client.hash.getNodesByKey("test-key");
 			expect(nodes).toBeDefined();
 			expect(nodes.length).toBeGreaterThan(0);
 			expect(nodes[0].id).toBe("localhost:11211");
