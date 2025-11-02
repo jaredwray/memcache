@@ -407,6 +407,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Get multiple values from the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * queries all replica nodes and returns the first successful result for each key.
 	 * @param keys {string[]}
 	 * @returns {Promise<Map<string, string>>}
 	 */
@@ -418,41 +420,50 @@ export class Memcache extends Hookified {
 			this.validateKey(key);
 		}
 
-		// Group keys by node
+		// Group keys by all their replica nodes
 		const keysByNode = new Map<MemcacheNode, string[]>();
 
 		for (const key of keys) {
-			const node = this._hash.getNodesByKey(key)[0];
-			if (!node) {
+			const nodes = this._hash.getNodesByKey(key);
+			if (nodes.length === 0) {
 				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
 			}
 
-			if (!keysByNode.has(node)) {
-				keysByNode.set(node, []);
+			// Add key to all replica nodes
+			for (const node of nodes) {
+				if (!keysByNode.has(node)) {
+					keysByNode.set(node, []);
+				}
+				// biome-ignore lint/style/noNonNullAssertion: we just set it
+				keysByNode.get(node)!.push(key);
 			}
-			// biome-ignore lint/style/noNonNullAssertion: we just set it
-			keysByNode.get(node)!.push(key);
 		}
 
-		// Execute commands in parallel across nodes
+		// Execute commands in parallel across all nodes (including replicas)
 		const promises = Array.from(keysByNode.entries()).map(
 			async ([node, nodeKeys]) => {
-				if (!node.isConnected()) await node.connect();
+				try {
+					if (!node.isConnected()) await node.connect();
 
-				const keysStr = nodeKeys.join(" ");
-				const result = await node.command(`get ${keysStr}`, {
-					isMultiline: true,
-					requestedKeys: nodeKeys,
-				});
+					const keysStr = nodeKeys.join(" ");
+					const result = await node.command(`get ${keysStr}`, {
+						isMultiline: true,
+						requestedKeys: nodeKeys,
+					});
 
-				return result;
+					return result;
+				} catch {
+					// If one node fails, continue with others
+					/* v8 ignore next -- @preserve */
+					return undefined;
+				}
 			},
 		);
 
 		const results = await Promise.all(promises);
 
-		// Merge results into Map
+		// Merge results into Map (first successful value for each key wins)
 		const map = new Map<string, string>();
 
 		for (const result of results) {
@@ -460,7 +471,10 @@ export class Memcache extends Hookified {
 				// Map found keys to their values
 				for (let i = 0; i < result.foundKeys.length; i++) {
 					if (result.values[i] !== undefined) {
-						map.set(result.foundKeys[i], result.values[i]);
+						// Only set if key doesn't exist yet (first successful result wins)
+						if (!map.has(result.foundKeys[i])) {
+							map.set(result.foundKeys[i], result.values[i]);
+						}
 					}
 				}
 			}
