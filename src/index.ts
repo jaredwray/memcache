@@ -383,7 +383,8 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(`get ${key}`, {
 			isMultiline: true,
 			requestedKeys: [key],
@@ -488,7 +489,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -525,7 +527,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -555,7 +558,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -585,7 +589,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -608,7 +613,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -631,7 +637,8 @@ export class Memcache extends Hookified {
 		const bytes = Buffer.byteLength(valueStr);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(command);
 		const success = result === "STORED";
 
@@ -650,7 +657,8 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(`delete ${key}`);
 		const success = result === "DELETED";
 
@@ -673,7 +681,8 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(`incr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
@@ -696,7 +705,8 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(`decr ${key} ${value}`);
 		const newValue = typeof result === "number" ? result : undefined;
 
@@ -716,7 +726,8 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 
-		const node = await this.getNodeForKey(key);
+		const nodes = await this.getNodesForKey(key);
+		const node = nodes[0];
 		const result = await node.command(`touch ${key} ${exptime}`);
 		const success = result === "TOUCHED";
 
@@ -837,25 +848,55 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the node for a given key using consistent hashing, with lazy connection.
-	 * This method will automatically connect to the node if it's not already connected.
+	 * Get the nodes for a given key using consistent hashing, with lazy connection.
+	 * This method will automatically connect to the nodes if they're not already connected.
+	 * Returns an array to support replication strategies.
 	 * @param {string} key - The cache key
-	 * @returns {Promise<MemcacheNode>} The node responsible for this key
-	 * @throws {Error} If no node is available for the key
+	 * @returns {Promise<Array<MemcacheNode>>} The nodes responsible for this key
+	 * @throws {Error} If no nodes are available for the key
 	 */
-	public async getNodeForKey(key: string): Promise<MemcacheNode> {
-		const node = this._distribution.hash.getNodesByKey(key)[0];
+	public async getNodesForKey(key: string): Promise<Array<MemcacheNode>> {
+		const nodes = this._distribution.hash.getNodesByKey(key);
 		/* v8 ignore next -- @preserve */
-		if (!node) {
+		if (nodes.length === 0) {
 			throw new Error(`No node available for key: ${key}`);
 		}
 
 		// Lazy connect if not connected
-		if (!node.isConnected()) {
-			await node.connect();
+		for (const node of nodes) {
+			if (!node.isConnected()) {
+				await node.connect();
+			}
 		}
 
-		return node;
+		return nodes;
+	}
+
+	/**
+	 * Validates a Memcache key according to protocol requirements.
+	 * @param {string} key - The key to validate
+	 * @throws {Error} If the key is empty, exceeds 250 characters, or contains invalid characters
+	 *
+	 * @example
+	 * ```typescript
+	 * client.validateKey("valid-key"); // OK
+	 * client.validateKey(""); // Throws: Key cannot be empty
+	 * client.validateKey("a".repeat(251)); // Throws: Key length cannot exceed 250 characters
+	 * client.validateKey("key with spaces"); // Throws: Key cannot contain spaces, newlines, or null characters
+	 * ```
+	 */
+	public validateKey(key: string): void {
+		if (!key || key.length === 0) {
+			throw new Error("Key cannot be empty");
+		}
+		if (key.length > 250) {
+			throw new Error("Key length cannot exceed 250 characters");
+		}
+		if (/[\s\r\n\0]/.test(key)) {
+			throw new Error(
+				"Key cannot contain spaces, newlines, or null characters",
+			);
+		}
 	}
 
 	// Private methods
