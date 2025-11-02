@@ -927,20 +927,6 @@ export class Memcache extends Hookified {
 		);
 		node.on("miss", (key: string) => this.emit(MemcacheEvents.MISS, key));
 	}
-
-	private validateKey(key: string): void {
-		if (!key || key.length === 0) {
-			throw new Error("Key cannot be empty");
-		}
-		if (key.length > 250) {
-			throw new Error("Key length cannot exceed 250 characters");
-		}
-		if (/[\s\r\n\0]/.test(key)) {
-			throw new Error(
-				"Key cannot contain spaces, newlines, or null characters",
-			);
-		}
-	}
 }
 
 export default Memcache;
