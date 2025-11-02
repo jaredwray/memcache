@@ -99,10 +99,34 @@ export class Memcache extends Hookified {
 		return this._nodes.map((node) => node.id);
 	}
 
+	/**
+	 * Get the hash provider used for consistent hashing distribution.
+	 * @returns {HashProvider} The current hash provider instance
+	 * @default KetamaHash
+	 *
+	 * @example
+	 * ```typescript
+	 * const client = new Memcache();
+	 * const hashProvider = client.hash;
+	 * console.log(hashProvider.name); // "ketama"
+	 * ```
+	 */
 	public get hash(): HashProvider {
 		return this._hash;
 	}
 
+	/**
+	 * Set the hash provider used for consistent hashing distribution.
+	 * This allows you to customize the hashing strategy for distributing keys across nodes.
+	 * @param {HashProvider} hash - The hash provider instance to use
+	 *
+	 * @example
+	 * ```typescript
+	 * const client = new Memcache();
+	 * const customHashProvider = new KetamaHash();
+	 * client.hash = customHashProvider;
+	 * ```
+	 */
 	public set hash(hash: HashProvider) {
 		this._hash = hash;
 	}
