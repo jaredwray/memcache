@@ -1,5 +1,5 @@
 import { Hookified } from "hookified";
-import { KetamaDistributionHash } from "./ketama.js";
+import { KetamaHash } from "./ketama.js";
 import { MemcacheNode } from "./node.js";
 
 export enum MemcacheEvents {
@@ -14,7 +14,7 @@ export enum MemcacheEvents {
 	CLOSE = "close",
 }
 
-export interface DistributionHash {
+export interface HashProvider {
 	name: string;
 	nodes: Array<MemcacheNode>;
 	addNode: (node: MemcacheNode) => void;
@@ -22,25 +22,6 @@ export interface DistributionHash {
 	getNode: (id: string) => MemcacheNode | undefined;
 	getNodesByKey: (key: string) => Array<MemcacheNode>;
 }
-
-export type DistributionCachingOptions = {
-	ttl?: number;
-	lruSize?: number;
-};
-
-export type DistributionOptions = {
-	hash?: DistributionHash;
-	caching?: boolean | DistributionCachingOptions;
-	nonBlocking?: boolean;
-};
-
-export type Distribution = {
-	hash: DistributionHash;
-	cache?: Map<string, Array<MemcacheNode>>;
-	lruSize: number;
-	ttl?: undefined;
-	nonBlocking: boolean;
-};
 
 export interface MemcacheOptions {
 	/**
@@ -65,14 +46,10 @@ export interface MemcacheOptions {
 	keepAliveDelay?: number;
 
 	/**
-	 * Distribution options such as the hash algorythm engine, caching, and nonBlocking settings.
-	 * By default the settings are:
-	 * @param hash: default is `KetamaDistributionHash` using md5 by default
-	 * @param caching: default is `true` with lruSize = 10_000 and no ttl
-	 * @param nonBlocking: default is `true` which will wait for only the first node to return which works for `ketama`
-	 * as by default ketama only returns a single node to distribute too.
+	 * The hash provider used to determine the distribution on each item is placed based
+	 * on the number of nodes and hashing. By default it uses KetamaHash as the provider
 	 */
-	distribution?: DistributionOptions;
+	hash?: HashProvider;
 }
 
 export interface MemcacheStats {
@@ -84,17 +61,12 @@ export class Memcache extends Hookified {
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
-	private _distribution: Distribution;
+	private _hash: HashProvider;
 
 	constructor(options?: MemcacheOptions) {
 		super();
 
-		this._distribution = {
-			hash: new KetamaDistributionHash(),
-			cache: new Map(),
-			lruSize: 10_000,
-			nonBlocking: true,
-		};
+		this._hash = new KetamaHash();
 
 		this._timeout = options?.timeout || 5000;
 		this._keepAlive = options?.keepAlive !== false;
@@ -115,8 +87,7 @@ export class Memcache extends Hookified {
 			// Forward node events to Memcache events
 			this._forwardNodeEvents(node);
 
-			this._nodes.push(node);
-			this._distribution.hash.addNode(node);
+			this.addNode(nodeUri);
 		}
 	}
 
@@ -128,8 +99,12 @@ export class Memcache extends Hookified {
 		return this._nodes.map((node) => node.id);
 	}
 
-	public get distribution(): Distribution {
-		return this._distribution;
+	public get hash(): HashProvider {
+		return this._hash;
+	}
+
+	public set hash(hash: HashProvider) {
+		this._hash = hash;
 	}
 
 	/**
@@ -235,7 +210,7 @@ export class Memcache extends Hookified {
 		this._forwardNodeEvents(node);
 		this._nodes.push(node);
 
-		this._distribution.hash.addNode(node);
+		this._hash.addNode(node);
 	}
 
 	/**
@@ -252,7 +227,7 @@ export class Memcache extends Hookified {
 		// Disconnect and remove
 		await node.disconnect();
 		this._nodes = this._nodes.filter((n) => n.id !== nodeKey);
-		this._distribution.hash.removeNode(node.id);
+		this._hash.removeNode(node.id);
 	}
 
 	/**
@@ -407,7 +382,7 @@ export class Memcache extends Hookified {
 		const keysByNode = new Map<MemcacheNode, string[]>();
 
 		for (const key of keys) {
-			const node = this._distribution.hash.getNodesByKey(key)[0];
+			const node = this._hash.getNodesByKey(key)[0];
 			if (!node) {
 				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
@@ -846,7 +821,7 @@ export class Memcache extends Hookified {
 	 * @throws {Error} If no nodes are available for the key
 	 */
 	public async getNodesByKey(key: string): Promise<Array<MemcacheNode>> {
-		const nodes = this._distribution.hash.getNodesByKey(key);
+		const nodes = this._hash.getNodesByKey(key);
 		/* v8 ignore next -- @preserve */
 		if (nodes.length === 0) {
 			throw new Error(`No node available for key: ${key}`);
