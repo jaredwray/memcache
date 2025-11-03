@@ -80,10 +80,18 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Get the list of nodes
+	 * @returns {MemcacheNode[]} Array of MemcacheNode
+	 */
+	public get nodes(): MemcacheNode[] {
+		return this._nodes;
+	}
+
+	/**
 	 * Get the list of node IDs (e.g., ["localhost:11211", "127.0.0.1:11212"])
 	 * @returns {string[]} Array of node ID strings
 	 */
-	public get nodes(): string[] {
+	public get nodeIds(): string[] {
 		return this._nodes.map((node) => node.id);
 	}
 
