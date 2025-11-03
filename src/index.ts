@@ -1,6 +1,6 @@
 import { Hookified } from "hookified";
 import { KetamaHash } from "./ketama.js";
-import { MemcacheNode } from "./node.js";
+import { createNode, MemcacheNode } from "./node.js";
 
 export enum MemcacheEvents {
 	CONNECT = "connect",
@@ -1108,4 +1108,5 @@ export class Memcache extends Hookified {
 	}
 }
 
+export { createNode };
 export default Memcache;

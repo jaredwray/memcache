@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Memcache, { MemcacheEvents } from "../src/index";
+import Memcache, { createNode, MemcacheEvents } from "../src/index";
 import { KetamaHash } from "../src/ketama";
 
 describe("Memcache", () => {
@@ -2550,6 +2550,18 @@ describe("Memcache", () => {
 			expect(success).toBe(true);
 
 			await multiNodeClient.disconnect();
+		});
+	});
+
+	describe("Exports", () => {
+		it("should export createNode function from index", () => {
+			expect(createNode).toBeDefined();
+			expect(typeof createNode).toBe("function");
+
+			const node = createNode("localhost", 11211);
+			expect(node).toBeDefined();
+			expect(node.host).toBe("localhost");
+			expect(node.port).toBe(11211);
 		});
 	});
 
