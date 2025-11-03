@@ -1,5 +1,5 @@
-import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
+import { Hookified } from "hookified";
 
 export interface MemcacheNodeOptions {
 	timeout?: number;
@@ -34,7 +34,7 @@ export type CommandQueueItem = {
  * MemcacheNode represents a single memcache server connection.
  * It handles the socket connection, command queue, and protocol parsing for one node.
  */
-export class MemcacheNode extends EventEmitter {
+export class MemcacheNode extends Hookified {
 	private _host: string;
 	private _port: number;
 	private _socket: Socket | undefined = undefined;
