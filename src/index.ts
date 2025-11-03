@@ -966,22 +966,26 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the Memcache server version from the first available node.
-	 * @returns {Promise<string>}
+	 * Get the Memcache server version from all nodes.
+	 * @returns {Promise<Map<string, string>>} Map of node IDs to version strings
 	 */
-	public async version(): Promise<string> {
-		// Get version from first node
-		const node = this._nodes[0];
-		/* v8 ignore next -- @preserve */
-		if (!node) throw new Error("No nodes available");
+	public async version(): Promise<Map<string, string>> {
+		// Get version from all nodes
+		const results = new Map<string, string>();
 
-		/* v8 ignore next -- @preserve */
-		if (!node.isConnected()) {
-			await node.connect();
-		}
+		await Promise.all(
+			/* v8 ignore next -- @preserve */
+			this._nodes.map(async (node) => {
+				if (!node.isConnected()) {
+					await node.connect();
+				}
 
-		const result = await node.command("version");
-		return result;
+				const version = await node.command("version");
+				results.set(node.id, version);
+			}),
+		);
+
+		return results;
 	}
 
 	/**
