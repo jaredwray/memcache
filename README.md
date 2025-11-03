@@ -1,7 +1,7 @@
 [<img src="./site/logo_medium.png" alt="Memcache Logo" align="center">](https://memcachejs.org)
 
 [![codecov](https://codecov.io/gh/jaredwray/memcache/graph/badge.svg?token=4DUANNWiIE)](https://codecov.io/gh/jaredwray/memcache)
-[![tests](https://github.com/jaredwray/memcache/actions/workflows/tests.yml/badge.svg)](https://github.com/jaredwray/memcache/actions/workflows/tests.yml)
+[![tests](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml/badge.svg)](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml)
 [![npm](https://img.shields.io/npm/v/memcache)](https://www.npmjs.com/package/memcache)
 [![npm](https://img.shields.io/npm/dm/memcache)](https://www.npmjs.com/package/memcache)
 [![license](https://img.shields.io/github/license/jaredwray/memcache)](https://github.com/jaredwray/memcache/blob/main/LICENSE)
