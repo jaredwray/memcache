@@ -88,6 +88,14 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * Get the list of node IDs (e.g., ["localhost:11211", "127.0.0.1:11212"])
+	 * @returns {string[]} Array of node ID strings
+	 */
+	public get nodeIds(): string[] {
+		return this._nodes.map((node) => node.id);
+	}
+
+	/**
 	 * Get the hash provider used for consistent hashing distribution.
 	 * @returns {HashProvider} The current hash provider instance
 	 * @default KetamaHash

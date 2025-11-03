@@ -34,18 +34,18 @@ describe("Memcache", () => {
 
 		it("should initialize with default node localhost:11211", () => {
 			const testClient = new Memcache();
-			expect(testClient.nodes).toHaveLength(1);
-			expect(testClient.nodes).toContain("localhost:11211");
+			expect(testClient.nodeIds).toHaveLength(1);
+			expect(testClient.nodeIds).toContain("localhost:11211");
 		});
 
 		it("should initialize with nodes from options", () => {
 			const testClient = new Memcache({
 				nodes: ["localhost:11211", "localhost:11212", "127.0.0.1:11213"],
 			});
-			expect(testClient.nodes).toHaveLength(3);
-			expect(testClient.nodes).toContain("localhost:11211");
-			expect(testClient.nodes).toContain("localhost:11212");
-			expect(testClient.nodes).toContain("127.0.0.1:11213");
+			expect(testClient.nodeIds).toHaveLength(3);
+			expect(testClient.nodeIds).toContain("localhost:11211");
+			expect(testClient.nodeIds).toContain("localhost:11212");
+			expect(testClient.nodeIds).toContain("127.0.0.1:11213");
 		});
 
 		it("should parse node URIs with protocols", () => {
@@ -56,28 +56,28 @@ describe("Memcache", () => {
 					"server3",
 				],
 			});
-			expect(testClient.nodes).toHaveLength(3);
-			expect(testClient.nodes).toContain("localhost:11211");
-			expect(testClient.nodes).toContain("192.168.1.100:11212");
-			expect(testClient.nodes).toContain("server3:11211");
+			expect(testClient.nodeIds).toHaveLength(3);
+			expect(testClient.nodeIds).toContain("localhost:11211");
+			expect(testClient.nodeIds).toContain("192.168.1.100:11212");
+			expect(testClient.nodeIds).toContain("server3:11211");
 		});
 
 		it("should handle Unix socket URIs in nodes", () => {
 			const testClient = new Memcache({
 				nodes: ["unix:///var/run/memcached.sock", "/tmp/memcached.sock"],
 			});
-			expect(testClient.nodes).toHaveLength(2);
-			expect(testClient.nodes).toContain("/var/run/memcached.sock");
-			expect(testClient.nodes).toContain("/tmp/memcached.sock");
+			expect(testClient.nodeIds).toHaveLength(2);
+			expect(testClient.nodeIds).toContain("/var/run/memcached.sock");
+			expect(testClient.nodeIds).toContain("/tmp/memcached.sock");
 		});
 
 		it("should handle IPv6 addresses in nodes", () => {
 			const testClient = new Memcache({
 				nodes: ["[::1]:11211", "memcache://[2001:db8::1]:11212"],
 			});
-			expect(testClient.nodes).toHaveLength(2);
-			expect(testClient.nodes).toContain("::1:11211");
-			expect(testClient.nodes).toContain("2001:db8::1:11212");
+			expect(testClient.nodeIds).toHaveLength(2);
+			expect(testClient.nodeIds).toContain("::1:11211");
+			expect(testClient.nodeIds).toContain("2001:db8::1:11212");
 		});
 
 		it("should allow setting timeout via setter", () => {
@@ -2162,14 +2162,14 @@ describe("Memcache", () => {
 
 	describe("Consistent Hashing Integration", () => {
 		it("should return default node initially", () => {
-			expect(client.nodes).toEqual(["localhost:11211"]);
+			expect(client.nodeIds).toEqual(["localhost:11211"]);
 		});
 
 		it("should return nodes as string array", async () => {
 			await client.addNode("localhost:11212");
 			await client.addNode("127.0.0.1:11213");
 
-			const nodes = client.nodes;
+			const nodes = client.nodeIds;
 			expect(nodes).toHaveLength(3);
 			expect(nodes).toContain("localhost:11211");
 			expect(nodes).toContain("localhost:11212");
@@ -2182,7 +2182,7 @@ describe("Memcache", () => {
 			await client.addNode("server2");
 			await client.addNode("server3");
 
-			const nodes = client.nodes;
+			const nodes = client.nodeIds;
 			expect(nodes).toHaveLength(4); // 3 + default
 			expect(nodes).toContain("server1:11211");
 			expect(nodes).toContain("server2:11211");
