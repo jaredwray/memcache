@@ -720,6 +720,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Prepend a value to an existing key in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @returns {Promise<boolean>}
@@ -733,9 +735,23 @@ export class Memcache extends Hookified {
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute PREPEND on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for PREPEND to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("prepend", { key, value, success });
 
