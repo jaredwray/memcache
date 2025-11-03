@@ -25,10 +25,11 @@ export interface HashProvider {
 
 export interface MemcacheOptions {
 	/**
-	 * Array of node URIs to add to the consistent hashing ring.
+	 * Array of node URIs or MemcacheNode instances to add to the consistent hashing ring.
 	 * Examples: ["localhost:11211", "memcache://192.168.1.100:11212", "server3:11213"]
+	 * Can also pass MemcacheNode instances directly: [createNode("localhost", 11211), createNode("server2", 11211)]
 	 */
-	nodes?: string[];
+	nodes?: (string | MemcacheNode)[];
 	/**
 	 * The timeout for Memcache operations.
 	 * @default 5000
@@ -208,24 +209,41 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Add a new node to the cluster
-	 * @param {string} uri - Node URI (e.g., "localhost:11212")
-	 * @param {number} weight - Optional weight for consistent hashing
+	 * @param {string | MemcacheNode} uri - Node URI (e.g., "localhost:11212") or a MemcacheNode instance
+	 * @param {number} weight - Optional weight for consistent hashing (only used for string URIs)
 	 */
-	public async addNode(uri: string, weight?: number): Promise<void> {
-		const { host, port } = this.parseUri(uri);
-		const nodeKey = port === 0 ? host : `${host}:${port}`;
+	public async addNode(
+		uri: string | MemcacheNode,
+		weight?: number,
+	): Promise<void> {
+		let node: MemcacheNode;
+		let nodeKey: string;
 
-		if (this._nodes.some((n) => n.id === nodeKey)) {
-			throw new Error(`Node ${nodeKey} already exists`);
+		if (typeof uri === "string") {
+			// Handle string URI
+			const { host, port } = this.parseUri(uri);
+			nodeKey = port === 0 ? host : `${host}:${port}`;
+
+			if (this._nodes.some((n) => n.id === nodeKey)) {
+				throw new Error(`Node ${nodeKey} already exists`);
+			}
+
+			// Create and connect node
+			node = new MemcacheNode(host, port, {
+				timeout: this._timeout,
+				keepAlive: this._keepAlive,
+				keepAliveDelay: this._keepAliveDelay,
+				weight,
+			});
+		} else {
+			// Handle MemcacheNode instance
+			node = uri;
+			nodeKey = node.id;
+
+			if (this._nodes.some((n) => n.id === nodeKey)) {
+				throw new Error(`Node ${nodeKey} already exists`);
+			}
 		}
-
-		// Create and connect node
-		const node = new MemcacheNode(host, port, {
-			timeout: this._timeout,
-			keepAlive: this._keepAlive,
-			keepAliveDelay: this._keepAliveDelay,
-			weight,
-		});
 
 		this.forwardNodeEvents(node);
 		this._nodes.push(node);
