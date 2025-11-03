@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Memcache, { MemcacheEvents, createNode } from "../src/index";
+import Memcache, { createNode, MemcacheEvents } from "../src/index";
 import { KetamaHash } from "../src/ketama";
 
 describe("Memcache", () => {
