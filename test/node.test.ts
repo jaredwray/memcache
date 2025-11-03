@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemcacheNode } from "../src/node";
+import { createNode, MemcacheNode } from "../src/node";
 
 describe("MemcacheNode", () => {
 	let node: MemcacheNode;
@@ -66,7 +66,37 @@ describe("MemcacheNode", () => {
 			testNode.weight = 10;
 			expect(testNode.weight).toBe(10);
 		});
+	});
 
+	describe("createNode factory function", () => {
+		it("should create a new MemcacheNode instance", () => {
+			const node = createNode("localhost", 11211);
+			expect(node).toBeInstanceOf(MemcacheNode);
+			expect(node.host).toBe("localhost");
+			expect(node.port).toBe(11211);
+		});
+
+		it("should create node with options", () => {
+			const node = createNode("localhost", 11211, {
+				timeout: 5000,
+				keepAlive: true,
+				keepAliveDelay: 1000,
+				weight: 3,
+			});
+			expect(node).toBeInstanceOf(MemcacheNode);
+			expect(node.weight).toBe(3);
+		});
+
+		it("should create node without options", () => {
+			const node = createNode("192.168.1.1", 11212);
+			expect(node).toBeInstanceOf(MemcacheNode);
+			expect(node.host).toBe("192.168.1.1");
+			expect(node.port).toBe(11212);
+			expect(node.weight).toBe(1); // default weight
+		});
+	});
+
+	describe("Constructor and Properties", () => {
 		it("should have default keepAlive of true", () => {
 			const testNode = new MemcacheNode("localhost", 11211);
 			expect(testNode.keepAlive).toBe(true);

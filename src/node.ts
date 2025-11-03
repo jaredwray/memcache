@@ -461,3 +461,28 @@ export class MemcacheNode extends EventEmitter {
 		}
 	}
 }
+
+/**
+ * Factory function to create a new MemcacheNode instance.
+ * @param host - The hostname or IP address of the memcache server
+ * @param port - The port number of the memcache server
+ * @param options - Optional configuration for the node
+ * @returns A new MemcacheNode instance
+ *
+ * @example
+ * ```typescript
+ * const node = createNode('localhost', 11211, {
+ *   timeout: 5000,
+ *   keepAlive: true,
+ *   weight: 1
+ * });
+ * await node.connect();
+ * ```
+ */
+export function createNode(
+	host: string,
+	port: number,
+	options?: MemcacheNodeOptions,
+): MemcacheNode {
+	return new MemcacheNode(host, port, options);
+}
