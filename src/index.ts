@@ -483,6 +483,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Check-And-Set: Store a value only if it hasn't been modified since last fetch.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @param casToken {string}
@@ -505,9 +507,23 @@ export class Memcache extends Hookified {
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute CAS on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for CAS to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("cas", {
 			key,
@@ -523,6 +539,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Set a value in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -543,9 +561,23 @@ export class Memcache extends Hookified {
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute SET on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for SET to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("set", { key, value, exptime, flags, success });
 
@@ -554,6 +586,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Add a value to the Memcache server (only if key doesn't exist).
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -574,9 +608,23 @@ export class Memcache extends Hookified {
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute ADD on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for ADD to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("add", { key, value, exptime, flags, success });
 
@@ -585,6 +633,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Replace a value in the Memcache server (only if key exists).
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @param exptime {number}
@@ -605,9 +655,23 @@ export class Memcache extends Hookified {
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute REPLACE on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for REPLACE to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("replace", { key, value, exptime, flags, success });
 
@@ -616,6 +680,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Append a value to an existing key in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @returns {Promise<boolean>}
@@ -629,9 +695,23 @@ export class Memcache extends Hookified {
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute APPEND on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for APPEND to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("append", { key, value, success });
 
@@ -640,6 +720,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Prepend a value to an existing key in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param value {string}
 	 * @returns {Promise<boolean>}
@@ -653,9 +735,23 @@ export class Memcache extends Hookified {
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(command);
-		const success = result === "STORED";
+
+		// Execute PREPEND on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(command);
+				return result === "STORED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for PREPEND to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("prepend", { key, value, success });
 
@@ -664,6 +760,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Delete a value from the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @returns {Promise<boolean>}
 	 */
@@ -673,9 +771,23 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`delete ${key}`);
-		const success = result === "DELETED";
+
+		// Execute DELETE on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`delete ${key}`);
+				return result === "DELETED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for DELETE to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("delete", { key, success });
 
@@ -684,6 +796,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Increment a value in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns the first successful result.
 	 * @param key {string}
 	 * @param value {number}
 	 * @returns {Promise<number | undefined>}
@@ -697,9 +811,23 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`incr ${key} ${value}`);
-		const newValue = typeof result === "number" ? result : undefined;
+
+		// Execute INCR on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`incr ${key} ${value}`);
+				return typeof result === "number" ? result : undefined;
+			} catch {
+				// If one node fails, continue with others
+				/* v8 ignore next -- @preserve */
+				return undefined;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// Return the first successful result
+		const newValue = results.find((v) => v !== undefined);
 
 		await this.afterHook("incr", { key, value, newValue });
 
@@ -708,6 +836,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Decrement a value in the Memcache server.
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns the first successful result.
 	 * @param key {string}
 	 * @param value {number}
 	 * @returns {Promise<number | undefined>}
@@ -721,9 +851,23 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`decr ${key} ${value}`);
-		const newValue = typeof result === "number" ? result : undefined;
+
+		// Execute DECR on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`decr ${key} ${value}`);
+				return typeof result === "number" ? result : undefined;
+			} catch {
+				// If one node fails, continue with others
+				/* v8 ignore next -- @preserve */
+				return undefined;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// Return the first successful result
+		const newValue = results.find((v) => v !== undefined);
 
 		await this.afterHook("decr", { key, value, newValue });
 
@@ -732,6 +876,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Touch a value in the Memcache server (update expiration time).
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param exptime {number}
 	 * @returns {Promise<boolean>}
@@ -742,9 +888,23 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`touch ${key} ${exptime}`);
-		const success = result === "TOUCHED";
+
+		// Execute TOUCH on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`touch ${key} ${exptime}`);
+				return result === "TOUCHED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for TOUCH to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("touch", { key, exptime, success });
 
@@ -806,22 +966,26 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the Memcache server version from the first available node.
-	 * @returns {Promise<string>}
+	 * Get the Memcache server version from all nodes.
+	 * @returns {Promise<Map<string, string>>} Map of node IDs to version strings
 	 */
-	public async version(): Promise<string> {
-		// Get version from first node
-		const node = this._nodes[0];
-		/* v8 ignore next -- @preserve */
-		if (!node) throw new Error("No nodes available");
+	public async version(): Promise<Map<string, string>> {
+		// Get version from all nodes
+		const results = new Map<string, string>();
 
-		/* v8 ignore next -- @preserve */
-		if (!node.isConnected()) {
-			await node.connect();
-		}
+		await Promise.all(
+			/* v8 ignore next -- @preserve */
+			this._nodes.map(async (node) => {
+				if (!node.isConnected()) {
+					await node.connect();
+				}
 
-		const result = await node.command("version");
-		return result;
+				const version = await node.command("version");
+				results.set(node.id, version);
+			}),
+		);
+
+		return results;
 	}
 
 	/**

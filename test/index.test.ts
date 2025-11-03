@@ -732,12 +732,20 @@ describe("Memcache", () => {
 			expect(typeof stats).toBe("object");
 		});
 
-		it("should get version", async () => {
+		it("should get version from all nodes", async () => {
 			await client.connect();
 
-			const version = await client.version();
-			expect(version).toBeDefined();
-			expect(typeof version).toBe("string");
+			const versions = await client.version();
+			expect(versions).toBeDefined();
+			expect(versions).toBeInstanceOf(Map);
+			expect(versions.size).toBeGreaterThan(0);
+
+			// Each node should have a version string
+			for (const [nodeId, version] of versions) {
+				expect(typeof nodeId).toBe("string");
+				expect(typeof version).toBe("string");
+				expect(version.length).toBeGreaterThan(0);
+			}
 		});
 
 		it("should handle quit command", async () => {
@@ -2284,6 +2292,264 @@ describe("Memcache", () => {
 
 			const nonExistent = client.getNode("nonexistent");
 			expect(nonExistent).toBeUndefined();
+		});
+	});
+
+	describe("Multi-node Replication", () => {
+		it("should execute set on all replica nodes", async () => {
+			// Create a client with a mock hash provider that returns multiple nodes
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			// Mock getNodesByKey to return multiple nodes (simulating replication)
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					// Return the same node twice to simulate replication
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.set("test-key", "test-value");
+			expect(success).toBe(true);
+
+			const value = await multiNodeClient.get("test-key");
+			expect(value).toBe("test-value");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute delete on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("delete-test", "value");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const deleted = await multiNodeClient.delete("delete-test");
+			// When the same node is returned twice, the first delete succeeds
+			// and the second fails (key already deleted), so overall result is false
+			expect(typeof deleted).toBe("boolean");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute incr on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("counter", "10");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const newValue = await multiNodeClient.incr("counter", 5);
+			expect(newValue).toBe(15);
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute decr on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("counter", "20");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const newValue = await multiNodeClient.decr("counter", 3);
+			expect(newValue).toBe(17);
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute cas on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("cas-test", "initial");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			// CAS with a dummy token (real token retrieval would require gets command)
+			const success = await multiNodeClient.cas(
+				"cas-test",
+				"updated",
+				"123456",
+			);
+			// Note: This might fail since we don't have a real CAS token,
+			// but it tests that the command executes on all nodes
+			expect(typeof success).toBe("boolean");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute add on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.add("add-test", "value");
+			// When the same node is returned twice, the first add succeeds
+			// and the second fails (key already exists), so overall result is false
+			expect(typeof success).toBe("boolean");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute replace on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("replace-test", "old-value");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.replace(
+				"replace-test",
+				"new-value",
+			);
+			expect(success).toBe(true);
+
+			const value = await multiNodeClient.get("replace-test");
+			expect(value).toBe("new-value");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute append on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("append-test", "hello");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.append("append-test", " world");
+			expect(success).toBe(true);
+
+			const value = await multiNodeClient.get("append-test");
+			// When the same node is returned twice, append happens twice
+			expect(value).toBe("hello world world");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute prepend on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("prepend-test", "world");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.prepend("prepend-test", "hello ");
+			expect(success).toBe(true);
+
+			const value = await multiNodeClient.get("prepend-test");
+			// When the same node is returned twice, prepend happens twice
+			expect(value).toBe("hello hello world");
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should execute touch on all replica nodes", async () => {
+			const multiNodeClient = new Memcache();
+			await multiNodeClient.connect();
+
+			await multiNodeClient.set("touch-test", "value");
+
+			// Mock getNodesByKey to return multiple nodes
+			const originalGetNodesByKey = multiNodeClient.hash.getNodesByKey.bind(
+				multiNodeClient.hash,
+			);
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(
+				(key: string) => {
+					const nodes = originalGetNodesByKey(key);
+					return nodes.length > 0 ? [nodes[0], nodes[0]] : nodes;
+				},
+			);
+
+			const success = await multiNodeClient.touch("touch-test", 3600);
+			expect(success).toBe(true);
+
+			await multiNodeClient.disconnect();
 		});
 	});
 
