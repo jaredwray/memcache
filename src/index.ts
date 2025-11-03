@@ -876,6 +876,8 @@ export class Memcache extends Hookified {
 
 	/**
 	 * Touch a value in the Memcache server (update expiration time).
+	 * When multiple nodes are returned by the hash provider (for replication),
+	 * executes on all nodes and returns true only if all succeed.
 	 * @param key {string}
 	 * @param exptime {number}
 	 * @returns {Promise<boolean>}
@@ -886,9 +888,23 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
-		const node = nodes[0];
-		const result = await node.command(`touch ${key} ${exptime}`);
-		const success = result === "TOUCHED";
+
+		// Execute TOUCH on all replica nodes
+		const promises = nodes.map(async (node) => {
+			try {
+				const result = await node.command(`touch ${key} ${exptime}`);
+				return result === "TOUCHED";
+			} catch {
+				// If one node fails, the entire operation fails
+				/* v8 ignore next -- @preserve */
+				return false;
+			}
+		});
+
+		const results = await Promise.all(promises);
+
+		// All nodes must succeed for TOUCH to be considered successful
+		const success = results.every((result) => result === true);
 
 		await this.afterHook("touch", { key, exptime, success });
 
