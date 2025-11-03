@@ -1,5 +1,11 @@
 [<img src="./site/logo_medium.png" alt="Memcache Logo" align="center">](https://memcachejs.org)
 
+[![codecov](https://codecov.io/gh/jaredwray/memcache/graph/badge.svg?token=4DUANNWiIE)](https://codecov.io/gh/jaredwray/memcache)
+[![tests](https://github.com/jaredwray/memcache/actions/workflows/tests.yml/badge.svg)](https://github.com/jaredwray/memcache/actions/workflows/tests.yml)
+[![npm](https://img.shields.io/npm/v/memcache)](https://www.npmjs.com/package/memcache)
+[![npm](https://img.shields.io/npm/dm/memcache)](https://www.npmjs.com/package/memcache)
+[![license](https://img.shields.io/github/license/jaredwray/memcache)](https://github.com/jaredwray/memcache/blob/main/LICENSE)
+
 # Memcache
 Nodejs Memcache Client
 
@@ -38,6 +44,8 @@ Nodejs Memcache Client
     - [decr(key, value?)](#decrkey-value)
     - [touch(key, exptime)](#touchkey-exptime)
   - [Hook Examples](#hook-examples)
+- [Contributing](#contributing)
+- [License and Copyright](#license-and-copyright)
 
 # Getting Started
 
@@ -386,3 +394,11 @@ client.onHook('after:set', async (context) => {
   console.log(`[SET] Key: ${context.key}, Success: ${context.success}, Time: ${duration}ms`);
 });
 ```
+
+# Contributing
+
+Please read our [Contributing Guidelines](./CONTRIBUTING.md) and also our [Code of Conduct](./CODE_OF_CONDUCT.md). 
+
+# License and Copyright
+
+[MIT & Copyright (c) Jared Wray](https://github.com/jaredwray/memcache/blob/main/LICENSE)
