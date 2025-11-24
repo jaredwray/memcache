@@ -83,6 +83,25 @@ await client.delete('mykey');
 await client.quit();
 ```
 
+You can specify multiple Memcache nodes by passing an array of connection strings:
+
+```javascript
+import { Memcache } from 'memcache';
+
+// Create a client with multiple nodes
+const client = new Memcache({
+  nodes: ['localhost:11211', '192.168.1.100:11211', 'memcache://192.168.1.101:11211']
+});
+
+// Set and get values (automatically distributed across nodes)
+await client.set('mykey', 'Hello, Memcache!');
+const value = await client.get('mykey');
+console.log(value); // ['Hello, Memcache!']
+
+// Close the connection
+await client.quit();
+```
+
 # API
 
 ## Constructor
