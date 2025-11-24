@@ -48,5 +48,9 @@
   "dependencies": {
     "hookified": "^1.13.0",
     "rimraf": "^6.1.2"
-  }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ]
 }
