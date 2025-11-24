@@ -33,5 +33,5 @@ jobs:
       run: pnpm test:ci
 
     - name: Publish
-      run: pnpm publish
+      run: pnpm publish --no-git-checks
 
