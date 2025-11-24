@@ -83,6 +83,22 @@ await client.delete('mykey');
 await client.quit();
 ```
 
+You can also just pass in the `uri` into the constructor
+
+```javascript
+// Single node as string
+const client = new Memcache('localhost:11211');
+
+// Single node with protocol
+const client = new Memcache('memcache://192.168.1.100:11211');
+
+// Multiple nodes with options
+const client = new Memcache({
+  nodes: ['localhost:11211', 'server2:11211'],
+  timeout: 10000
+});
+```
+
 You can specify multiple Memcache nodes by passing an array of connection strings:
 
 ```javascript
@@ -102,15 +118,58 @@ console.log(value); // ['Hello, Memcache!']
 await client.quit();
 ```
 
+You can also pass an array of MemcacheNode instances for advanced configuration:
+
+```javascript
+import { Memcache, createNode } from 'memcache';
+
+// Create nodes with custom settings
+const node1 = createNode('localhost', 11211, { weight: 2 });
+const node2 = createNode('192.168.1.100', 11211, { weight: 1 });
+const node3 = createNode('192.168.1.101', 11211, { weight: 1 });
+
+// Create a client with MemcacheNode instances
+const client = new Memcache({
+  nodes: [node1, node2, node3],
+  timeout: 10000
+});
+
+// node1 will receive twice as much traffic due to higher weight
+await client.set('mykey', 'Hello, Memcache!');
+const value = await client.get('mykey');
+console.log(value); // ['Hello, Memcache!']
+
+// Close the connection
+await client.quit();
+```
+
 # API
 
 ## Constructor
 
 ```typescript
-new Memcache(options?: MemcacheOptions)
+new Memcache(options?: string | MemcacheOptions)
 ```
 
-Creates a new Memcache client instance.
+Creates a new Memcache client instance. You can pass either:
+- A **string** representing a single node URI (uses default settings)
+- A **MemcacheOptions** object for custom configuration
+
+**Examples:**
+
+```javascript
+// Single node as string
+const client = new Memcache('localhost:11211');
+
+// Single node with protocol
+const client = new Memcache('memcache://192.168.1.100:11211');
+
+// Multiple nodes with options
+const client = new Memcache({
+  nodes: ['localhost:11211', 'server2:11211'],
+  timeout: 10000
+});
+```
 
 ### Options
 
