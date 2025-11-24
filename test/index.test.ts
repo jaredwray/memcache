@@ -80,6 +80,32 @@ describe("Memcache", () => {
 			expect(testClient.nodeIds).toContain("2001:db8::1:11212");
 		});
 
+		it("should create instance with single node from string parameter", () => {
+			const testClient = new Memcache("localhost:11211");
+			expect(testClient).toBeInstanceOf(Memcache);
+			expect(testClient.nodeIds).toHaveLength(1);
+			expect(testClient.nodeIds).toContain("localhost:11211");
+		});
+
+		it("should parse string parameter with protocol", () => {
+			const testClient = new Memcache("memcache://192.168.1.100:11212");
+			expect(testClient.nodeIds).toHaveLength(1);
+			expect(testClient.nodeIds).toContain("192.168.1.100:11212");
+		});
+
+		it("should use default settings when string parameter is provided", () => {
+			const testClient = new Memcache("localhost:11211");
+			expect(testClient.timeout).toBe(5000);
+			expect(testClient.keepAlive).toBe(true);
+			expect(testClient.keepAliveDelay).toBe(1000);
+		});
+
+		it("should handle simple hostname in string parameter", () => {
+			const testClient = new Memcache("myserver");
+			expect(testClient.nodeIds).toHaveLength(1);
+			expect(testClient.nodeIds).toContain("myserver:11211");
+		});
+
 		it("should allow setting timeout via setter", () => {
 			const testClient = new Memcache();
 			expect(testClient.timeout).toBe(5000); // Default timeout
