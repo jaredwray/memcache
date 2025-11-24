@@ -118,6 +118,31 @@ console.log(value); // ['Hello, Memcache!']
 await client.quit();
 ```
 
+You can also pass an array of MemcacheNode instances for advanced configuration:
+
+```javascript
+import { Memcache, createNode } from 'memcache';
+
+// Create nodes with custom settings
+const node1 = createNode('localhost', 11211, { weight: 2 });
+const node2 = createNode('192.168.1.100', 11211, { weight: 1 });
+const node3 = createNode('192.168.1.101', 11211, { weight: 1 });
+
+// Create a client with MemcacheNode instances
+const client = new Memcache({
+  nodes: [node1, node2, node3],
+  timeout: 10000
+});
+
+// node1 will receive twice as much traffic due to higher weight
+await client.set('mykey', 'Hello, Memcache!');
+const value = await client.get('mykey');
+console.log(value); // ['Hello, Memcache!']
+
+// Close the connection
+await client.quit();
+```
+
 # API
 
 ## Constructor
