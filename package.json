@@ -34,12 +34,12 @@
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.0.13",
     "tsc": "^2.0.4",
-    "tsup": "^8.5.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.13"
   },
   "dependencies": {
     "hookified": "^1.12.2",
-    "rimraf": "^6.1.0"
+    "rimraf": "^6.1.2"
   }
 }
