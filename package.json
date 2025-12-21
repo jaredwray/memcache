@@ -46,7 +46,7 @@
     "vitest": "^4.0.16"
   },
   "dependencies": {
-    "hookified": "^1.13.0",
+    "hookified": "^1.14.0",
     "rimraf": "^6.1.2"
   },
   "files": [
