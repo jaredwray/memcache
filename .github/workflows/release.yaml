@@ -6,7 +6,6 @@ on:
     types: [released]
 
 permissions:
-  id-token: write
   contents: read    
 
 jobs:
@@ -34,5 +33,9 @@ jobs:
       run: pnpm test:ci
 
     - name: Publish
-      run: pnpm publish --no-git-checks
+      run: |
+        npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
+        npm publish --ignore-scripts
+      env:
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
