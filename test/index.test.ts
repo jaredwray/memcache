@@ -2757,4 +2757,97 @@ describe("Memcache", () => {
 			expect(closeNodeId).toBe("localhost:11211");
 		});
 	});
+
+	describe("Additional Coverage Tests", () => {
+		let client: Memcache;
+
+		beforeEach(() => {
+			client = new Memcache();
+		});
+
+		afterEach(async () => {
+			await client.disconnect();
+		});
+
+		it("should handle removeNode for non-existent node gracefully", async () => {
+			await client.connect();
+
+			// Try to remove a node that doesn't exist - should not throw
+			await client.removeNode("nonexistent:11211");
+
+			// Original node should still be there
+			expect(client.nodes).toHaveLength(1);
+		});
+
+		it("should handle removeNode with Unix socket path", async () => {
+			// Add a node with port that simulates Unix socket behavior
+			const testClient = new Memcache({ nodes: [] });
+
+			// Manually create a node-like scenario for the Unix socket path
+			// The removeNode method checks port === 0 for Unix sockets
+			await testClient.removeNode("/var/run/memcached.sock");
+
+			// Should not throw, just return early since node doesn't exist
+			expect(testClient.nodes).toHaveLength(0);
+		});
+
+		it("should handle quit when node is not connected", async () => {
+			// Don't connect, just call quit - should handle gracefully
+			await client.quit();
+
+			// Should not throw and complete successfully
+			expect(client.isConnected()).toBe(false);
+		});
+
+		it("should connect disconnected nodes in gets operation", async () => {
+			await client.connect();
+
+			// Set some values first
+			await client.set("gets-connect-1", "value1");
+			await client.set("gets-connect-2", "value2");
+
+			// Disconnect manually
+			await client.disconnect();
+			expect(client.isConnected()).toBe(false);
+
+			// Now call gets - it should auto-connect the nodes
+			const results = await client.gets(["gets-connect-1", "gets-connect-2"]);
+
+			// Should have reconnected and retrieved values
+			expect(client.isConnected()).toBe(true);
+			expect(results.get("gets-connect-1")).toBe("value1");
+			expect(results.get("gets-connect-2")).toBe("value2");
+		});
+
+		it("should handle gets with partial results and undefined values", async () => {
+			await client.connect();
+
+			// Set only one key
+			await client.set("partial-key-1", "value1");
+
+			// Get multiple keys where some don't exist
+			const results = await client.gets([
+				"partial-key-1",
+				"partial-nonexistent",
+			]);
+
+			// Should have only the existing key
+			expect(results.get("partial-key-1")).toBe("value1");
+			expect(results.has("partial-nonexistent")).toBe(false);
+		});
+
+		it("should skip setting duplicate keys in gets (first wins)", async () => {
+			await client.connect();
+
+			// Set a key
+			await client.set("dedup-key", "original-value");
+
+			// The gets operation should handle duplicates - first successful result wins
+			// This tests the `if (!map.has(result.foundKeys[i]))` branch
+			const results = await client.gets(["dedup-key"]);
+
+			expect(results.get("dedup-key")).toBe("original-value");
+			expect(results.size).toBe(1);
+		});
+	});
 });

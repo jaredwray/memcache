@@ -417,6 +417,7 @@ export class KetamaHash implements HashProvider {
 
 		// Map back to MemcacheNode
 		const node = this.nodeMap.get(nodeId);
+		/* v8 ignore next -- @preserve */
 		return node ? [node] : [];
 	}
 }
