@@ -805,5 +805,66 @@ describe("MemcacheNode", () => {
 			await expect(promise2).rejects.toThrow();
 			await expect(promise3).rejects.toThrow();
 		});
+
+		it("should reject connection when socket error occurs before connected", async () => {
+			// Use an invalid port to trigger connection error before _connected is set
+			const badNode = new MemcacheNode("localhost", 1, { timeout: 1000 });
+
+			// The connection should be rejected due to socket error
+			await expect(badNode.connect()).rejects.toThrow();
+		});
+
+		it("should handle error response for multiline command without requestedKeys", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get test_key", {
+				isMultiline: true,
+				// Note: no requestedKeys provided
+			});
+
+			// Simulate server ERROR response for multiline command
+			mockSocket.emit("data", "ERROR\r\n");
+
+			await expect(commandPromise).rejects.toThrow("ERROR");
+		});
+
+		it("should reject current command in rejectPendingCommands when current command exists", async () => {
+			await node.connect();
+
+			// Start a command that will become _currentCommand
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get some_key", {
+				isMultiline: true,
+			});
+
+			// Send partial response to set _currentCommand
+			mockSocket.emit("data", "VALUE some_key 0 5\r\n");
+
+			// Trigger close event which calls rejectPendingCommands
+			mockSocket.emit("close");
+
+			await expect(commandPromise).rejects.toThrow("Connection closed");
+		});
+
+		it("should handle SERVER_ERROR after partial VALUE response in multiline command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("get key1 key2", {
+				isMultiline: true,
+			});
+
+			// First send a VALUE line and its data
+			mockSocket.emit("data", "VALUE key1 0 5\r\n");
+			mockSocket.emit("data", "test1\r\n");
+
+			// Then send a SERVER_ERROR (simulating server issue mid-response)
+			mockSocket.emit("data", "SERVER_ERROR out of memory\r\n");
+
+			await expect(commandPromise).rejects.toThrow(
+				"SERVER_ERROR out of memory",
+			);
+		});
 	});
 });
