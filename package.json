@@ -40,14 +40,14 @@
     "@biomejs/biome": "^2.3.11",
     "@types/node": "^25.0.9",
     "@vitest/coverage-v8": "^4.0.17",
+    "rimraf": "^6.1.2",
     "tsc": "^2.0.4",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.17"
   },
   "dependencies": {
-    "hookified": "^1.14.0",
-    "rimraf": "^6.1.2"
+    "hookified": "^1.15.0"
   },
   "files": [
     "dist",
