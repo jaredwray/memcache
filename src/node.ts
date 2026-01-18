@@ -219,7 +219,7 @@ export class MemcacheNode extends Hookified {
 				// If SASL credentials are configured, authenticate before resolving
 				if (this._sasl) {
 					try {
-						await this._performSaslAuth();
+						await this.performSaslAuth();
 						// Keep socket in binary mode - SASL servers require binary protocol
 						// for all commands. Use binary* methods for operations.
 						this.emit("connect");
@@ -306,7 +306,7 @@ export class MemcacheNode extends Hookified {
 	/**
 	 * Perform SASL PLAIN authentication using the binary protocol
 	 */
-	private async _performSaslAuth(): Promise<void> {
+	private async performSaslAuth(): Promise<void> {
 		if (!this._sasl || !this._socket) {
 			throw new Error("SASL credentials not configured");
 		}
@@ -369,7 +369,7 @@ export class MemcacheNode extends Hookified {
 	 * Send a binary protocol request and wait for response.
 	 * Used internally for SASL-authenticated connections.
 	 */
-	private async _binaryRequest(packet: Buffer): Promise<Buffer> {
+	private async binaryRequest(packet: Buffer): Promise<Buffer> {
 		if (!this._socket) {
 			throw new Error("Not connected");
 		}
@@ -406,7 +406,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol GET operation
 	 */
 	public async binaryGet(key: string): Promise<string | undefined> {
-		const response = await this._binaryRequest(buildGetRequest(key));
+		const response = await this.binaryRequest(buildGetRequest(key));
 		const { header, value } = parseGetResponse(response);
 
 		if (header.status === STATUS_KEY_NOT_FOUND) {
@@ -432,7 +432,7 @@ export class MemcacheNode extends Hookified {
 		exptime = 0,
 		flags = 0,
 	): Promise<boolean> {
-		const response = await this._binaryRequest(
+		const response = await this.binaryRequest(
 			buildSetRequest(key, value, flags, exptime),
 		);
 		const header = deserializeHeader(response);
@@ -448,7 +448,7 @@ export class MemcacheNode extends Hookified {
 		exptime = 0,
 		flags = 0,
 	): Promise<boolean> {
-		const response = await this._binaryRequest(
+		const response = await this.binaryRequest(
 			buildAddRequest(key, value, flags, exptime),
 		);
 		const header = deserializeHeader(response);
@@ -464,7 +464,7 @@ export class MemcacheNode extends Hookified {
 		exptime = 0,
 		flags = 0,
 	): Promise<boolean> {
-		const response = await this._binaryRequest(
+		const response = await this.binaryRequest(
 			buildReplaceRequest(key, value, flags, exptime),
 		);
 		const header = deserializeHeader(response);
@@ -475,7 +475,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol DELETE operation
 	 */
 	public async binaryDelete(key: string): Promise<boolean> {
-		const response = await this._binaryRequest(buildDeleteRequest(key));
+		const response = await this.binaryRequest(buildDeleteRequest(key));
 		const header = deserializeHeader(response);
 		return (
 			header.status === STATUS_SUCCESS || header.status === STATUS_KEY_NOT_FOUND
@@ -491,7 +491,7 @@ export class MemcacheNode extends Hookified {
 		initial = 0,
 		exptime = 0,
 	): Promise<number | undefined> {
-		const response = await this._binaryRequest(
+		const response = await this.binaryRequest(
 			buildIncrementRequest(key, delta, initial, exptime),
 		);
 		const { header, value } = parseIncrDecrResponse(response);
@@ -512,7 +512,7 @@ export class MemcacheNode extends Hookified {
 		initial = 0,
 		exptime = 0,
 	): Promise<number | undefined> {
-		const response = await this._binaryRequest(
+		const response = await this.binaryRequest(
 			buildDecrementRequest(key, delta, initial, exptime),
 		);
 		const { header, value } = parseIncrDecrResponse(response);
@@ -528,7 +528,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol APPEND operation
 	 */
 	public async binaryAppend(key: string, value: string): Promise<boolean> {
-		const response = await this._binaryRequest(buildAppendRequest(key, value));
+		const response = await this.binaryRequest(buildAppendRequest(key, value));
 		const header = deserializeHeader(response);
 		return header.status === STATUS_SUCCESS;
 	}
@@ -537,7 +537,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol PREPEND operation
 	 */
 	public async binaryPrepend(key: string, value: string): Promise<boolean> {
-		const response = await this._binaryRequest(buildPrependRequest(key, value));
+		const response = await this.binaryRequest(buildPrependRequest(key, value));
 		const header = deserializeHeader(response);
 		return header.status === STATUS_SUCCESS;
 	}
@@ -546,7 +546,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol TOUCH operation
 	 */
 	public async binaryTouch(key: string, exptime: number): Promise<boolean> {
-		const response = await this._binaryRequest(buildTouchRequest(key, exptime));
+		const response = await this.binaryRequest(buildTouchRequest(key, exptime));
 		const header = deserializeHeader(response);
 		return header.status === STATUS_SUCCESS;
 	}
@@ -555,7 +555,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol FLUSH operation
 	 */
 	public async binaryFlush(exptime = 0): Promise<boolean> {
-		const response = await this._binaryRequest(buildFlushRequest(exptime));
+		const response = await this.binaryRequest(buildFlushRequest(exptime));
 		const header = deserializeHeader(response);
 		return header.status === STATUS_SUCCESS;
 	}
@@ -564,7 +564,7 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol VERSION operation
 	 */
 	public async binaryVersion(): Promise<string | undefined> {
-		const response = await this._binaryRequest(buildVersionRequest());
+		const response = await this.binaryRequest(buildVersionRequest());
 		const header = deserializeHeader(response);
 
 		if (header.status !== STATUS_SUCCESS) {
