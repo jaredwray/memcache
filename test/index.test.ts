@@ -288,6 +288,28 @@ describe("Memcache", () => {
 			expect(testClient.retries).toBe(0);
 			expect(testClient.retryDelay).toBe(100);
 			expect(testClient.retryBackoff).toBe(defaultRetryBackoff);
+			expect(testClient.retryOnlyIdempotent).toBe(true);
+		});
+
+		it("should default retryOnlyIdempotent to true", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryOnlyIdempotent).toBe(true);
+		});
+
+		it("should allow setting retryOnlyIdempotent via constructor", () => {
+			const testClient = new Memcache({ retryOnlyIdempotent: false });
+			expect(testClient.retryOnlyIdempotent).toBe(false);
+		});
+
+		it("should allow getting and setting retryOnlyIdempotent property", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryOnlyIdempotent).toBe(true);
+
+			testClient.retryOnlyIdempotent = false;
+			expect(testClient.retryOnlyIdempotent).toBe(false);
+
+			testClient.retryOnlyIdempotent = true;
+			expect(testClient.retryOnlyIdempotent).toBe(true);
 		});
 
 		it("defaultRetryBackoff should return fixed delay", () => {
@@ -308,7 +330,11 @@ describe("Memcache", () => {
 
 	describe("Retry Behavior", () => {
 		it("should retry on failure and succeed on subsequent attempt", async () => {
-			const testClient = new Memcache({ retries: 2, retryDelay: 10 });
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 10,
+				retryOnlyIdempotent: false,
+			});
 			await testClient.connect();
 
 			const node = testClient.nodes[0];
@@ -337,7 +363,11 @@ describe("Memcache", () => {
 		});
 
 		it("should return undefined after all retries exhausted", async () => {
-			const testClient = new Memcache({ retries: 2, retryDelay: 10 });
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 10,
+				retryOnlyIdempotent: false,
+			});
 			await testClient.connect();
 
 			const node = testClient.nodes[0];
@@ -366,6 +396,7 @@ describe("Memcache", () => {
 				retries: 3,
 				retryDelay: 10,
 				retryBackoff: customBackoff,
+				retryOnlyIdempotent: false,
 			});
 			await testClient.connect();
 
@@ -382,7 +413,11 @@ describe("Memcache", () => {
 		});
 
 		it("should respect per-call retry override", async () => {
-			const testClient = new Memcache({ retries: 0, retryDelay: 10 });
+			const testClient = new Memcache({
+				retries: 0,
+				retryDelay: 10,
+				retryOnlyIdempotent: false,
+			});
 			await testClient.connect();
 
 			const node = testClient.nodes[0];
@@ -414,7 +449,11 @@ describe("Memcache", () => {
 		});
 
 		it("should skip delay when retryDelay is 0", async () => {
-			const testClient = new Memcache({ retries: 2, retryDelay: 0 });
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 0,
+				retryOnlyIdempotent: false,
+			});
 			await testClient.connect();
 
 			const node = testClient.nodes[0];
@@ -446,6 +485,7 @@ describe("Memcache", () => {
 				retries: 3,
 				retryDelay: 10,
 				retryBackoff: exponentialRetryBackoff,
+				retryOnlyIdempotent: false,
 			});
 			await testClient.connect();
 
@@ -472,6 +512,114 @@ describe("Memcache", () => {
 				const delay2 = startTimes[2] - startTimes[1];
 				expect(delay2).toBeGreaterThanOrEqual(15); // ~20ms with tolerance
 			}
+
+			await testClient.disconnect();
+		});
+
+		it("should not retry when retryOnlyIdempotent is true and idempotent is not set", async () => {
+			const testClient = new Memcache({
+				retries: 3,
+				retryDelay: 10,
+				retryOnlyIdempotent: true, // default, but explicit for clarity
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+
+			vi.spyOn(node, "command").mockImplementation(async () => {
+				callCount++;
+				throw new Error("Always fails");
+			});
+
+			// Without idempotent flag, should NOT retry despite retries: 3
+			await testClient.execute("incr counter 1", testClient.nodes);
+
+			expect(callCount).toBe(1); // Only initial attempt, no retries
+
+			await testClient.disconnect();
+		});
+
+		it("should retry when retryOnlyIdempotent is true and idempotent is true", async () => {
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 10,
+				retryOnlyIdempotent: true,
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+
+			vi.spyOn(node, "command").mockImplementation(async () => {
+				callCount++;
+				throw new Error("Always fails");
+			});
+
+			// With idempotent: true, should retry
+			await testClient.execute("get mykey", testClient.nodes, {
+				idempotent: true,
+			});
+
+			expect(callCount).toBe(3); // Initial + 2 retries
+
+			await testClient.disconnect();
+		});
+
+		it("should retry all commands when retryOnlyIdempotent is false", async () => {
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 10,
+				retryOnlyIdempotent: false,
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+
+			vi.spyOn(node, "command").mockImplementation(async () => {
+				callCount++;
+				throw new Error("Always fails");
+			});
+
+			// Even without idempotent flag, should retry because retryOnlyIdempotent is false
+			await testClient.execute("incr counter 1", testClient.nodes);
+
+			expect(callCount).toBe(3); // Initial + 2 retries
+
+			await testClient.disconnect();
+		});
+
+		it("should allow idempotent override on per-call basis", async () => {
+			const testClient = new Memcache({
+				retries: 2,
+				retryDelay: 10,
+				retryOnlyIdempotent: true,
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+			const originalCommand = node.command.bind(node);
+
+			vi.spyOn(node, "command").mockImplementation(async (cmd, options) => {
+				callCount++;
+				if (callCount === 1) {
+					throw new Error("Simulated failure");
+				}
+				return originalCommand(cmd, options);
+			});
+
+			const uniqueKey = `idempotent-override-${Date.now()}`;
+			// Explicitly mark as idempotent to enable retries
+			const results = await testClient.execute(
+				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				testClient.nodes,
+				{ idempotent: true },
+			);
+
+			expect(results[0]).toBe("STORED");
+			expect(callCount).toBe(2); // First failed, second succeeded
 
 			await testClient.disconnect();
 		});

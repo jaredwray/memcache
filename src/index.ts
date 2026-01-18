@@ -99,6 +99,15 @@ export interface MemcacheOptions {
 	 * @default defaultRetryBackoff (fixed delay)
 	 */
 	retryBackoff?: RetryBackoffFunction;
+
+	/**
+	 * When true, retries are only performed for commands marked as idempotent.
+	 * This prevents accidental double-execution of non-idempotent operations
+	 * (like incr, decr, append) if the server applies the command but the
+	 * client doesn't receive the response before a timeout/disconnect.
+	 * @default true
+	 */
+	retryOnlyIdempotent?: boolean;
 }
 
 export interface MemcacheStats {
@@ -126,6 +135,14 @@ export interface ExecuteOptions {
 	 * If undefined, uses the instance-level retryBackoff setting.
 	 */
 	retryBackoff?: RetryBackoffFunction;
+
+	/**
+	 * Mark this command as idempotent, allowing retries even when
+	 * retryOnlyIdempotent is true. Set this for read operations (get, gets)
+	 * or operations that are safe to repeat (set with same value).
+	 * @default false
+	 */
+	idempotent?: boolean;
 }
 
 export class Memcache extends Hookified {
@@ -137,6 +154,7 @@ export class Memcache extends Hookified {
 	private _retries: number;
 	private _retryDelay: number;
 	private _retryBackoff: RetryBackoffFunction;
+	private _retryOnlyIdempotent: boolean;
 
 	constructor(options?: string | MemcacheOptions) {
 		super();
@@ -150,6 +168,7 @@ export class Memcache extends Hookified {
 			this._retries = 0;
 			this._retryDelay = 100;
 			this._retryBackoff = defaultRetryBackoff;
+			this._retryOnlyIdempotent = true;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -160,6 +179,7 @@ export class Memcache extends Hookified {
 			this._retries = options?.retries ?? 0;
 			this._retryDelay = options?.retryDelay ?? 100;
 			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
+			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 
 			// Add nodes if provided, otherwise add default node
 			const nodeUris = options?.nodes || ["localhost:11211"];
@@ -332,6 +352,27 @@ export class Memcache extends Hookified {
 	 */
 	public set retryBackoff(value: RetryBackoffFunction) {
 		this._retryBackoff = value;
+	}
+
+	/**
+	 * Get whether retries are restricted to idempotent commands only.
+	 * @returns {boolean}
+	 * @default true
+	 */
+	public get retryOnlyIdempotent(): boolean {
+		return this._retryOnlyIdempotent;
+	}
+
+	/**
+	 * Set whether retries are restricted to idempotent commands only.
+	 * When true (default), retries only occur for commands explicitly marked
+	 * as idempotent via ExecuteOptions. This prevents accidental double-execution
+	 * of non-idempotent operations like incr, decr, append, etc.
+	 * @param {boolean} value
+	 * @default true
+	 */
+	public set retryOnlyIdempotent(value: boolean) {
+		this._retryOnlyIdempotent = value;
 	}
 
 	/**
@@ -1079,9 +1120,16 @@ export class Memcache extends Hookified {
 		nodes: MemcacheNode[],
 		options?: ExecuteOptions,
 	): Promise<unknown[]> {
-		const maxRetries = options?.retries ?? this._retries;
+		const configuredRetries = options?.retries ?? this._retries;
 		const retryDelay = options?.retryDelay ?? this._retryDelay;
 		const retryBackoff = options?.retryBackoff ?? this._retryBackoff;
+
+		// Determine effective max retries based on idempotent flag
+		// If retryOnlyIdempotent is true (default), only retry if idempotent is explicitly true
+		// This prevents accidental double-execution of non-idempotent operations
+		const isIdempotent = options?.idempotent === true;
+		const maxRetries =
+			this._retryOnlyIdempotent && !isIdempotent ? 0 : configuredRetries;
 
 		const promises = nodes.map(async (node) => {
 			return this.executeWithRetry(
