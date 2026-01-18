@@ -306,6 +306,177 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("Retry Behavior", () => {
+		it("should retry on failure and succeed on subsequent attempt", async () => {
+			const testClient = new Memcache({ retries: 2, retryDelay: 10 });
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+			const originalCommand = node.command.bind(node);
+
+			vi.spyOn(node, "command").mockImplementation(async (cmd, options) => {
+				callCount++;
+				if (callCount === 1) {
+					throw new Error("Simulated failure");
+				}
+				return originalCommand(cmd, options);
+			});
+
+			const uniqueKey = `retry-test-${Date.now()}`;
+			// Use execute directly to test retry behavior
+			const results = await testClient.execute(
+				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				testClient.nodes,
+			);
+
+			expect(results[0]).toBe("STORED");
+			expect(callCount).toBe(2); // First failed, second succeeded
+
+			await testClient.disconnect();
+		});
+
+		it("should return undefined after all retries exhausted", async () => {
+			const testClient = new Memcache({ retries: 2, retryDelay: 10 });
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			vi.spyOn(node, "command").mockRejectedValue(new Error("Always fails"));
+
+			// Use execute directly to test retry behavior
+			const results = await testClient.execute(
+				"get test-key",
+				testClient.nodes,
+			);
+
+			expect(results[0]).toBeUndefined();
+
+			await testClient.disconnect();
+		});
+
+		it("should use custom backoff function for retry delays", async () => {
+			const delays: number[] = [];
+			const customBackoff: RetryBackoffFunction = (attempt, baseDelay) => {
+				const delay = baseDelay * (attempt + 1);
+				delays.push(delay);
+				return delay;
+			};
+
+			const testClient = new Memcache({
+				retries: 3,
+				retryDelay: 10,
+				retryBackoff: customBackoff,
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			vi.spyOn(node, "command").mockRejectedValue(new Error("Always fails"));
+
+			// Use execute directly to test retry behavior
+			await testClient.execute("get test-key", testClient.nodes);
+
+			// Should have called backoff for attempts 0, 1, 2 (3 retries)
+			expect(delays).toEqual([10, 20, 30]);
+
+			await testClient.disconnect();
+		});
+
+		it("should respect per-call retry override", async () => {
+			const testClient = new Memcache({ retries: 0, retryDelay: 10 });
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+			const originalCommand = node.command.bind(node);
+
+			vi.spyOn(node, "command").mockImplementation(async (cmd, options) => {
+				callCount++;
+				if (callCount === 1) {
+					throw new Error("Simulated failure");
+				}
+				return originalCommand(cmd, options);
+			});
+
+			const uniqueKey = `retry-override-${Date.now()}`;
+			// Override with retries: 2 for this specific call
+			await testClient.execute(
+				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				testClient.nodes,
+				{
+					retries: 2,
+					retryDelay: 10,
+				},
+			);
+
+			expect(callCount).toBe(2); // First failed, second succeeded
+
+			await testClient.disconnect();
+		});
+
+		it("should skip delay when retryDelay is 0", async () => {
+			const testClient = new Memcache({ retries: 2, retryDelay: 0 });
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			let callCount = 0;
+			const originalCommand = node.command.bind(node);
+
+			vi.spyOn(node, "command").mockImplementation(async (cmd, options) => {
+				callCount++;
+				if (callCount === 1) {
+					throw new Error("Simulated failure");
+				}
+				return originalCommand(cmd, options);
+			});
+
+			const uniqueKey = `retry-no-delay-${Date.now()}`;
+			// Use execute directly to test retry behavior
+			await testClient.execute(
+				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				testClient.nodes,
+			);
+
+			expect(callCount).toBe(2);
+
+			await testClient.disconnect();
+		});
+
+		it("should use exponential backoff correctly", async () => {
+			const testClient = new Memcache({
+				retries: 3,
+				retryDelay: 10,
+				retryBackoff: exponentialRetryBackoff,
+			});
+			await testClient.connect();
+
+			const node = testClient.nodes[0];
+			const startTimes: number[] = [];
+
+			vi.spyOn(node, "command").mockImplementation(async () => {
+				startTimes.push(Date.now());
+				throw new Error("Always fails");
+			});
+
+			await testClient.execute("get test-key", testClient.nodes);
+
+			// Should have 4 attempts (initial + 3 retries)
+			expect(startTimes.length).toBe(4);
+
+			// Verify delays are approximately exponential (10, 20, 40ms)
+			// Allow some tolerance for timing
+			if (startTimes.length >= 2) {
+				const delay1 = startTimes[1] - startTimes[0];
+				expect(delay1).toBeGreaterThanOrEqual(8); // ~10ms with tolerance
+			}
+			if (startTimes.length >= 3) {
+				const delay2 = startTimes[2] - startTimes[1];
+				expect(delay2).toBeGreaterThanOrEqual(15); // ~20ms with tolerance
+			}
+
+			await testClient.disconnect();
+		});
+	});
+
 	describe("parseUri", () => {
 		it("should parse host and port from simple format", () => {
 			const result = client.parseUri("localhost:11211");
