@@ -1,14 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildAppendRequest,
+	buildFlushRequest,
+	buildPrependRequest,
+	buildQuitRequest,
 	buildSaslListMechsRequest,
 	buildSaslPlainRequest,
+	buildStatRequest,
+	buildTouchRequest,
+	buildVersionRequest,
 	deserializeHeader,
 	HEADER_SIZE,
+	OPCODE_APPEND,
+	OPCODE_FLUSH,
+	OPCODE_PREPEND,
+	OPCODE_QUIT,
 	OPCODE_SASL_AUTH,
 	OPCODE_SASL_LIST_MECHS,
+	OPCODE_STAT,
+	OPCODE_TOUCH,
+	OPCODE_VERSION,
+	parseGetResponse,
+	parseIncrDecrResponse,
 	REQUEST_MAGIC,
 	RESPONSE_MAGIC,
 	STATUS_AUTH_ERROR,
+	STATUS_KEY_NOT_FOUND,
 	STATUS_SUCCESS,
 	serializeHeader,
 } from "../src/binary-protocol.js";
@@ -290,6 +307,326 @@ describe("Binary Protocol", () => {
 		it("should have zero key length", () => {
 			const packet = buildSaslListMechsRequest();
 			expect(packet.readUInt16BE(2)).toBe(0);
+		});
+	});
+
+	describe("buildAppendRequest", () => {
+		it("should create packet with correct opcode", () => {
+			const packet = buildAppendRequest("key", "value");
+			expect(packet.readUInt8(1)).toBe(OPCODE_APPEND);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildAppendRequest("key", "value");
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should set correct key length", () => {
+			const packet = buildAppendRequest("testkey", "value");
+			expect(packet.readUInt16BE(2)).toBe(7); // "testkey".length
+		});
+
+		it("should set correct total body length", () => {
+			const packet = buildAppendRequest("key", "value");
+			// Total body = key (3) + value (5) = 8
+			expect(packet.readUInt32BE(8)).toBe(8);
+		});
+
+		it("should include key and value in body", () => {
+			const packet = buildAppendRequest("key", "value");
+			const body = packet.subarray(HEADER_SIZE);
+			expect(body.toString()).toBe("keyvalue");
+		});
+
+		it("should handle Buffer value", () => {
+			const valueBuf = Buffer.from("buffervalue");
+			const packet = buildAppendRequest("key", valueBuf);
+			const body = packet.subarray(HEADER_SIZE);
+			expect(body.toString()).toBe("keybuffervalue");
+		});
+	});
+
+	describe("buildPrependRequest", () => {
+		it("should create packet with correct opcode", () => {
+			const packet = buildPrependRequest("key", "value");
+			expect(packet.readUInt8(1)).toBe(OPCODE_PREPEND);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildPrependRequest("key", "value");
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should set correct key length", () => {
+			const packet = buildPrependRequest("mykey", "value");
+			expect(packet.readUInt16BE(2)).toBe(5); // "mykey".length
+		});
+
+		it("should set correct total body length", () => {
+			const packet = buildPrependRequest("key", "value");
+			expect(packet.readUInt32BE(8)).toBe(8); // key (3) + value (5)
+		});
+
+		it("should include key and value in body", () => {
+			const packet = buildPrependRequest("key", "value");
+			const body = packet.subarray(HEADER_SIZE);
+			expect(body.toString()).toBe("keyvalue");
+		});
+
+		it("should handle Buffer value", () => {
+			const valueBuf = Buffer.from("bufval");
+			const packet = buildPrependRequest("k", valueBuf);
+			const body = packet.subarray(HEADER_SIZE);
+			expect(body.toString()).toBe("kbufval");
+		});
+	});
+
+	describe("buildTouchRequest", () => {
+		it("should create packet with correct opcode", () => {
+			const packet = buildTouchRequest("key", 3600);
+			expect(packet.readUInt8(1)).toBe(OPCODE_TOUCH);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildTouchRequest("key", 3600);
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should set extras length to 4", () => {
+			const packet = buildTouchRequest("key", 3600);
+			expect(packet.readUInt8(4)).toBe(4);
+		});
+
+		it("should set correct key length", () => {
+			const packet = buildTouchRequest("testkey", 3600);
+			expect(packet.readUInt16BE(2)).toBe(7);
+		});
+
+		it("should set correct total body length", () => {
+			const packet = buildTouchRequest("key", 3600);
+			// extras (4) + key (3) = 7
+			expect(packet.readUInt32BE(8)).toBe(7);
+		});
+
+		it("should include exptime in extras", () => {
+			const packet = buildTouchRequest("key", 3600);
+			const exptime = packet.readUInt32BE(HEADER_SIZE);
+			expect(exptime).toBe(3600);
+		});
+
+		it("should include key after extras", () => {
+			const packet = buildTouchRequest("mykey", 100);
+			const key = packet.subarray(HEADER_SIZE + 4, HEADER_SIZE + 4 + 5);
+			expect(key.toString()).toBe("mykey");
+		});
+	});
+
+	describe("buildFlushRequest", () => {
+		it("should create packet with correct opcode", () => {
+			const packet = buildFlushRequest();
+			expect(packet.readUInt8(1)).toBe(OPCODE_FLUSH);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildFlushRequest();
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should set extras length to 4", () => {
+			const packet = buildFlushRequest();
+			expect(packet.readUInt8(4)).toBe(4);
+		});
+
+		it("should set total body length to 4", () => {
+			const packet = buildFlushRequest();
+			expect(packet.readUInt32BE(8)).toBe(4);
+		});
+
+		it("should default exptime to 0", () => {
+			const packet = buildFlushRequest();
+			const exptime = packet.readUInt32BE(HEADER_SIZE);
+			expect(exptime).toBe(0);
+		});
+
+		it("should set custom exptime", () => {
+			const packet = buildFlushRequest(60);
+			const exptime = packet.readUInt32BE(HEADER_SIZE);
+			expect(exptime).toBe(60);
+		});
+	});
+
+	describe("buildVersionRequest", () => {
+		it("should create a header-only packet", () => {
+			const packet = buildVersionRequest();
+			expect(packet.length).toBe(HEADER_SIZE);
+		});
+
+		it("should set correct opcode", () => {
+			const packet = buildVersionRequest();
+			expect(packet.readUInt8(1)).toBe(OPCODE_VERSION);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildVersionRequest();
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should have zero body length", () => {
+			const packet = buildVersionRequest();
+			expect(packet.readUInt32BE(8)).toBe(0);
+		});
+	});
+
+	describe("buildStatRequest", () => {
+		it("should create header-only packet when no key provided", () => {
+			const packet = buildStatRequest();
+			expect(packet.length).toBe(HEADER_SIZE);
+		});
+
+		it("should set correct opcode", () => {
+			const packet = buildStatRequest();
+			expect(packet.readUInt8(1)).toBe(OPCODE_STAT);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildStatRequest();
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should have zero body length when no key", () => {
+			const packet = buildStatRequest();
+			expect(packet.readUInt32BE(8)).toBe(0);
+		});
+
+		it("should include key when provided", () => {
+			const packet = buildStatRequest("items");
+			expect(packet.length).toBe(HEADER_SIZE + 5);
+		});
+
+		it("should set key length when key provided", () => {
+			const packet = buildStatRequest("slabs");
+			expect(packet.readUInt16BE(2)).toBe(5);
+		});
+
+		it("should set body length to key length when key provided", () => {
+			const packet = buildStatRequest("items");
+			expect(packet.readUInt32BE(8)).toBe(5);
+		});
+
+		it("should include key in body", () => {
+			const packet = buildStatRequest("items");
+			const key = packet.subarray(HEADER_SIZE);
+			expect(key.toString()).toBe("items");
+		});
+	});
+
+	describe("buildQuitRequest", () => {
+		it("should create a header-only packet", () => {
+			const packet = buildQuitRequest();
+			expect(packet.length).toBe(HEADER_SIZE);
+		});
+
+		it("should set correct opcode", () => {
+			const packet = buildQuitRequest();
+			expect(packet.readUInt8(1)).toBe(OPCODE_QUIT);
+		});
+
+		it("should set request magic byte", () => {
+			const packet = buildQuitRequest();
+			expect(packet.readUInt8(0)).toBe(REQUEST_MAGIC);
+		});
+
+		it("should have zero body length", () => {
+			const packet = buildQuitRequest();
+			expect(packet.readUInt32BE(8)).toBe(0);
+		});
+	});
+
+	describe("parseGetResponse", () => {
+		it("should return undefined value when status is not SUCCESS", () => {
+			const buf = Buffer.alloc(HEADER_SIZE);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_KEY_NOT_FOUND, 6);
+			const result = parseGetResponse(buf);
+			expect(result.header.status).toBe(STATUS_KEY_NOT_FOUND);
+			expect(result.value).toBeUndefined();
+			expect(result.key).toBeUndefined();
+		});
+
+		it("should return undefined value when status is AUTH_ERROR", () => {
+			const buf = Buffer.alloc(HEADER_SIZE);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_AUTH_ERROR, 6);
+			const result = parseGetResponse(buf);
+			expect(result.header.status).toBe(STATUS_AUTH_ERROR);
+			expect(result.value).toBeUndefined();
+		});
+
+		it("should parse successful response with value", () => {
+			// Create a successful GET response
+			const value = "testvalue";
+			const extras = Buffer.alloc(4); // flags
+			const valueBuf = Buffer.from(value);
+			const totalBody = extras.length + valueBuf.length;
+
+			const header = Buffer.alloc(HEADER_SIZE);
+			header.writeUInt8(RESPONSE_MAGIC, 0);
+			header.writeUInt16BE(STATUS_SUCCESS, 6);
+			header.writeUInt8(4, 4); // extrasLength
+			header.writeUInt32BE(totalBody, 8);
+
+			const buf = Buffer.concat([header, extras, valueBuf]);
+			const result = parseGetResponse(buf);
+
+			expect(result.header.status).toBe(STATUS_SUCCESS);
+			expect(result.value?.toString()).toBe(value);
+		});
+	});
+
+	describe("parseIncrDecrResponse", () => {
+		it("should return undefined value when status is not SUCCESS", () => {
+			const buf = Buffer.alloc(HEADER_SIZE);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_KEY_NOT_FOUND, 6);
+			const result = parseIncrDecrResponse(buf);
+			expect(result.header.status).toBe(STATUS_KEY_NOT_FOUND);
+			expect(result.value).toBeUndefined();
+		});
+
+		it("should return undefined value when body length is less than 8", () => {
+			const buf = Buffer.alloc(HEADER_SIZE + 4);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_SUCCESS, 6);
+			buf.writeUInt32BE(4, 8); // totalBodyLength = 4 (less than 8)
+			const result = parseIncrDecrResponse(buf);
+			expect(result.value).toBeUndefined();
+		});
+
+		it("should parse successful response with value", () => {
+			const buf = Buffer.alloc(HEADER_SIZE + 8);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_SUCCESS, 6);
+			buf.writeUInt32BE(8, 8); // totalBodyLength = 8
+			// Write value as 64-bit big-endian: 42
+			buf.writeUInt32BE(0, HEADER_SIZE); // high 32 bits
+			buf.writeUInt32BE(42, HEADER_SIZE + 4); // low 32 bits
+
+			const result = parseIncrDecrResponse(buf);
+			expect(result.header.status).toBe(STATUS_SUCCESS);
+			expect(result.value).toBe(42);
+		});
+
+		it("should parse large 64-bit values", () => {
+			const buf = Buffer.alloc(HEADER_SIZE + 8);
+			buf.writeUInt8(RESPONSE_MAGIC, 0);
+			buf.writeUInt16BE(STATUS_SUCCESS, 6);
+			buf.writeUInt32BE(8, 8);
+			// Write a large value: 0x0000000100000000 (4294967296)
+			buf.writeUInt32BE(1, HEADER_SIZE); // high 32 bits
+			buf.writeUInt32BE(0, HEADER_SIZE + 4); // low 32 bits
+
+			const result = parseIncrDecrResponse(buf);
+			expect(result.value).toBe(0x100000000);
 		});
 	});
 });
