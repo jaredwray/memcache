@@ -651,7 +651,8 @@ describe("MemcacheNode", () => {
 
 		it("should handle partial data delivery for value bytes", async () => {
 			const key = generateKey("partial");
-			const value = generateValue();
+			// Use a value guaranteed to be longer than 5 characters for proper partial delivery testing
+			const value = generateLargeValue(20);
 			const bytes = Buffer.byteLength(value);
 
 			// Set the value first
