@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Memcache, { createNode, MemcacheEvents } from "../src/index";
+import Memcache, { createNode, MemcacheEvents, ModulaHash } from "../src/index";
 import { KetamaHash } from "../src/ketama";
 
 describe("Memcache", () => {
@@ -167,6 +167,31 @@ describe("Memcache", () => {
 			const customHashProvider = new KetamaHash();
 			testClient.hash = customHashProvider;
 			expect(testClient.hash).toBe(customHashProvider);
+		});
+
+		it("should initialize with custom hash provider from options", () => {
+			const modulaHash = new ModulaHash();
+			const testClient = new Memcache({
+				nodes: ["localhost:11211"],
+				hash: modulaHash,
+			});
+
+			expect(testClient.hash).toBe(modulaHash);
+			expect(testClient.hash.name).toBe("modula");
+		});
+
+		it("should use KetamaHash by default when hash option is not provided", () => {
+			const testClient = new Memcache({
+				nodes: ["localhost:11211"],
+			});
+
+			expect(testClient.hash.name).toBe("ketama");
+		});
+
+		it("should use KetamaHash when initialized with string URI", () => {
+			const testClient = new Memcache("localhost:11211");
+
+			expect(testClient.hash.name).toBe("ketama");
 		});
 	});
 
