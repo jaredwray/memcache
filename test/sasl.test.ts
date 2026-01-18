@@ -220,6 +220,122 @@ describe("SASL Authentication", () => {
 			// Cleanup
 			await node.binaryDelete(key);
 		});
+
+		it("should perform append/prepend operations with SASL using binary protocol", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const key = generateKey("sasl-append-prepend");
+			const node = client.nodes[0];
+
+			// Set initial value
+			await node.binarySet(key, "middle");
+
+			// Append
+			const appendResult = await node.binaryAppend(key, "-suffix");
+			expect(appendResult).toBe(true);
+
+			// Prepend
+			const prependResult = await node.binaryPrepend(key, "prefix-");
+			expect(prependResult).toBe(true);
+
+			// Verify
+			const getResult = await node.binaryGet(key);
+			expect(getResult).toBe("prefix-middle-suffix");
+
+			// Cleanup
+			await node.binaryDelete(key);
+		});
+
+		it("should perform touch operation with SASL using binary protocol", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const key = generateKey("sasl-touch");
+			const node = client.nodes[0];
+
+			// Set a key
+			await node.binarySet(key, "touchme");
+
+			// Touch to update expiration
+			const touchResult = await node.binaryTouch(key, 3600);
+			expect(touchResult).toBe(true);
+
+			// Key should still exist
+			const getResult = await node.binaryGet(key);
+			expect(getResult).toBe("touchme");
+
+			// Cleanup
+			await node.binaryDelete(key);
+		});
+
+		it("should get version with SASL using binary protocol", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const node = client.nodes[0];
+			const version = await node.binaryVersion();
+
+			expect(version).toBeDefined();
+			expect(typeof version).toBe("string");
+			expect(version?.length).toBeGreaterThan(0);
+		});
+
+		it("should get stats with SASL using binary protocol", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const node = client.nodes[0];
+			const stats = await node.binaryStats();
+
+			expect(stats).toBeDefined();
+			expect(typeof stats).toBe("object");
+			expect(stats.pid).toBeDefined();
+		});
+
+		it("should return undefined for binaryGet on non-existent key", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const node = client.nodes[0];
+			const result = await node.binaryGet("nonexistent-key-12345");
+
+			expect(result).toBeUndefined();
+		});
+
+		it("should call binaryQuit without error", async () => {
+			client = new Memcache({
+				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await client.connect();
+
+			const node = client.nodes[0];
+
+			// binaryQuit should not throw
+			await expect(node.binaryQuit()).resolves.toBeUndefined();
+		});
 	});
 
 	describe("createNode factory with SASL", () => {
