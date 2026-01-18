@@ -9,6 +9,7 @@ import Memcache, {
 	type RetryBackoffFunction,
 } from "../src/index";
 import { KetamaHash } from "../src/ketama";
+import { generateKey, generateValue } from "./test-utils.js";
 
 describe("Memcache", () => {
 	let client: Memcache;
@@ -349,10 +350,11 @@ describe("Memcache", () => {
 				return originalCommand(cmd, options);
 			});
 
-			const uniqueKey = `retry-test-${Date.now()}`;
+			const uniqueKey = generateKey("retry");
+			const testValue = generateValue();
 			// Use execute directly to test retry behavior
 			const results = await testClient.execute(
-				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				`set ${uniqueKey} 0 0 ${Buffer.byteLength(testValue)}\r\n${testValue}`,
 				testClient.nodes,
 			);
 
@@ -374,8 +376,9 @@ describe("Memcache", () => {
 			vi.spyOn(node, "command").mockRejectedValue(new Error("Always fails"));
 
 			// Use execute directly to test retry behavior
+			const testKey = generateKey("exhausted");
 			const results = await testClient.execute(
-				"get test-key",
+				`get ${testKey}`,
 				testClient.nodes,
 			);
 
@@ -404,7 +407,8 @@ describe("Memcache", () => {
 			vi.spyOn(node, "command").mockRejectedValue(new Error("Always fails"));
 
 			// Use execute directly to test retry behavior
-			await testClient.execute("get test-key", testClient.nodes);
+			const testKey = generateKey("backoff");
+			await testClient.execute(`get ${testKey}`, testClient.nodes);
 
 			// Should have called backoff for attempts 0, 1, 2 (3 retries)
 			expect(delays).toEqual([10, 20, 30]);
@@ -432,10 +436,11 @@ describe("Memcache", () => {
 				return originalCommand(cmd, options);
 			});
 
-			const uniqueKey = `retry-override-${Date.now()}`;
+			const uniqueKey = generateKey("retry-override");
+			const testValue = generateValue();
 			// Override with retries: 2 for this specific call
 			await testClient.execute(
-				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				`set ${uniqueKey} 0 0 ${Buffer.byteLength(testValue)}\r\n${testValue}`,
 				testClient.nodes,
 				{
 					retries: 2,
@@ -468,10 +473,11 @@ describe("Memcache", () => {
 				return originalCommand(cmd, options);
 			});
 
-			const uniqueKey = `retry-no-delay-${Date.now()}`;
+			const uniqueKey = generateKey("retry-nodelay");
+			const testValue = generateValue();
 			// Use execute directly to test retry behavior
 			await testClient.execute(
-				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				`set ${uniqueKey} 0 0 ${Buffer.byteLength(testValue)}\r\n${testValue}`,
 				testClient.nodes,
 			);
 
@@ -497,7 +503,8 @@ describe("Memcache", () => {
 				throw new Error("Always fails");
 			});
 
-			await testClient.execute("get test-key", testClient.nodes);
+			const testKey = generateKey("exponential");
+			await testClient.execute(`get ${testKey}`, testClient.nodes);
 
 			// Should have 4 attempts (initial + 3 retries)
 			expect(startTimes.length).toBe(4);
@@ -533,7 +540,8 @@ describe("Memcache", () => {
 			});
 
 			// Without idempotent flag, should NOT retry despite retries: 3
-			await testClient.execute("incr counter 1", testClient.nodes);
+			const counterKey = generateKey("counter");
+			await testClient.execute(`incr ${counterKey} 1`, testClient.nodes);
 
 			expect(callCount).toBe(1); // Only initial attempt, no retries
 
@@ -557,7 +565,8 @@ describe("Memcache", () => {
 			});
 
 			// With idempotent: true, should retry
-			await testClient.execute("get mykey", testClient.nodes, {
+			const testKey = generateKey("idempotent");
+			await testClient.execute(`get ${testKey}`, testClient.nodes, {
 				idempotent: true,
 			});
 
@@ -583,7 +592,8 @@ describe("Memcache", () => {
 			});
 
 			// Even without idempotent flag, should retry because retryOnlyIdempotent is false
-			await testClient.execute("incr counter 1", testClient.nodes);
+			const counterKey = generateKey("counter");
+			await testClient.execute(`incr ${counterKey} 1`, testClient.nodes);
 
 			expect(callCount).toBe(3); // Initial + 2 retries
 
@@ -610,10 +620,11 @@ describe("Memcache", () => {
 				return originalCommand(cmd, options);
 			});
 
-			const uniqueKey = `idempotent-override-${Date.now()}`;
+			const uniqueKey = generateKey("idempotent-override");
+			const testValue = generateValue();
 			// Explicitly mark as idempotent to enable retries
 			const results = await testClient.execute(
-				`set ${uniqueKey} 0 0 10\r\ntest-value`,
+				`set ${uniqueKey} 0 0 ${Buffer.byteLength(testValue)}\r\n${testValue}`,
 				testClient.nodes,
 				{ idempotent: true },
 			);
@@ -810,7 +821,9 @@ describe("Memcache", () => {
 			expect(testClient.isConnected()).toBe(false);
 
 			// This should auto-connect
-			await testClient.set("lazy-test", "value");
+			const key = generateKey("lazy");
+			const value = generateValue();
+			await testClient.set(key, value);
 			expect(testClient.isConnected()).toBe(true);
 
 			await testClient.disconnect();
@@ -868,18 +881,21 @@ describe("Memcache", () => {
 			expect(testClient.isConnected()).toBe(true);
 
 			// Set a value to ensure connection is working
-			await testClient.set("reconnect-test", "initial-value");
-			const value1 = await testClient.get("reconnect-test");
-			expect(value1).toBe("initial-value");
+			const key = generateKey("reconnect");
+			const initialValue = generateValue();
+			await testClient.set(key, initialValue);
+			const value1 = await testClient.get(key);
+			expect(value1).toBe(initialValue);
 
 			// Reconnect
 			await testClient.reconnect();
 			expect(testClient.isConnected()).toBe(true);
 
 			// Verify we can still execute commands after reconnect
-			await testClient.set("reconnect-test", "new-value");
-			const value2 = await testClient.get("reconnect-test");
-			expect(value2).toBe("new-value");
+			const newValue = generateValue();
+			await testClient.set(key, newValue);
+			const value2 = await testClient.get(key);
+			expect(value2).toBe(newValue);
 
 			await testClient.disconnect();
 		});
@@ -894,18 +910,22 @@ describe("Memcache", () => {
 			expect(testClient.isConnected()).toBe(true);
 
 			// Set values on different nodes
-			await testClient.set("key1", "value1");
-			await testClient.set("key2", "value2");
+			const key1 = generateKey("multi1");
+			const key2 = generateKey("multi2");
+			const value1 = generateValue();
+			const value2 = generateValue();
+			await testClient.set(key1, value1);
+			await testClient.set(key2, value2);
 
 			// Reconnect all nodes
 			await testClient.reconnect();
 			expect(testClient.isConnected()).toBe(true);
 
 			// Verify all nodes work after reconnect
-			const value1 = await testClient.get("key1");
-			const value2 = await testClient.get("key2");
-			expect(value1).toBe("value1");
-			expect(value2).toBe("value2");
+			const getValue1 = await testClient.get(key1);
+			const getValue2 = await testClient.get(key2);
+			expect(getValue1).toBe(value1);
+			expect(getValue2).toBe(value2);
 
 			await testClient.disconnect();
 		});
@@ -921,9 +941,11 @@ describe("Memcache", () => {
 			expect(testClient.isConnected()).toBe(true);
 
 			// Verify connections work
-			await testClient.set("reconnect-initial", "test-value");
-			const value = await testClient.get("reconnect-initial");
-			expect(value).toBe("test-value");
+			const key = generateKey("reconnect-initial");
+			const testValue = generateValue();
+			await testClient.set(key, testValue);
+			const value = await testClient.get(key);
+			expect(value).toBe(testValue);
 
 			await testClient.disconnect();
 		});
@@ -952,7 +974,9 @@ describe("Memcache", () => {
 			await testClient.connect();
 
 			// Set some data
-			await testClient.set("clear-test", "value");
+			const key = generateKey("clear");
+			const value = generateValue();
+			await testClient.set(key, value);
 
 			// Get the nodes to check internal state
 			const nodes = testClient.getNodes();
@@ -975,17 +999,23 @@ describe("Memcache", () => {
 
 			// All commands should auto-connect and succeed
 			await testClient.connect();
-			await testClient.set("key1", "value1");
-			await testClient.set("key2", "value2");
-			await testClient.set("key3", "value3");
+			const key1 = generateKey("queue1");
+			const key2 = generateKey("queue2");
+			const key3 = generateKey("queue3");
+			const value1 = generateValue();
+			const value2 = generateValue();
+			const value3 = generateValue();
+			await testClient.set(key1, value1);
+			await testClient.set(key2, value2);
+			await testClient.set(key3, value3);
 
 			const results = await Promise.all([
-				testClient.get("key1"),
-				testClient.get("key2"),
-				testClient.get("key3"),
+				testClient.get(key1),
+				testClient.get(key2),
+				testClient.get(key3),
 			]);
 
-			expect(results).toEqual(["value1", "value2", "value3"]);
+			expect(results).toEqual([value1, value2, value3]);
 			await testClient.disconnect();
 		});
 	});
@@ -996,7 +1026,7 @@ describe("Memcache", () => {
 			await client2.connect();
 
 			// Use a non-existent key with unique name
-			const uniqueKey = `test-close-${Date.now()}`;
+			const uniqueKey = generateKey("close");
 
 			// Start a command but don't await it
 			const pendingCommand = await client2
@@ -1021,13 +1051,15 @@ describe("Memcache", () => {
 			await client3.connect();
 
 			// Use unique keys that don't exist
-			const timestamp = Date.now();
+			const key1 = generateKey("pending1");
+			const key2 = generateKey("pending2");
+			const key3 = generateKey("pending3");
 
 			// Start multiple commands without awaiting
 			const commands = [
-				client3.get(`key1-${timestamp}`).catch((e) => e.message),
-				client3.get(`key2-${timestamp}`).catch((e) => e.message),
-				client3.get(`key3-${timestamp}`).catch((e) => e.message),
+				client3.get(key1).catch((e) => e.message),
+				client3.get(key2).catch((e) => e.message),
+				client3.get(key3).catch((e) => e.message),
 			];
 
 			// Immediately disconnect to catch commands in flight
@@ -1068,8 +1100,8 @@ describe("Memcache", () => {
 
 		it("should set and get a value", async () => {
 			await client.connect();
-			const key = "test-key";
-			const value = "test-value";
+			const key = generateKey("setget");
+			const value = generateValue();
 
 			const setResult = await client.set(key, value);
 			expect(setResult).toBe(true);
@@ -1081,23 +1113,30 @@ describe("Memcache", () => {
 		it("should handle multiple gets", async () => {
 			await client.connect();
 
+			const key1 = generateKey("multi1");
+			const key2 = generateKey("multi2");
+			const key3 = generateKey("multi3");
+			const value1 = generateValue();
+			const value2 = generateValue();
+
 			// Clean up any leftover key3 from previous tests
-			await client.delete("key3");
+			await client.delete(key3);
 
-			await client.set("key1", "value1");
-			await client.set("key2", "value2");
+			await client.set(key1, value1);
+			await client.set(key2, value2);
 
-			const results = await client.gets(["key1", "key2", "key3"]);
-			expect(results.get("key1")).toBe("value1");
-			expect(results.get("key2")).toBe("value2");
-			expect(results.has("key3")).toBe(false);
+			const results = await client.gets([key1, key2, key3]);
+			expect(results.get(key1)).toBe(value1);
+			expect(results.get(key2)).toBe(value2);
+			expect(results.has(key3)).toBe(false);
 		});
 
 		it("should delete a key", async () => {
 			await client.connect();
-			const key = "delete-test";
+			const key = generateKey("delete");
+			const value = generateValue();
 
-			await client.set(key, "value");
+			await client.set(key, value);
 			const deleteResult = await client.delete(key);
 			expect(deleteResult).toBe(true);
 
@@ -1107,7 +1146,7 @@ describe("Memcache", () => {
 
 		it("should increment and decrement values", async () => {
 			await client.connect();
-			const key = "counter";
+			const key = generateKey("counter");
 
 			await client.set(key, "10");
 
@@ -1120,34 +1159,38 @@ describe("Memcache", () => {
 
 		it("should handle add command", async () => {
 			await client.connect();
-			const key = "add-test";
+			const key = generateKey("add");
+			const value1 = generateValue();
+			const value2 = generateValue();
 
 			// Clean up any leftover key from previous tests
 			await client.delete(key);
 
-			const firstAdd = await client.add(key, "value1");
+			const firstAdd = await client.add(key, value1);
 			expect(firstAdd).toBe(true);
 
-			const secondAdd = await client.add(key, "value2");
+			const secondAdd = await client.add(key, value2);
 			expect(secondAdd).toBe(false);
 		});
 
 		it("should handle replace command", async () => {
 			await client.connect();
-			const key = "replace-test";
+			const key = generateKey("replace");
+			const initialValue = generateValue();
+			const replacedValue = generateValue();
 
 			// Clean up any leftover key from previous tests
 			await client.delete(key);
 
-			const replaceNonExistent = await client.replace(key, "value1");
+			const replaceNonExistent = await client.replace(key, initialValue);
 			expect(replaceNonExistent).toBe(false);
 
-			await client.set(key, "initial");
-			const replaceExisting = await client.replace(key, "replaced");
+			await client.set(key, initialValue);
+			const replaceExisting = await client.replace(key, replacedValue);
 			expect(replaceExisting).toBe(true);
 
 			const getValue = await client.get(key);
-			expect(getValue).toBe("replaced");
+			expect(getValue).toBe(replacedValue);
 		});
 
 		// Removed: CAS tests with socket mocking
@@ -1156,7 +1199,7 @@ describe("Memcache", () => {
 
 		it("should handle append and prepend", async () => {
 			await client.connect();
-			const key = "concat-test";
+			const key = generateKey("concat");
 
 			await client.set(key, "middle");
 
@@ -1169,9 +1212,10 @@ describe("Memcache", () => {
 
 		it("should handle touch command", async () => {
 			await client.connect();
-			const key = "touch-test";
+			const key = generateKey("touch");
+			const value = generateValue();
 
-			await client.set(key, "value", 3600);
+			await client.set(key, value, 3600);
 			const touchResult = await client.touch(key, 7200);
 			expect(touchResult).toBe(true);
 		});
@@ -1179,14 +1223,19 @@ describe("Memcache", () => {
 		it("should handle flush commands", async () => {
 			await client.connect();
 
-			await client.set("flush1", "value1");
-			await client.set("flush2", "value2");
+			const key1 = generateKey("flush1");
+			const key2 = generateKey("flush2");
+			const value1 = generateValue();
+			const value2 = generateValue();
+
+			await client.set(key1, value1);
+			await client.set(key2, value2);
 
 			const flushResult = await client.flush();
 			expect(flushResult).toBe(true);
 
-			const getValue1 = await client.get("flush1");
-			const getValue2 = await client.get("flush2");
+			const getValue1 = await client.get(key1);
+			const getValue2 = await client.get(key2);
 			expect(getValue1).toBe(undefined);
 			expect(getValue2).toBe(undefined);
 		});
@@ -1261,16 +1310,18 @@ describe("Memcache", () => {
 			client.onHook("after:get", afterHookMock);
 
 			await client.connect();
-			await client.set("hook-test", "hook-value");
+			const key = generateKey("hook");
+			const value = generateValue();
+			await client.set(key, value);
 
-			const result = await client.get("hook-test");
+			const result = await client.get(key);
 
-			expect(beforeHookMock).toHaveBeenCalledWith({ key: "hook-test" });
+			expect(beforeHookMock).toHaveBeenCalledWith({ key });
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "hook-test",
-				value: "hook-value",
+				key,
+				value,
 			});
-			expect(result).toBe("hook-value");
+			expect(result).toBe(value);
 		});
 
 		it("should call hooks even when key doesn't exist", async () => {
@@ -1282,13 +1333,14 @@ describe("Memcache", () => {
 
 			await client.connect();
 
-			const result = await client.get("non-existent-hook-key");
+			const key = generateKey("nonexistent-hook");
+			const result = await client.get(key);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "non-existent-hook-key",
+				key,
 			});
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "non-existent-hook-key",
+				key,
 				value: undefined,
 			});
 			expect(result).toBe(undefined);
@@ -1306,8 +1358,10 @@ describe("Memcache", () => {
 			client.onHook("after:get", afterHook2);
 
 			await client.connect();
-			await client.set("multi-hook-test", "value");
-			await client.get("multi-hook-test");
+			const key = generateKey("multi-hook");
+			const value = generateValue();
+			await client.set(key, value);
+			await client.get(key);
 
 			expect(beforeHook1).toHaveBeenCalled();
 			expect(beforeHook2).toHaveBeenCalled();
@@ -1321,17 +1375,19 @@ describe("Memcache", () => {
 			client.onHook("before:get", hookMock);
 
 			await client.connect();
-			await client.set("remove-hook-test", "value");
+			const key = generateKey("remove-hook");
+			const value = generateValue();
+			await client.set(key, value);
 
 			// First call should trigger the hook
-			await client.get("remove-hook-test");
+			await client.get(key);
 			expect(hookMock).toHaveBeenCalledTimes(1);
 
 			// Remove the hook
 			client.removeHook("before:get", hookMock);
 
 			// Second call should not trigger the hook
-			await client.get("remove-hook-test");
+			await client.get(key);
 			expect(hookMock).toHaveBeenCalledTimes(1);
 		});
 
@@ -1348,15 +1404,17 @@ describe("Memcache", () => {
 			client.onHook("after:get", asyncAfterHook);
 
 			await client.connect();
-			await client.set("async-hook-test", "async-value");
+			const key = generateKey("async-hook");
+			const value = generateValue();
+			await client.set(key, value);
 
 			const start = Date.now();
-			const result = await client.get("async-hook-test");
+			const result = await client.get(key);
 			const duration = Date.now() - start;
 
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
-			expect(result).toBe("async-value");
+			expect(result).toBe(value);
 			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
@@ -1372,12 +1430,12 @@ describe("Memcache", () => {
 			errorClient.onHook("before:get", errorHook);
 
 			await errorClient.connect();
-			await errorClient.set("error-hook-test", "value");
+			const key1 = generateKey("error-hook");
+			const value1 = generateValue();
+			await errorClient.set(key1, value1);
 
 			// Hook error should propagate and reject the promise
-			await expect(errorClient.get("error-hook-test")).rejects.toThrow(
-				"Hook error",
-			);
+			await expect(errorClient.get(key1)).rejects.toThrow("Hook error");
 			expect(errorHook).toHaveBeenCalled();
 
 			await errorClient.disconnect();
@@ -1393,11 +1451,13 @@ describe("Memcache", () => {
 			noErrorClient.onHook("before:get", errorHook2);
 
 			await noErrorClient.connect();
-			await noErrorClient.set("error-hook-test2", "value2");
+			const key2 = generateKey("error-hook2");
+			const value2 = generateValue();
+			await noErrorClient.set(key2, value2);
 
 			// Operation should succeed despite hook error
-			const result = await noErrorClient.get("error-hook-test2");
-			expect(result).toBe("value2");
+			const result = await noErrorClient.get(key2);
+			expect(result).toBe(value2);
 			expect(errorHook2).toHaveBeenCalled();
 
 			await noErrorClient.disconnect();
@@ -1413,23 +1473,27 @@ describe("Memcache", () => {
 			await client.connect();
 
 			// Test with multiple keys
-			await client.set("context-key1", "value1");
-			await client.set("context-key2", "value2");
+			const key1 = generateKey("context1");
+			const key2 = generateKey("context2");
+			const value1 = generateValue();
+			const value2 = generateValue();
+			await client.set(key1, value1);
+			await client.set(key2, value2);
 
-			await client.get("context-key1");
+			await client.get(key1);
 
-			expect(beforeHookMock).toHaveBeenLastCalledWith({ key: "context-key1" });
+			expect(beforeHookMock).toHaveBeenLastCalledWith({ key: key1 });
 			expect(afterHookMock).toHaveBeenLastCalledWith({
-				key: "context-key1",
-				value: "value1",
+				key: key1,
+				value: value1,
 			});
 
-			await client.get("context-key2");
+			await client.get(key2);
 
-			expect(beforeHookMock).toHaveBeenLastCalledWith({ key: "context-key2" });
+			expect(beforeHookMock).toHaveBeenLastCalledWith({ key: key2 });
 			expect(afterHookMock).toHaveBeenLastCalledWith({
-				key: "context-key2",
-				value: "value2",
+				key: key2,
+				value: value2,
 			});
 		});
 
@@ -1439,14 +1503,16 @@ describe("Memcache", () => {
 			client.onceHook("before:get", onceHookMock);
 
 			await client.connect();
-			await client.set("once-hook-test", "value");
+			const key = generateKey("once-hook");
+			const value = generateValue();
+			await client.set(key, value);
 
 			// First call should trigger the hook
-			await client.get("once-hook-test");
+			await client.get(key);
 			expect(onceHookMock).toHaveBeenCalledTimes(1);
 
 			// Second call should not trigger the hook (it was removed after first execution)
-			await client.get("once-hook-test");
+			await client.get(key);
 			expect(onceHookMock).toHaveBeenCalledTimes(1);
 		});
 
@@ -1458,10 +1524,12 @@ describe("Memcache", () => {
 			client.onHook("after:get", hook2);
 
 			await client.connect();
-			await client.set("clear-hooks-test", "value");
+			const key = generateKey("clear-hooks");
+			const value = generateValue();
+			await client.set(key, value);
 
 			// First call should trigger hooks
-			await client.get("clear-hooks-test");
+			await client.get(key);
 			expect(hook1).toHaveBeenCalledTimes(1);
 			expect(hook2).toHaveBeenCalledTimes(1);
 
@@ -1469,7 +1537,7 @@ describe("Memcache", () => {
 			client.clearHooks();
 
 			// Second call should not trigger any hooks
-			await client.get("clear-hooks-test");
+			await client.get(key);
 			expect(hook1).toHaveBeenCalledTimes(1);
 			expect(hook2).toHaveBeenCalledTimes(1);
 		});
@@ -1494,8 +1562,10 @@ describe("Memcache", () => {
 			});
 
 			await client.connect();
-			await client.set("order-test", "value");
-			await client.get("order-test");
+			const key = generateKey("order");
+			const value = generateValue();
+			await client.set(key, value);
+			await client.get(key);
 
 			expect(executionOrder).toEqual([
 				"before1",
@@ -1514,23 +1584,20 @@ describe("Memcache", () => {
 
 			await client.connect();
 
-			const result = await client.set(
-				"set-hook-test",
-				"set-hook-value",
-				3600,
-				42,
-			);
+			const key = generateKey("set-hook");
+			const value = generateValue();
+			const result = await client.set(key, value, 3600, 42);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "set-hook-test",
-				value: "set-hook-value",
+				key,
+				value,
 				exptime: 3600,
 				flags: 42,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "set-hook-test",
-				value: "set-hook-value",
+				key,
+				value,
 				exptime: 3600,
 				flags: 42,
 				success: true,
@@ -1548,18 +1615,20 @@ describe("Memcache", () => {
 
 			await client.connect();
 
-			const result = await client.set("set-hook-default", "default-value");
+			const key = generateKey("set-hook-default");
+			const value = generateValue();
+			const result = await client.set(key, value);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "set-hook-default",
-				value: "default-value",
+				key,
+				value,
 				exptime: 0,
 				flags: 0,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "set-hook-default",
-				value: "default-value",
+				key,
+				value,
 				exptime: 0,
 				flags: 0,
 				success: true,
@@ -1582,7 +1651,9 @@ describe("Memcache", () => {
 
 			await client.connect();
 
-			const result = await client.set("async-set-test", "async-value");
+			const key = generateKey("async-set");
+			const value = generateValue();
+			const result = await client.set(key, value);
 
 			expect(asyncBeforeHook).toHaveBeenCalled();
 			expect(asyncAfterHook).toHaveBeenCalled();
@@ -1599,37 +1670,39 @@ describe("Memcache", () => {
 			await client.connect();
 
 			// Set some values first
-			await client.set("gets-hook-1", "value1");
-			await client.set("gets-hook-2", "value2");
-			await client.set("gets-hook-3", "value3");
+			const key1 = generateKey("gets-hook-1");
+			const key2 = generateKey("gets-hook-2");
+			const key3 = generateKey("gets-hook-3");
+			const nonExistentKey = generateKey("nonexistent");
+			const value1 = generateValue();
+			const value2 = generateValue();
+			const value3 = generateValue();
+			await client.set(key1, value1);
+			await client.set(key2, value2);
+			await client.set(key3, value3);
 
-			const keys = [
-				"gets-hook-1",
-				"gets-hook-2",
-				"gets-hook-3",
-				"non-existent",
-			];
+			const keys = [key1, key2, key3, nonExistentKey];
 			const result = await client.gets(keys);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				keys: ["gets-hook-1", "gets-hook-2", "gets-hook-3", "non-existent"],
+				keys: [key1, key2, key3, nonExistentKey],
 			});
 
 			const expectedMap = new Map([
-				["gets-hook-1", "value1"],
-				["gets-hook-2", "value2"],
-				["gets-hook-3", "value3"],
+				[key1, value1],
+				[key2, value2],
+				[key3, value3],
 			]);
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				keys: ["gets-hook-1", "gets-hook-2", "gets-hook-3", "non-existent"],
+				keys: [key1, key2, key3, nonExistentKey],
 				values: expectedMap,
 			});
 
-			expect(result.get("gets-hook-1")).toBe("value1");
-			expect(result.get("gets-hook-2")).toBe("value2");
-			expect(result.get("gets-hook-3")).toBe("value3");
-			expect(result.has("non-existent")).toBe(false);
+			expect(result.get(key1)).toBe(value1);
+			expect(result.get(key2)).toBe(value2);
+			expect(result.get(key3)).toBe(value3);
+			expect(result.has(nonExistentKey)).toBe(false);
 		});
 
 		it("should call gets hooks when all keys are missing", async () => {
