@@ -9,6 +9,7 @@ import {
 	type MemcacheOptions,
 	type MemcacheStats,
 	type RetryBackoffFunction,
+	type SASLCredentials,
 } from "./types.js";
 
 export {
@@ -18,6 +19,7 @@ export {
 	type MemcacheOptions,
 	type MemcacheStats,
 	type RetryBackoffFunction,
+	type SASLCredentials,
 } from "./types.js";
 
 /**
@@ -46,6 +48,7 @@ export class Memcache extends Hookified {
 	private _retryDelay: number;
 	private _retryBackoff: RetryBackoffFunction;
 	private _retryOnlyIdempotent: boolean;
+	private _sasl: SASLCredentials | undefined;
 
 	constructor(options?: string | MemcacheOptions) {
 		super();
@@ -60,6 +63,7 @@ export class Memcache extends Hookified {
 			this._retryDelay = 100;
 			this._retryBackoff = defaultRetryBackoff;
 			this._retryOnlyIdempotent = true;
+			this._sasl = undefined;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -71,6 +75,7 @@ export class Memcache extends Hookified {
 			this._retryDelay = options?.retryDelay ?? 100;
 			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
+			this._sasl = options?.sasl;
 
 			// Add nodes if provided, otherwise add default node
 			const nodeUris = options?.nodes || ["localhost:11211"];
@@ -310,6 +315,7 @@ export class Memcache extends Hookified {
 				keepAlive: this._keepAlive,
 				keepAliveDelay: this._keepAliveDelay,
 				weight,
+				sasl: this._sasl,
 			});
 		} else {
 			// Handle MemcacheNode instance
@@ -1149,5 +1155,5 @@ export class Memcache extends Hookified {
 	}
 }
 
-export { createNode, ModulaHash };
+export { createNode, MemcacheNode, ModulaHash };
 export default Memcache;

@@ -14,8 +14,8 @@ RUN apt-get update && \
 RUN mkdir -p /etc/sasl2
 RUN echo "mech_list: plain" > /etc/sasl2/memcached.conf
 
-# Create SASL user (testuser/testpass)
-RUN echo "testpass" | saslpasswd2 -a memcached -c testuser -p
+# Create SASL user (testuser/testpass) with explicit realm
+RUN echo "testpass" | saslpasswd2 -a memcached -c -u localhost testuser -p
 
 # Set environment for SASL password database
 ENV MEMCACHED_SASL_PWDB=/etc/sasldb2

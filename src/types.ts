@@ -1,5 +1,24 @@
 import type { CommandOptions, MemcacheNode } from "./node.js";
 
+/**
+ * SASL authentication credentials for connecting to a secured memcache server.
+ */
+export interface SASLCredentials {
+	/**
+	 * Username for SASL authentication
+	 */
+	username: string;
+	/**
+	 * Password for SASL authentication
+	 */
+	password: string;
+	/**
+	 * SASL mechanism to use (default: 'PLAIN')
+	 * Currently only 'PLAIN' is supported.
+	 */
+	mechanism?: "PLAIN";
+}
+
 export enum MemcacheEvents {
 	CONNECT = "connect",
 	QUIT = "quit",
@@ -89,6 +108,13 @@ export interface MemcacheOptions {
 	 * @default true
 	 */
 	retryOnlyIdempotent?: boolean;
+
+	/**
+	 * SASL authentication credentials for all nodes.
+	 * When provided, nodes will authenticate using SASL PLAIN mechanism
+	 * before accepting commands.
+	 */
+	sasl?: SASLCredentials;
 }
 
 export interface MemcacheStats {

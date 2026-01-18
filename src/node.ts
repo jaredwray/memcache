@@ -1,11 +1,39 @@
 import { createConnection, type Socket } from "node:net";
 import { Hookified } from "hookified";
+import {
+	buildAddRequest,
+	buildAppendRequest,
+	buildDecrementRequest,
+	buildDeleteRequest,
+	buildFlushRequest,
+	buildGetRequest,
+	buildIncrementRequest,
+	buildPrependRequest,
+	buildQuitRequest,
+	buildReplaceRequest,
+	buildSaslPlainRequest,
+	buildSetRequest,
+	buildStatRequest,
+	buildTouchRequest,
+	buildVersionRequest,
+	deserializeHeader,
+	HEADER_SIZE,
+	OPCODE_STAT,
+	parseGetResponse,
+	parseIncrDecrResponse,
+	STATUS_AUTH_ERROR,
+	STATUS_KEY_NOT_FOUND,
+	STATUS_SUCCESS,
+} from "./binary-protocol.js";
+import type { SASLCredentials } from "./types.js";
 
 export interface MemcacheNodeOptions {
 	timeout?: number;
 	keepAlive?: boolean;
 	keepAliveDelay?: number;
 	weight?: number;
+	/** SASL authentication credentials */
+	sasl?: SASLCredentials;
 }
 
 export interface CommandOptions {
@@ -48,6 +76,9 @@ export class MemcacheNode extends Hookified {
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
 	private _pendingValueBytes: number = 0;
+	private _sasl: SASLCredentials | undefined;
+	private _authenticated: boolean = false;
+	private _binaryBuffer: Buffer = Buffer.alloc(0);
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
 		super();
@@ -57,6 +88,7 @@ export class MemcacheNode extends Hookified {
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._weight = options?.weight || 1;
+		this._sasl = options?.sasl;
 	}
 
 	/**
@@ -144,6 +176,20 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
+	 * Get whether SASL authentication is configured
+	 */
+	public get hasSaslCredentials(): boolean {
+		return !!this._sasl?.username && !!this._sasl?.password;
+	}
+
+	/**
+	 * Get whether the node is authenticated (only relevant if SASL is configured)
+	 */
+	public get isAuthenticated(): boolean {
+		return this._authenticated;
+	}
+
+	/**
 	 * Connect to the memcache server
 	 */
 	public async connect(): Promise<void> {
@@ -161,16 +207,41 @@ export class MemcacheNode extends Hookified {
 			});
 
 			this._socket.setTimeout(this._timeout);
-			this._socket.setEncoding("utf8");
 
-			this._socket.on("connect", () => {
+			// Don't set encoding initially if SASL is configured (need raw buffers for binary protocol)
+			if (!this._sasl) {
+				this._socket.setEncoding("utf8");
+			}
+
+			this._socket.on("connect", async () => {
 				this._connected = true;
-				this.emit("connect");
-				resolve();
+
+				// If SASL credentials are configured, authenticate before resolving
+				if (this._sasl) {
+					try {
+						await this._performSaslAuth();
+						// Keep socket in binary mode - SASL servers require binary protocol
+						// for all commands. Use binary* methods for operations.
+						this.emit("connect");
+						resolve();
+					} catch (error) {
+						this._socket?.destroy();
+						this._connected = false;
+						this._authenticated = false;
+						reject(error);
+					}
+				} else {
+					this.emit("connect");
+					resolve();
+				}
 			});
 
-			this._socket.on("data", (data: string) => {
-				this.handleData(data);
+			this._socket.on("data", (data: string | Buffer) => {
+				// For non-SASL connections, data will be strings (utf8 encoding set)
+				// For SASL connections, data handler is managed by binary* methods
+				if (typeof data === "string") {
+					this.handleData(data);
+				}
 			});
 
 			this._socket.on("error", (error: Error) => {
@@ -183,6 +254,7 @@ export class MemcacheNode extends Hookified {
 
 			this._socket.on("close", () => {
 				this._connected = false;
+				this._authenticated = false;
 				this.emit("close");
 				this.rejectPendingCommands(new Error("Connection closed"));
 			});
@@ -223,10 +295,348 @@ export class MemcacheNode extends Hookified {
 			this._currentCommand = undefined;
 			this._multilineData = [];
 			this._pendingValueBytes = 0;
+			this._authenticated = false;
+			this._binaryBuffer = Buffer.alloc(0);
 		}
 
 		// Now establish a fresh connection
 		await this.connect();
+	}
+
+	/**
+	 * Perform SASL PLAIN authentication using the binary protocol
+	 */
+	private async _performSaslAuth(): Promise<void> {
+		if (!this._sasl || !this._socket) {
+			throw new Error("SASL credentials not configured");
+		}
+
+		// Capture references before entering the Promise to satisfy TypeScript
+		const socket = this._socket;
+		const sasl = this._sasl;
+
+		return new Promise((resolve, reject) => {
+			this._binaryBuffer = Buffer.alloc(0);
+
+			const authPacket = buildSaslPlainRequest(sasl.username, sasl.password);
+
+			// Temporary binary data handler for SASL authentication
+			const binaryHandler = (data: Buffer) => {
+				this._binaryBuffer = Buffer.concat([this._binaryBuffer, data]);
+
+				// Need at least header size to parse response
+				if (this._binaryBuffer.length < HEADER_SIZE) {
+					return;
+				}
+
+				const header = deserializeHeader(this._binaryBuffer);
+				const totalLength = HEADER_SIZE + header.totalBodyLength;
+
+				// Wait for complete packet
+				if (this._binaryBuffer.length < totalLength) {
+					return;
+				}
+
+				// Remove this temporary handler
+				socket.removeListener("data", binaryHandler);
+
+				if (header.status === STATUS_SUCCESS) {
+					this._authenticated = true;
+					this.emit("authenticated");
+					resolve();
+				} else if (header.status === STATUS_AUTH_ERROR) {
+					const body = this._binaryBuffer.subarray(HEADER_SIZE, totalLength);
+					reject(
+						new Error(
+							`SASL authentication failed: ${body.toString() || "Invalid credentials"}`,
+						),
+					);
+				} else {
+					reject(
+						new Error(
+							`SASL authentication failed with status: 0x${header.status.toString(16)}`,
+						),
+					);
+				}
+			};
+
+			socket.on("data", binaryHandler);
+			socket.write(authPacket);
+		});
+	}
+
+	/**
+	 * Send a binary protocol request and wait for response.
+	 * Used internally for SASL-authenticated connections.
+	 */
+	private async _binaryRequest(packet: Buffer): Promise<Buffer> {
+		if (!this._socket) {
+			throw new Error("Not connected");
+		}
+
+		const socket = this._socket;
+
+		return new Promise((resolve) => {
+			let buffer = Buffer.alloc(0);
+
+			const dataHandler = (data: Buffer) => {
+				buffer = Buffer.concat([buffer, data]);
+
+				if (buffer.length < HEADER_SIZE) {
+					return;
+				}
+
+				const header = deserializeHeader(buffer);
+				const totalLength = HEADER_SIZE + header.totalBodyLength;
+
+				if (buffer.length < totalLength) {
+					return;
+				}
+
+				socket.removeListener("data", dataHandler);
+				resolve(buffer.subarray(0, totalLength));
+			};
+
+			socket.on("data", dataHandler);
+			socket.write(packet);
+		});
+	}
+
+	/**
+	 * Binary protocol GET operation
+	 */
+	public async binaryGet(key: string): Promise<string | undefined> {
+		const response = await this._binaryRequest(buildGetRequest(key));
+		const { header, value } = parseGetResponse(response);
+
+		if (header.status === STATUS_KEY_NOT_FOUND) {
+			this.emit("miss", key);
+			return undefined;
+		}
+
+		if (header.status !== STATUS_SUCCESS || !value) {
+			return undefined;
+		}
+
+		const result = value.toString("utf8");
+		this.emit("hit", key, result);
+		return result;
+	}
+
+	/**
+	 * Binary protocol SET operation
+	 */
+	public async binarySet(
+		key: string,
+		value: string,
+		exptime = 0,
+		flags = 0,
+	): Promise<boolean> {
+		const response = await this._binaryRequest(
+			buildSetRequest(key, value, flags, exptime),
+		);
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol ADD operation
+	 */
+	public async binaryAdd(
+		key: string,
+		value: string,
+		exptime = 0,
+		flags = 0,
+	): Promise<boolean> {
+		const response = await this._binaryRequest(
+			buildAddRequest(key, value, flags, exptime),
+		);
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol REPLACE operation
+	 */
+	public async binaryReplace(
+		key: string,
+		value: string,
+		exptime = 0,
+		flags = 0,
+	): Promise<boolean> {
+		const response = await this._binaryRequest(
+			buildReplaceRequest(key, value, flags, exptime),
+		);
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol DELETE operation
+	 */
+	public async binaryDelete(key: string): Promise<boolean> {
+		const response = await this._binaryRequest(buildDeleteRequest(key));
+		const header = deserializeHeader(response);
+		return (
+			header.status === STATUS_SUCCESS || header.status === STATUS_KEY_NOT_FOUND
+		);
+	}
+
+	/**
+	 * Binary protocol INCREMENT operation
+	 */
+	public async binaryIncr(
+		key: string,
+		delta = 1,
+		initial = 0,
+		exptime = 0,
+	): Promise<number | undefined> {
+		const response = await this._binaryRequest(
+			buildIncrementRequest(key, delta, initial, exptime),
+		);
+		const { header, value } = parseIncrDecrResponse(response);
+
+		if (header.status !== STATUS_SUCCESS) {
+			return undefined;
+		}
+
+		return value;
+	}
+
+	/**
+	 * Binary protocol DECREMENT operation
+	 */
+	public async binaryDecr(
+		key: string,
+		delta = 1,
+		initial = 0,
+		exptime = 0,
+	): Promise<number | undefined> {
+		const response = await this._binaryRequest(
+			buildDecrementRequest(key, delta, initial, exptime),
+		);
+		const { header, value } = parseIncrDecrResponse(response);
+
+		if (header.status !== STATUS_SUCCESS) {
+			return undefined;
+		}
+
+		return value;
+	}
+
+	/**
+	 * Binary protocol APPEND operation
+	 */
+	public async binaryAppend(key: string, value: string): Promise<boolean> {
+		const response = await this._binaryRequest(buildAppendRequest(key, value));
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol PREPEND operation
+	 */
+	public async binaryPrepend(key: string, value: string): Promise<boolean> {
+		const response = await this._binaryRequest(buildPrependRequest(key, value));
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol TOUCH operation
+	 */
+	public async binaryTouch(key: string, exptime: number): Promise<boolean> {
+		const response = await this._binaryRequest(buildTouchRequest(key, exptime));
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol FLUSH operation
+	 */
+	public async binaryFlush(exptime = 0): Promise<boolean> {
+		const response = await this._binaryRequest(buildFlushRequest(exptime));
+		const header = deserializeHeader(response);
+		return header.status === STATUS_SUCCESS;
+	}
+
+	/**
+	 * Binary protocol VERSION operation
+	 */
+	public async binaryVersion(): Promise<string | undefined> {
+		const response = await this._binaryRequest(buildVersionRequest());
+		const header = deserializeHeader(response);
+
+		if (header.status !== STATUS_SUCCESS) {
+			return undefined;
+		}
+
+		return response
+			.subarray(HEADER_SIZE, HEADER_SIZE + header.totalBodyLength)
+			.toString("utf8");
+	}
+
+	/**
+	 * Binary protocol STATS operation
+	 */
+	public async binaryStats(): Promise<Record<string, string>> {
+		if (!this._socket) {
+			throw new Error("Not connected");
+		}
+
+		const socket = this._socket;
+		const stats: Record<string, string> = {};
+
+		return new Promise((resolve) => {
+			let buffer = Buffer.alloc(0);
+
+			const dataHandler = (data: Buffer) => {
+				buffer = Buffer.concat([buffer, data]);
+
+				while (buffer.length >= HEADER_SIZE) {
+					const header = deserializeHeader(buffer);
+					const totalLength = HEADER_SIZE + header.totalBodyLength;
+
+					if (buffer.length < totalLength) {
+						return;
+					}
+
+					// Empty key means end of stats
+					if (header.keyLength === 0 && header.totalBodyLength === 0) {
+						socket.removeListener("data", dataHandler);
+						resolve(stats);
+						return;
+					}
+
+					if (
+						header.opcode === OPCODE_STAT &&
+						header.status === STATUS_SUCCESS
+					) {
+						const keyStart = HEADER_SIZE;
+						const keyEnd = keyStart + header.keyLength;
+						const valueEnd = HEADER_SIZE + header.totalBodyLength;
+
+						const key = buffer.subarray(keyStart, keyEnd).toString("utf8");
+						const value = buffer.subarray(keyEnd, valueEnd).toString("utf8");
+						stats[key] = value;
+					}
+
+					buffer = buffer.subarray(totalLength);
+				}
+			};
+
+			socket.on("data", dataHandler);
+			socket.write(buildStatRequest());
+		});
+	}
+
+	/**
+	 * Binary protocol QUIT operation
+	 */
+	public async binaryQuit(): Promise<void> {
+		if (this._socket) {
+			this._socket.write(buildQuitRequest());
+		}
 	}
 
 	/**
