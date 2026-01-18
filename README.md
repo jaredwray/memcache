@@ -52,6 +52,7 @@ Nodejs Memcache Client
   - [Basic Retry Setup](#basic-retry-setup)
   - [Backoff Strategies](#backoff-strategies)
   - [Idempotent Safety](#idempotent-safety)
+  - [Methods Without Retry Support](#methods-without-retry-support)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -701,6 +702,23 @@ const client = new Memcache({
 | `true` (default)      | `false` (default) | No               |
 | `true` (default)      | `true`            | Yes              |
 | `false`               | (any)             | Yes              |
+
+### Methods Without Retry Support
+
+The following methods do not use the retry mechanism and have their own error handling:
+
+- `get()` - Returns `undefined` on failure
+- `gets()` - Returns partial results on node failure
+- `flush()` - Operates directly on nodes
+- `stats()` - Operates directly on nodes
+- `version()` - Operates directly on nodes
+
+To use retries with read operations, use the `execute()` method directly:
+
+```javascript
+const nodes = await client.getNodesByKey('mykey');
+const results = await client.execute('get mykey', nodes, { idempotent: true });
+```
 
 # Contributing
 
