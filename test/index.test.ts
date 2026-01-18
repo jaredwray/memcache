@@ -1122,6 +1122,9 @@ describe("Memcache", () => {
 			await client.connect();
 			const key = "add-test";
 
+			// Clean up any leftover key from previous tests
+			await client.delete(key);
+
 			const firstAdd = await client.add(key, "value1");
 			expect(firstAdd).toBe(true);
 
@@ -1132,6 +1135,9 @@ describe("Memcache", () => {
 		it("should handle replace command", async () => {
 			await client.connect();
 			const key = "replace-test";
+
+			// Clean up any leftover key from previous tests
+			await client.delete(key);
 
 			const replaceNonExistent = await client.replace(key, "value1");
 			expect(replaceNonExistent).toBe(false);
