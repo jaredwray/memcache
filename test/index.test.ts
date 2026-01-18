@@ -1,6 +1,13 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Memcache, { createNode, MemcacheEvents, ModulaHash } from "../src/index";
+import Memcache, {
+	createNode,
+	defaultRetryBackoff,
+	exponentialRetryBackoff,
+	MemcacheEvents,
+	ModulaHash,
+	type RetryBackoffFunction,
+} from "../src/index";
 import { KetamaHash } from "../src/ketama";
 
 describe("Memcache", () => {
@@ -192,6 +199,110 @@ describe("Memcache", () => {
 			const testClient = new Memcache("localhost:11211");
 
 			expect(testClient.hash.name).toBe("ketama");
+		});
+
+		it("should have default retries of 0", () => {
+			const testClient = new Memcache();
+			expect(testClient.retries).toBe(0);
+		});
+
+		it("should have default retryDelay of 100", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryDelay).toBe(100);
+		});
+
+		it("should have default retryBackoff of defaultRetryBackoff", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryBackoff).toBe(defaultRetryBackoff);
+		});
+
+		it("should initialize with custom retries from options", () => {
+			const testClient = new Memcache({ retries: 3 });
+			expect(testClient.retries).toBe(3);
+		});
+
+		it("should initialize with custom retryDelay from options", () => {
+			const testClient = new Memcache({ retryDelay: 500 });
+			expect(testClient.retryDelay).toBe(500);
+		});
+
+		it("should initialize with custom retryBackoff from options", () => {
+			const testClient = new Memcache({
+				retryBackoff: exponentialRetryBackoff,
+			});
+			expect(testClient.retryBackoff).toBe(exponentialRetryBackoff);
+		});
+
+		it("should allow getting and setting retries property", () => {
+			const testClient = new Memcache();
+			expect(testClient.retries).toBe(0);
+
+			testClient.retries = 5;
+			expect(testClient.retries).toBe(5);
+
+			testClient.retries = 0;
+			expect(testClient.retries).toBe(0);
+		});
+
+		it("should allow getting and setting retryDelay property", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryDelay).toBe(100);
+
+			testClient.retryDelay = 250;
+			expect(testClient.retryDelay).toBe(250);
+		});
+
+		it("should allow getting and setting retryBackoff property", () => {
+			const testClient = new Memcache();
+			expect(testClient.retryBackoff).toBe(defaultRetryBackoff);
+
+			testClient.retryBackoff = exponentialRetryBackoff;
+			expect(testClient.retryBackoff).toBe(exponentialRetryBackoff);
+
+			const customBackoff: RetryBackoffFunction = (attempt, baseDelay) =>
+				baseDelay * (attempt + 1);
+			testClient.retryBackoff = customBackoff;
+			expect(testClient.retryBackoff).toBe(customBackoff);
+		});
+
+		it("should enforce non-negative retries", () => {
+			const testClient = new Memcache();
+			testClient.retries = -5;
+			expect(testClient.retries).toBe(0);
+		});
+
+		it("should enforce non-negative retryDelay", () => {
+			const testClient = new Memcache();
+			testClient.retryDelay = -100;
+			expect(testClient.retryDelay).toBe(0);
+		});
+
+		it("should floor decimal retry values", () => {
+			const testClient = new Memcache();
+			testClient.retries = 2.7;
+			expect(testClient.retries).toBe(2);
+		});
+
+		it("should use default retry settings when string parameter is provided", () => {
+			const testClient = new Memcache("localhost:11211");
+			expect(testClient.retries).toBe(0);
+			expect(testClient.retryDelay).toBe(100);
+			expect(testClient.retryBackoff).toBe(defaultRetryBackoff);
+		});
+
+		it("defaultRetryBackoff should return fixed delay", () => {
+			expect(defaultRetryBackoff(0, 100)).toBe(100);
+			expect(defaultRetryBackoff(1, 100)).toBe(100);
+			expect(defaultRetryBackoff(2, 100)).toBe(100);
+			expect(defaultRetryBackoff(5, 200)).toBe(200);
+		});
+
+		it("exponentialRetryBackoff should return exponentially increasing delay", () => {
+			expect(exponentialRetryBackoff(0, 100)).toBe(100); // 100 * 2^0 = 100
+			expect(exponentialRetryBackoff(1, 100)).toBe(200); // 100 * 2^1 = 200
+			expect(exponentialRetryBackoff(2, 100)).toBe(400); // 100 * 2^2 = 400
+			expect(exponentialRetryBackoff(3, 100)).toBe(800); // 100 * 2^3 = 800
+			expect(exponentialRetryBackoff(4, 50)).toBe(800); // 50 * 2^4 = 800
 		});
 	});
 

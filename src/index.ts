@@ -15,6 +15,33 @@ export enum MemcacheEvents {
 	CLOSE = "close",
 }
 
+/**
+ * Function to calculate delay between retry attempts.
+ * @param attempt - The current attempt number (0-indexed)
+ * @param baseDelay - The base delay in milliseconds
+ * @returns The delay in milliseconds before the next retry
+ */
+export type RetryBackoffFunction = (
+	attempt: number,
+	baseDelay: number,
+) => number;
+
+/**
+ * Default backoff function - returns fixed delay
+ */
+export const defaultRetryBackoff: RetryBackoffFunction = (
+	_attempt,
+	baseDelay,
+) => baseDelay;
+
+/**
+ * Exponential backoff function - doubles delay each attempt
+ */
+export const exponentialRetryBackoff: RetryBackoffFunction = (
+	attempt,
+	baseDelay,
+) => baseDelay * 2 ** attempt;
+
 export interface HashProvider {
 	name: string;
 	nodes: Array<MemcacheNode>;
@@ -52,6 +79,26 @@ export interface MemcacheOptions {
 	 * on the number of nodes and hashing. By default it uses KetamaHash as the provider
 	 */
 	hash?: HashProvider;
+
+	/**
+	 * The number of retry attempts for failed commands.
+	 * Set to 0 to disable retries.
+	 * @default 0
+	 */
+	retries?: number;
+
+	/**
+	 * The base delay in milliseconds between retry attempts.
+	 * @default 100
+	 */
+	retryDelay?: number;
+
+	/**
+	 * Function to calculate backoff delay between retries.
+	 * Receives (attempt, baseDelay) and returns delay in ms.
+	 * @default defaultRetryBackoff (fixed delay)
+	 */
+	retryBackoff?: RetryBackoffFunction;
 }
 
 export interface MemcacheStats {
@@ -61,6 +108,24 @@ export interface MemcacheStats {
 export interface ExecuteOptions {
 	/** Command options passed to node.command() */
 	commandOptions?: CommandOptions;
+
+	/**
+	 * Override the number of retries for this specific execution.
+	 * If undefined, uses the instance-level retries setting.
+	 */
+	retries?: number;
+
+	/**
+	 * Override the retry delay for this specific execution.
+	 * If undefined, uses the instance-level retryDelay setting.
+	 */
+	retryDelay?: number;
+
+	/**
+	 * Override the backoff function for this specific execution.
+	 * If undefined, uses the instance-level retryBackoff setting.
+	 */
+	retryBackoff?: RetryBackoffFunction;
 }
 
 export class Memcache extends Hookified {
@@ -69,6 +134,9 @@ export class Memcache extends Hookified {
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _hash: HashProvider;
+	private _retries: number;
+	private _retryDelay: number;
+	private _retryBackoff: RetryBackoffFunction;
 
 	constructor(options?: string | MemcacheOptions) {
 		super();
@@ -79,6 +147,9 @@ export class Memcache extends Hookified {
 			this._timeout = 5000;
 			this._keepAlive = true;
 			this._keepAliveDelay = 1000;
+			this._retries = 0;
+			this._retryDelay = 100;
+			this._retryBackoff = defaultRetryBackoff;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -86,6 +157,9 @@ export class Memcache extends Hookified {
 			this._timeout = options?.timeout || 5000;
 			this._keepAlive = options?.keepAlive !== false;
 			this._keepAliveDelay = options?.keepAliveDelay || 1000;
+			this._retries = options?.retries ?? 0;
+			this._retryDelay = options?.retryDelay ?? 100;
+			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
 
 			// Add nodes if provided, otherwise add default node
 			const nodeUris = options?.nodes || ["localhost:11211"];
@@ -203,6 +277,61 @@ export class Memcache extends Hookified {
 		this._keepAliveDelay = value;
 		// Update all existing nodes
 		this.updateNodes();
+	}
+
+	/**
+	 * Get the number of retry attempts for failed commands.
+	 * @returns {number}
+	 * @default 0
+	 */
+	public get retries(): number {
+		return this._retries;
+	}
+
+	/**
+	 * Set the number of retry attempts for failed commands.
+	 * Set to 0 to disable retries.
+	 * @param {number} value
+	 * @default 0
+	 */
+	public set retries(value: number) {
+		this._retries = Math.max(0, Math.floor(value));
+	}
+
+	/**
+	 * Get the base delay in milliseconds between retry attempts.
+	 * @returns {number}
+	 * @default 100
+	 */
+	public get retryDelay(): number {
+		return this._retryDelay;
+	}
+
+	/**
+	 * Set the base delay in milliseconds between retry attempts.
+	 * @param {number} value
+	 * @default 100
+	 */
+	public set retryDelay(value: number) {
+		this._retryDelay = Math.max(0, value);
+	}
+
+	/**
+	 * Get the backoff function for retry delays.
+	 * @returns {RetryBackoffFunction}
+	 * @default defaultRetryBackoff
+	 */
+	public get retryBackoff(): RetryBackoffFunction {
+		return this._retryBackoff;
+	}
+
+	/**
+	 * Set the backoff function for retry delays.
+	 * @param {RetryBackoffFunction} value
+	 * @default defaultRetryBackoff
+	 */
+	public set retryBackoff(value: RetryBackoffFunction) {
+		this._retryBackoff = value;
 	}
 
 	/**
@@ -939,10 +1068,10 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Execute a command on the specified nodes.
+	 * Execute a command on the specified nodes with retry support.
 	 * @param {string} command - The memcache command string to execute
 	 * @param {MemcacheNode[]} nodes - Array of MemcacheNode instances to execute on
-	 * @param {ExecuteOptions} options - Optional execution options
+	 * @param {ExecuteOptions} options - Optional execution options including retry overrides
 	 * @returns {Promise<unknown[]>} Promise resolving to array of results from each node
 	 */
 	public async execute(
@@ -950,13 +1079,19 @@ export class Memcache extends Hookified {
 		nodes: MemcacheNode[],
 		options?: ExecuteOptions,
 	): Promise<unknown[]> {
+		const maxRetries = options?.retries ?? this._retries;
+		const retryDelay = options?.retryDelay ?? this._retryDelay;
+		const retryBackoff = options?.retryBackoff ?? this._retryBackoff;
+
 		const promises = nodes.map(async (node) => {
-			try {
-				return await node.command(command, options?.commandOptions);
-			} catch {
-				/* v8 ignore next -- @preserve */
-				return undefined;
-			}
+			return this.executeWithRetry(
+				node,
+				command,
+				options?.commandOptions,
+				maxRetries,
+				retryDelay,
+				retryBackoff,
+			);
 		});
 
 		return Promise.all(promises);
@@ -990,6 +1125,62 @@ export class Memcache extends Hookified {
 	}
 
 	// Private methods
+
+	/**
+	 * Sleep utility for retry delays.
+	 * @param {number} ms - Milliseconds to sleep
+	 * @returns {Promise<void>}
+	 */
+	private sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	/**
+	 * Execute a command on a single node with retry logic.
+	 * @param {MemcacheNode} node - The node to execute on
+	 * @param {string} command - The command string
+	 * @param {CommandOptions} commandOptions - Optional command options
+	 * @param {number} maxRetries - Maximum number of retry attempts
+	 * @param {number} retryDelay - Base delay between retries in milliseconds
+	 * @param {RetryBackoffFunction} retryBackoff - Function to calculate backoff delay
+	 * @returns {Promise<unknown>} Result or undefined on failure
+	 */
+	private async executeWithRetry(
+		node: MemcacheNode,
+		command: string,
+		commandOptions: CommandOptions | undefined,
+		maxRetries: number,
+		retryDelay: number,
+		retryBackoff: RetryBackoffFunction,
+	): Promise<unknown> {
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			try {
+				return await node.command(command, commandOptions);
+			} catch {
+				if (attempt >= maxRetries) {
+					break;
+				}
+
+				const delay = retryBackoff(attempt, retryDelay);
+				if (delay > 0) {
+					await this.sleep(delay);
+				}
+
+				// Try reconnecting if disconnected
+				/* v8 ignore next 3 -- @preserve */
+				if (!node.isConnected()) {
+					try {
+						await node.connect();
+					} catch {
+						// Continue to next retry attempt even if reconnect fails
+					}
+				}
+			}
+		}
+
+		/* v8 ignore next -- @preserve */
+		return undefined;
+	}
 
 	/**
 	 * Update all nodes with current keepAlive settings
