@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HashRing, KetamaHash } from "../src/ketama.js";
 import { MemcacheNode } from "../src/node.js";
+import { generateKey } from "./test-utils.js";
 
 describe("HashRing", () => {
 	describe("constructor", () => {
@@ -157,34 +158,39 @@ describe("HashRing", () => {
 	describe("getNode", () => {
 		it("should return node for a given key", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3"]);
-			const node = ring.getNode("test-key");
+			const key = generateKey("ring");
+			const node = ring.getNode(key);
 			expect(node).toBeDefined();
 			expect(["node1", "node2", "node3"]).toContain(node);
 		});
 
 		it("should return consistent node for same key", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3"]);
-			const node1 = ring.getNode("test-key");
-			const node2 = ring.getNode("test-key");
+			const key = generateKey("consistent");
+			const node1 = ring.getNode(key);
+			const node2 = ring.getNode(key);
 			expect(node1).toBe(node2);
 		});
 
 		it("should return undefined for empty ring", () => {
 			const ring = new HashRing<string>();
-			const node = ring.getNode("test-key");
+			const key = generateKey("empty");
+			const node = ring.getNode(key);
 			expect(node).toBeUndefined();
 		});
 
 		it("should accept Buffer input", () => {
 			const ring = new HashRing<string>(["node1", "node2"]);
-			const node = ring.getNode(Buffer.from("test-key"));
+			const key = generateKey("buffer");
+			const node = ring.getNode(Buffer.from(key));
 			expect(node).toBeDefined();
 		});
 
 		it("should return same node for string and Buffer with same content", () => {
 			const ring = new HashRing<string>(["node1", "node2"]);
-			const nodeFromString = ring.getNode("test-key");
-			const nodeFromBuffer = ring.getNode(Buffer.from("test-key"));
+			const key = generateKey("compare");
+			const nodeFromString = ring.getNode(key);
+			const nodeFromBuffer = ring.getNode(Buffer.from(key));
 			expect(nodeFromString).toBe(nodeFromBuffer);
 		});
 
@@ -213,13 +219,15 @@ describe("HashRing", () => {
 	describe("getNodes (replicas)", () => {
 		it("should return empty array for empty ring", () => {
 			const ring = new HashRing<string>();
-			const nodes = ring.getNodes("test-key", 3);
+			const key = generateKey("empty-replicas");
+			const nodes = ring.getNodes(key, 3);
 			expect(nodes).toEqual([]);
 		});
 
 		it("should return all nodes when replicas >= node count", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3"]);
-			const nodes = ring.getNodes("test-key", 5);
+			const key = generateKey("replicas-exceed");
+			const nodes = ring.getNodes(key, 5);
 			expect(nodes.length).toBe(3);
 			expect(nodes).toContain("node1");
 			expect(nodes).toContain("node2");
@@ -228,27 +236,31 @@ describe("HashRing", () => {
 
 		it("should return all nodes when replicas equals node count", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3"]);
-			const nodes = ring.getNodes("test-key", 3);
+			const key = generateKey("replicas-equal");
+			const nodes = ring.getNodes(key, 3);
 			expect(nodes.length).toBe(3);
 		});
 
 		it("should return requested number of unique nodes", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3", "node4"]);
-			const nodes = ring.getNodes("test-key", 2);
+			const key = generateKey("unique-nodes");
+			const nodes = ring.getNodes(key, 2);
 			expect(nodes.length).toBe(2);
 			expect(new Set(nodes).size).toBe(2); // All unique
 		});
 
 		it("should return consistent replicas for same key", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3", "node4"]);
-			const nodes1 = ring.getNodes("test-key", 3);
-			const nodes2 = ring.getNodes("test-key", 3);
+			const key = generateKey("consistent-replicas");
+			const nodes1 = ring.getNodes(key, 3);
+			const nodes2 = ring.getNodes(key, 3);
 			expect(nodes1).toEqual(nodes2);
 		});
 
 		it("should return nodes in ring order", () => {
 			const ring = new HashRing<string>(["node1", "node2", "node3", "node4"]);
-			const nodes = ring.getNodes("test-key", 3);
+			const key = generateKey("ring-order");
+			const nodes = ring.getNodes(key, 3);
 			expect(nodes.length).toBe(3);
 			// All nodes should be unique
 			const uniqueNodes = new Set(nodes);
@@ -257,7 +269,8 @@ describe("HashRing", () => {
 
 		it("should handle single node ring", () => {
 			const ring = new HashRing<string>(["node1"]);
-			const nodes = ring.getNodes("test-key", 3);
+			const key = generateKey("single-node");
+			const nodes = ring.getNodes(key, 3);
 			expect(nodes).toEqual(["node1"]);
 		});
 	});
@@ -396,7 +409,8 @@ describe("KetamaHash", () => {
 			distribution.addNode(node1);
 			distribution.addNode(node2);
 
-			const nodes = distribution.getNodesByKey("test-key");
+			const key = generateKey("ketama");
+			const nodes = distribution.getNodesByKey(key);
 			expect(nodes.length).toBe(1);
 			expect([node1, node2]).toContain(nodes[0]);
 		});
@@ -409,14 +423,16 @@ describe("KetamaHash", () => {
 			distribution.addNode(node1);
 			distribution.addNode(node2);
 
-			const nodes1 = distribution.getNodesByKey("test-key");
-			const nodes2 = distribution.getNodesByKey("test-key");
+			const key = generateKey("consistent");
+			const nodes1 = distribution.getNodesByKey(key);
+			const nodes2 = distribution.getNodesByKey(key);
 			expect(nodes1[0]).toBe(nodes2[0]);
 		});
 
 		it("should return empty array when no nodes available", () => {
 			const distribution = new KetamaHash();
-			const nodes = distribution.getNodesByKey("test-key");
+			const key = generateKey("empty");
+			const nodes = distribution.getNodesByKey(key);
 			expect(nodes).toEqual([]);
 		});
 
@@ -484,7 +500,8 @@ describe("KetamaHash", () => {
 			expect(distribution.nodes.length).toBe(2);
 
 			// Get by key
-			const nodeForKey = distribution.getNodesByKey("my-key");
+			const key = generateKey("integration");
+			const nodeForKey = distribution.getNodesByKey(key);
 			expect(nodeForKey.length).toBe(1);
 
 			// Get by ID

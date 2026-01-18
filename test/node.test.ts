@@ -1,6 +1,11 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createNode, MemcacheNode } from "../src/node";
+import {
+	generateKey,
+	generateLargeValue,
+	generateValue,
+} from "./test-utils.js";
 
 describe("MemcacheNode", () => {
 	let node: MemcacheNode;
@@ -213,8 +218,8 @@ describe("MemcacheNode", () => {
 			expect(node.isConnected()).toBe(true);
 
 			// Set a value to ensure connection is working
-			const key = "node-test-reconnect";
-			const value = "initial-value";
+			const key = generateKey("reconnect");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 			await node.command(`set ${key} 0 0 ${bytes}\r\n${value}`);
 
@@ -233,7 +238,8 @@ describe("MemcacheNode", () => {
 			await node.connect();
 
 			// Queue a command that won't complete
-			const promise = node.command("get slow-key", { isMultiline: true });
+			const key = generateKey("slow");
+			const promise = node.command(`get ${key}`, { isMultiline: true });
 
 			// Reconnect immediately (this will disconnect and clear pending commands)
 			setImmediate(async () => {
@@ -302,8 +308,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute set command", async () => {
-			const key = "node-test-set";
-			const value = "test-value";
+			const key = generateKey("set");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 			const cmd = `set ${key} 0 0 ${bytes}\r\n${value}`;
 			const result = await node.command(cmd);
@@ -311,8 +317,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute get command with multiline option", async () => {
-			const key = "node-test-get";
-			const value = "test-value";
+			const key = generateKey("get");
+			const value = generateValue();
 
 			// First set the value
 			const bytes = Buffer.byteLength(value);
@@ -325,14 +331,14 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute get command for non-existent key", async () => {
-			const key = "node-test-nonexistent";
+			const key = generateKey("nonexistent");
 			const result = await node.command(`get ${key}`, { isMultiline: true });
 			expect(result).toBeUndefined();
 		});
 
 		it("should execute delete command", async () => {
-			const key = "node-test-delete";
-			const value = "test-value";
+			const key = generateKey("delete");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// Set first
@@ -344,7 +350,7 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute incr command", async () => {
-			const key = "node-test-incr";
+			const key = generateKey("incr");
 
 			// Set initial value
 			await node.command(`set ${key} 0 0 1\r\n0`);
@@ -355,7 +361,7 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute decr command", async () => {
-			const key = "node-test-decr";
+			const key = generateKey("decr");
 
 			// Set initial value
 			await node.command(`set ${key} 0 0 2\r\n10`);
@@ -373,8 +379,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute touch command", async () => {
-			const key = "node-test-touch";
-			const value = "test-value";
+			const key = generateKey("touch");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// Set first
@@ -391,8 +397,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle NOT_STORED response for add command", async () => {
-			const key = "node-test-add-duplicate";
-			const value = "test-value";
+			const key = generateKey("add-dup");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// First set the key
@@ -404,8 +410,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle EXISTS response for cas command", async () => {
-			const key = "node-test-cas-exists";
-			const value = "test-value";
+			const key = generateKey("cas");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// Set initial value
@@ -434,7 +440,7 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle NOT_FOUND response for delete command", async () => {
-			const key = "node-test-delete-nonexistent";
+			const key = generateKey("delete-notfound");
 
 			// Try to delete a key that doesn't exist
 			const mockSocket = (node as any)._socket;
@@ -448,9 +454,9 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle multiple sequential commands", async () => {
-			const key1 = "node-test-seq1";
-			const key2 = "node-test-seq2";
-			const value = "test";
+			const key1 = generateKey("seq1");
+			const key2 = generateKey("seq2");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			const result1 = await node.command(
@@ -468,8 +474,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should emit hit event for successful get", async () => {
-			const key = "node-test-hit";
-			const value = "test-value";
+			const key = generateKey("hit");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// Set first
@@ -497,7 +503,7 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should emit miss event for non-existent key", async () => {
-			const key = "node-test-miss";
+			const key = generateKey("miss");
 
 			let missEmitted = false;
 			let missKey = "";
@@ -539,7 +545,8 @@ describe("MemcacheNode", () => {
 			await node.connect();
 
 			// Queue a command
-			const promise = node.command("get slow-key", { isMultiline: true });
+			const key = generateKey("slow");
+			const promise = node.command(`get ${key}`, { isMultiline: true });
 
 			// Immediately disconnect
 			setImmediate(() => {
@@ -570,10 +577,10 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should maintain FIFO order for commands", async () => {
-			const key1 = "node-fifo-1";
-			const key2 = "node-fifo-2";
-			const key3 = "node-fifo-3";
-			const value = "test";
+			const key1 = generateKey("fifo1");
+			const key2 = generateKey("fifo2");
+			const key3 = generateKey("fifo3");
+			const value = generateValue();
 			const bytes = Buffer.byteLength(value);
 
 			// Queue multiple commands
@@ -602,10 +609,10 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle multiple keys in get command", async () => {
-			const key1 = "node-multi-1";
-			const key2 = "node-multi-2";
-			const value1 = "value1";
-			const value2 = "value2";
+			const key1 = generateKey("multi1");
+			const key2 = generateKey("multi2");
+			const value1 = generateValue();
+			const value2 = generateValue();
 
 			// Set both keys
 			await node.command(
@@ -627,8 +634,8 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle large values", async () => {
-			const key = "node-large";
-			const value = "x".repeat(10000); // 10KB value
+			const key = generateKey("large");
+			const value = generateLargeValue(10000); // 10KB value
 			const bytes = Buffer.byteLength(value);
 
 			const setResult = await node.command(
@@ -643,8 +650,9 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should handle partial data delivery for value bytes", async () => {
-			const key = "node-partial";
-			const value = "test-value-12345";
+			const key = generateKey("partial");
+			// Use a value guaranteed to be longer than 5 characters for proper partial delivery testing
+			const value = generateLargeValue(20);
 			const bytes = Buffer.byteLength(value);
 
 			// Set the value first
@@ -730,10 +738,11 @@ describe("MemcacheNode", () => {
 		it("should handle ERROR response for multiline get command", async () => {
 			await node.connect();
 
+			const key = generateKey("error");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get test_key", {
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
-				requestedKeys: ["test_key"],
+				requestedKeys: [key],
 			});
 
 			// Simulate server ERROR response
@@ -745,10 +754,11 @@ describe("MemcacheNode", () => {
 		it("should handle CLIENT_ERROR response for multiline get command", async () => {
 			await node.connect();
 
+			const key = generateKey("clienterror");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get test_key", {
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
-				requestedKeys: ["test_key"],
+				requestedKeys: [key],
 			});
 
 			// Simulate server CLIENT_ERROR response
@@ -760,10 +770,11 @@ describe("MemcacheNode", () => {
 		it("should handle SERVER_ERROR response for multiline get command", async () => {
 			await node.connect();
 
+			const key = generateKey("servererror");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get test_key", {
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
-				requestedKeys: ["test_key"],
+				requestedKeys: [key],
 			});
 
 			// Simulate server SERVER_ERROR response
@@ -778,7 +789,8 @@ describe("MemcacheNode", () => {
 			await node.connect();
 
 			// Start a command but don't let it complete
-			const commandPromise = node.command("get pending_key", {
+			const key = generateKey("pending");
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
 			});
 
@@ -793,9 +805,12 @@ describe("MemcacheNode", () => {
 			await node.connect();
 
 			// Queue multiple commands without responses
-			const promise1 = node.command("get key1", { isMultiline: true });
-			const promise2 = node.command("get key2", { isMultiline: true });
-			const promise3 = node.command("get key3", { isMultiline: true });
+			const key1 = generateKey("queue1");
+			const key2 = generateKey("queue2");
+			const key3 = generateKey("queue3");
+			const promise1 = node.command(`get ${key1}`, { isMultiline: true });
+			const promise2 = node.command(`get ${key2}`, { isMultiline: true });
+			const promise3 = node.command(`get ${key3}`, { isMultiline: true });
 
 			// Disconnect immediately
 			await node.disconnect();
@@ -817,8 +832,9 @@ describe("MemcacheNode", () => {
 		it("should handle error response for multiline command without requestedKeys", async () => {
 			await node.connect();
 
+			const key = generateKey("nokeys");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get test_key", {
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
 				// Note: no requestedKeys provided
 			});
@@ -833,13 +849,14 @@ describe("MemcacheNode", () => {
 			await node.connect();
 
 			// Start a command that will become _currentCommand
+			const key = generateKey("current");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get some_key", {
+			const commandPromise = node.command(`get ${key}`, {
 				isMultiline: true,
 			});
 
 			// Send partial response to set _currentCommand
-			mockSocket.emit("data", "VALUE some_key 0 5\r\n");
+			mockSocket.emit("data", `VALUE ${key} 0 5\r\n`);
 
 			// Trigger close event which calls rejectPendingCommands
 			mockSocket.emit("close");
@@ -850,13 +867,15 @@ describe("MemcacheNode", () => {
 		it("should handle SERVER_ERROR after partial VALUE response in multiline command", async () => {
 			await node.connect();
 
+			const key1 = generateKey("partial1");
+			const key2 = generateKey("partial2");
 			const mockSocket = (node as any)._socket;
-			const commandPromise = node.command("get key1 key2", {
+			const commandPromise = node.command(`get ${key1} ${key2}`, {
 				isMultiline: true,
 			});
 
 			// First send a VALUE line and its data
-			mockSocket.emit("data", "VALUE key1 0 5\r\n");
+			mockSocket.emit("data", `VALUE ${key1} 0 5\r\n`);
 			mockSocket.emit("data", "test1\r\n");
 
 			// Then send a SERVER_ERROR (simulating server issue mid-response)

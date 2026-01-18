@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ModulaHash } from "../src/modula.js";
 import { MemcacheNode } from "../src/node.js";
+import { generateKey } from "./test-utils.js";
 
 describe("ModulaHash", () => {
 	describe("constructor", () => {
@@ -102,7 +103,8 @@ describe("ModulaHash", () => {
 			distribution.removeNode(node.id);
 
 			// After removal, getNodesByKey should return empty
-			const nodes = distribution.getNodesByKey("test-key");
+			const key = generateKey("removed");
+			const nodes = distribution.getNodesByKey(key);
 			expect(nodes).toEqual([]);
 		});
 	});
@@ -147,7 +149,8 @@ describe("ModulaHash", () => {
 			distribution.addNode(node1);
 			distribution.addNode(node2);
 
-			const nodes = distribution.getNodesByKey("test-key");
+			const key = generateKey("modula");
+			const nodes = distribution.getNodesByKey(key);
 			expect(nodes.length).toBe(1);
 			expect([node1, node2]).toContain(nodes[0]);
 		});
@@ -160,14 +163,16 @@ describe("ModulaHash", () => {
 			distribution.addNode(node1);
 			distribution.addNode(node2);
 
-			const nodes1 = distribution.getNodesByKey("test-key");
-			const nodes2 = distribution.getNodesByKey("test-key");
+			const key = generateKey("consistent");
+			const nodes1 = distribution.getNodesByKey(key);
+			const nodes2 = distribution.getNodesByKey(key);
 			expect(nodes1[0]).toBe(nodes2[0]);
 		});
 
 		it("should return empty array when no nodes available", () => {
 			const distribution = new ModulaHash();
-			const nodes = distribution.getNodesByKey("test-key");
+			const key = generateKey("empty");
+			const nodes = distribution.getNodesByKey(key);
 			expect(nodes).toEqual([]);
 		});
 
@@ -249,7 +254,8 @@ describe("ModulaHash", () => {
 			expect(distribution.nodes.length).toBe(2);
 
 			// Get by key
-			const nodeForKey = distribution.getNodesByKey("my-key");
+			const key = generateKey("integration");
+			const nodeForKey = distribution.getNodesByKey(key);
 			expect(nodeForKey.length).toBe(1);
 
 			// Get by ID
@@ -311,8 +317,9 @@ describe("ModulaHash", () => {
 			md5Distribution.addNode(node2);
 
 			// Both should work and distribute keys
-			const sha1Nodes = sha1Distribution.getNodesByKey("test-key");
-			const md5Nodes = md5Distribution.getNodesByKey("test-key");
+			const key = generateKey("hash-algo");
+			const sha1Nodes = sha1Distribution.getNodesByKey(key);
+			const md5Nodes = md5Distribution.getNodesByKey(key);
 
 			expect(sha1Nodes.length).toBe(1);
 			expect(md5Nodes.length).toBe(1);
