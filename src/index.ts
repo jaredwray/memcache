@@ -73,16 +73,16 @@ export class Memcache extends Hookified {
 	constructor(options?: string | MemcacheOptions) {
 		super();
 
-		this._hash = new KetamaHash();
-
 		// Handle string parameter as a single node URI
 		if (typeof options === "string") {
+			this._hash = new KetamaHash();
 			this._timeout = 5000;
 			this._keepAlive = true;
 			this._keepAliveDelay = 1000;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
+			this._hash = options?.hash ?? new KetamaHash();
 			this._timeout = options?.timeout || 5000;
 			this._keepAlive = options?.keepAlive !== false;
 			this._keepAliveDelay = options?.keepAliveDelay || 1000;
