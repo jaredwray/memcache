@@ -1,5 +1,6 @@
 import { Hookified } from "hookified";
 import { KetamaHash } from "./ketama.js";
+import { ModulaHash } from "./modula.js";
 import { type CommandOptions, createNode, MemcacheNode } from "./node.js";
 
 export enum MemcacheEvents {
@@ -1018,5 +1019,5 @@ export class Memcache extends Hookified {
 	}
 }
 
-export { createNode };
+export { createNode, ModulaHash };
 export default Memcache;

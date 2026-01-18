@@ -44,6 +44,10 @@ Nodejs Memcache Client
     - [decr(key, value?)](#decrkey-value)
     - [touch(key, exptime)](#touchkey-exptime)
   - [Hook Examples](#hook-examples)
+- [Distribution Algorithms](#distribution-algorithms)
+  - [KetamaHash (Default)](#ketamahash-default)
+  - [ModulaHash](#modulahash)
+  - [Choosing an Algorithm](#choosing-an-algorithm)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -473,9 +477,98 @@ client.onHook('after:set', async (context) => {
 });
 ```
 
+# Distribution Algorithms
+
+Memcache supports pluggable distribution algorithms to determine how keys are distributed across nodes. You can configure the algorithm using the `hash` option.
+
+## KetamaHash (Default)
+
+KetamaHash uses the Ketama consistent hashing algorithm, which minimizes key redistribution when nodes are added or removed. This is the default and recommended algorithm for production environments with dynamic scaling.
+
+```javascript
+import { Memcache } from 'memcache';
+
+// KetamaHash is used by default
+const client = new Memcache({
+  nodes: ['server1:11211', 'server2:11211', 'server3:11211']
+});
+```
+
+**Characteristics:**
+- Minimal key redistribution (~1/n keys move when adding/removing nodes)
+- Uses virtual nodes for better distribution
+- Supports weighted nodes
+- Best for production environments with dynamic scaling
+
+## ModulaHash
+
+ModulaHash uses a simple modulo-based hashing algorithm (`hash(key) % nodeCount`). This is a simpler algorithm that may redistribute all keys when nodes change.
+
+```javascript
+import { Memcache, ModulaHash } from 'memcache';
+
+// Use ModulaHash for distribution
+const client = new Memcache({
+  nodes: ['server1:11211', 'server2:11211', 'server3:11211'],
+  hash: new ModulaHash()
+});
+
+// With a custom hash algorithm (default is sha1)
+const client2 = new Memcache({
+  nodes: ['server1:11211', 'server2:11211'],
+  hash: new ModulaHash('md5')
+});
+```
+
+**Characteristics:**
+- Simple and fast algorithm
+- All keys may be redistributed when nodes are added or removed
+- Supports weighted nodes (nodes with higher weight appear more in the distribution)
+- Best for fixed-size clusters or testing environments
+
+### Weighted Nodes with ModulaHash
+
+ModulaHash supports weighted nodes, where nodes with higher weights receive proportionally more keys:
+
+```javascript
+import { Memcache, ModulaHash, createNode } from 'memcache';
+
+// Create nodes with different weights
+const node1 = createNode('server1', 11211, { weight: 3 }); // 3x traffic
+const node2 = createNode('server2', 11211, { weight: 1 }); // 1x traffic
+
+const client = new Memcache({
+  nodes: [node1, node2],
+  hash: new ModulaHash()
+});
+
+// server1 will receive approximately 75% of keys
+// server2 will receive approximately 25% of keys
+```
+
+## Choosing an Algorithm
+
+| Feature | KetamaHash | ModulaHash |
+|---------|------------|------------|
+| Key redistribution on node change | Minimal (~1/n keys) | All keys may move |
+| Complexity | Higher (virtual nodes) | Lower (simple modulo) |
+| Performance | Slightly slower | Faster |
+| Best for | Dynamic scaling | Fixed clusters |
+| Weighted nodes | Yes | Yes |
+
+**Use KetamaHash (default) when:**
+- Your cluster size may change dynamically
+- You want to minimize cache invalidation during scaling
+- You're running in production
+
+**Use ModulaHash when:**
+- Your cluster size is fixed
+- You prefer simplicity over minimal redistribution
+- You're in a testing or development environment
+
 # Contributing
 
-Please read our [Contributing Guidelines](./CONTRIBUTING.md) and also our [Code of Conduct](./CODE_OF_CONDUCT.md). 
+Please read our [Contributing Guidelines](./CONTRIBUTING.md) and also our [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 # License and Copyright
 
