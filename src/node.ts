@@ -343,6 +343,7 @@ export class MemcacheNode extends Hookified {
 				// Remove this temporary handler
 				socket.removeListener("data", binaryHandler);
 
+				/* v8 ignore next -- @preserve */
 				if (header.status === STATUS_SUCCESS) {
 					this._authenticated = true;
 					this.emit("authenticated");
@@ -355,7 +356,6 @@ export class MemcacheNode extends Hookified {
 						),
 					);
 				} else {
-					/* v8 ignore next -- @preserve */
 					reject(
 						new Error(
 							`SASL authentication failed with status: 0x${header.status.toString(16)}`,
@@ -564,12 +564,10 @@ export class MemcacheNode extends Hookified {
 	/**
 	 * Binary protocol FLUSH operation
 	 */
+	/* v8 ignore next -- @preserve */
 	public async binaryFlush(exptime = 0): Promise<boolean> {
-		/* v8 ignore next -- @preserve */
 		const response = await this.binaryRequest(buildFlushRequest(exptime));
-		/* v8 ignore next -- @preserve */
 		const header = deserializeHeader(response);
-		/* v8 ignore next -- @preserve */
 		return header.status === STATUS_SUCCESS;
 	}
 

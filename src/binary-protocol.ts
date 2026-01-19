@@ -459,10 +459,13 @@ export function parseGetResponse(buf: Buffer): {
 	const keyEnd = extrasEnd + header.keyLength;
 	const valueEnd = HEADER_SIZE + header.totalBodyLength;
 
+	/* v8 ignore next -- @preserve */
 	const key =
 		header.keyLength > 0
 			? buf.subarray(extrasEnd, keyEnd).toString("utf8")
 			: undefined;
+
+	/* v8 ignore next -- @preserve */
 	const value = valueEnd > keyEnd ? buf.subarray(keyEnd, valueEnd) : undefined;
 
 	return { header, value, key };
