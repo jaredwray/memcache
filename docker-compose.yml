@@ -22,3 +22,12 @@ services:
       - "11213:11211"
     command: memcached -m 64 -vv
     restart: unless-stopped
+
+  memcached-sasl:
+    build:
+      context: ./test/sasl
+      dockerfile: Dockerfile
+    container_name: memcached-server-sasl
+    ports:
+      - "11215:11211"
+    restart: unless-stopped
