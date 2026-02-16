@@ -48,7 +48,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "hookified": "^1.15.0"
+    "hookified": "^1.15.1"
   },
   "files": [
     "dist",
