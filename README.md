@@ -1,4 +1,4 @@
-[<img src="https://jaredwray.com/images/memcache.svg" width="80%" height="80%" alt="Memcache Logo" align="center">](https://memcachejs.org)
+[<img src="https://jaredwray.com/images/memcache.svg" width="80%" height="80%" align="center" alt="Memcache Logo" align="center">](https://memcachejs.org)
 
 [![codecov](https://codecov.io/gh/jaredwray/memcache/graph/badge.svg?token=4DUANNWiIE)](https://codecov.io/gh/jaredwray/memcache)
 [![tests](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml/badge.svg)](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml)
