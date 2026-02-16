@@ -39,6 +39,7 @@ export interface MemcacheNodeOptions {
 export interface CommandOptions {
 	isMultiline?: boolean;
 	isStats?: boolean;
+	isConfig?: boolean;
 	requestedKeys?: string[];
 }
 
@@ -54,6 +55,7 @@ export type CommandQueueItem = {
 	reject: (reason?: any) => void;
 	isMultiline?: boolean;
 	isStats?: boolean;
+	isConfig?: boolean;
 	requestedKeys?: string[];
 	foundKeys?: string[];
 };
@@ -109,7 +111,12 @@ export class MemcacheNode extends Hookified {
 	 * Get the unique identifier for this node (host:port format)
 	 */
 	public get id(): string {
-		return this._port === 0 ? this._host : `${this._host}:${this._port}`;
+		if (this._port === 0) {
+			return this._host;
+		}
+
+		const host = this._host.includes(":") ? `[${this._host}]` : this._host;
+		return `${host}:${this._port}`;
 	}
 
 	/**
@@ -697,6 +704,7 @@ export class MemcacheNode extends Hookified {
 				reject,
 				isMultiline: options?.isMultiline,
 				isStats: options?.isStats,
+				isConfig: options?.isConfig,
 				requestedKeys: options?.requestedKeys,
 			});
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
@@ -766,6 +774,30 @@ export class MemcacheNode extends Hookified {
 				this._currentCommand.reject(new Error(line));
 				this._currentCommand = undefined;
 				return;
+			}
+
+			return;
+		}
+
+		if (this._currentCommand.isConfig) {
+			if (line.startsWith("CONFIG ")) {
+				const parts = line.split(" ");
+				const bytes = Number.parseInt(parts[3], 10);
+				this._pendingValueBytes = bytes;
+			} else if (line === "END") {
+				const result =
+					this._multilineData.length > 0 ? this._multilineData : undefined;
+				this._currentCommand.resolve(result);
+				this._multilineData = [];
+				this._currentCommand = undefined;
+			} else if (
+				line.startsWith("ERROR") ||
+				line.startsWith("CLIENT_ERROR") ||
+				line.startsWith("SERVER_ERROR")
+			) {
+				this._currentCommand.reject(new Error(line));
+				this._multilineData = [];
+				this._currentCommand = undefined;
 			}
 
 			return;

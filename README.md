@@ -1,4 +1,4 @@
-[<img src="https://jaredwray.com/images/memcache.svg" width="80%" height="80%" alt="Memcache Logo" align="center">](https://memcachejs.org)
+[<img src="https://jaredwray.com/images/memcache.svg" width="80%" height="80%" align="center" alt="Memcache Logo" align="center">](https://memcachejs.org)
 
 [![codecov](https://codecov.io/gh/jaredwray/memcache/graph/badge.svg?token=4DUANNWiIE)](https://codecov.io/gh/jaredwray/memcache)
 [![tests](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml/badge.svg)](https://github.com/jaredwray/memcache/actions/workflows/tests.yaml)
@@ -59,6 +59,12 @@ Nodejs Memcache Client
   - [Per-Node SASL Configuration](#per-node-sasl-configuration)
   - [Authentication Events](#authentication-events)
   - [Server Configuration](#server-configuration)
+- [Auto Discovery](#auto-discovery)
+  - [Enabling Auto Discovery](#enabling-auto-discovery)
+  - [Auto Discovery Options](#auto-discovery-options)
+  - [Auto Discovery Events](#auto-discovery-events)
+  - [Legacy Command Support](#legacy-command-support)
+- [IPv6 Support](#ipv6-support)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -198,6 +204,7 @@ const client = new Memcache({
 - `retryDelay?: number` - Base delay in milliseconds between retries (default: 100)
 - `retryBackoff?: RetryBackoffFunction` - Function to calculate backoff delay (default: fixed delay)
 - `retryOnlyIdempotent?: boolean` - Only retry commands marked as idempotent (default: true)
+- `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
 
@@ -404,6 +411,9 @@ client.on('miss', (key) => {
 - `quit` - Emitted when quit command is sent
 - `warn` - Emitted for warning messages
 - `info` - Emitted for informational messages
+- `autoDiscover` - Emitted on initial auto discovery with the cluster config
+- `autoDiscoverUpdate` - Emitted when auto discovery detects a topology change
+- `autoDiscoverError` - Emitted when auto discovery encounters an error
 
 ## Hooks
 
@@ -876,6 +886,148 @@ To use SASL authentication, your memcached server must be configured with SASL s
    ```
 
 For more details, see the [memcached SASL documentation](https://github.com/memcached/memcached/wiki/SASLHowto).
+
+# Auto Discovery
+
+The Memcache client supports AWS ElastiCache Auto Discovery, which automatically detects cluster topology changes and adds or removes nodes as needed. When enabled, the client connects to a configuration endpoint, retrieves the current list of cache nodes, and periodically polls for changes.
+
+## Enabling Auto Discovery
+
+```javascript
+import { Memcache } from 'memcache';
+
+const client = new Memcache({
+  nodes: [],
+  autoDiscover: {
+    enabled: true,
+    configEndpoint: 'my-cluster.cfg.use1.cache.amazonaws.com:11211',
+  },
+});
+
+await client.connect();
+// The client automatically discovers and connects to all cluster nodes
+```
+
+If you omit `configEndpoint`, the first node in the `nodes` array is used as the configuration endpoint:
+
+```javascript
+const client = new Memcache({
+  nodes: ['my-cluster.cfg.use1.cache.amazonaws.com:11211'],
+  autoDiscover: {
+    enabled: true,
+  },
+});
+```
+
+## Auto Discovery Options
+
+The `autoDiscover` option accepts an object with the following properties:
+
+- `enabled: boolean` - Enable auto discovery of cluster nodes (required)
+- `pollingInterval?: number` - How often to poll for topology changes, in milliseconds (default: 60000)
+- `configEndpoint?: string` - The configuration endpoint to use for discovery. This is typically the `.cfg` endpoint from ElastiCache. If not specified, the first node in the `nodes` array will be used
+- `useLegacyCommand?: boolean` - Use the legacy `get AmazonElastiCache:cluster` command instead of `config get cluster` (default: false)
+
+## Auto Discovery Events
+
+The client emits events during the auto discovery lifecycle:
+
+```javascript
+const client = new Memcache({
+  nodes: [],
+  autoDiscover: {
+    enabled: true,
+    configEndpoint: 'my-cluster.cfg.use1.cache.amazonaws.com:11211',
+  },
+});
+
+// Emitted on initial discovery with the full cluster config
+client.on('autoDiscover', (config) => {
+  console.log('Discovered nodes:', config.nodes);
+  console.log('Config version:', config.version);
+});
+
+// Emitted when polling detects a topology change
+client.on('autoDiscoverUpdate', (config) => {
+  console.log('Cluster topology changed:', config.nodes);
+});
+
+// Emitted when discovery encounters an error (non-fatal, retries on next poll)
+client.on('autoDiscoverError', (error) => {
+  console.error('Discovery error:', error.message);
+});
+
+await client.connect();
+```
+
+## Legacy Command Support
+
+For ElastiCache engine versions older than 1.4.14, use the legacy discovery command:
+
+```javascript
+const client = new Memcache({
+  nodes: [],
+  autoDiscover: {
+    enabled: true,
+    configEndpoint: 'my-cluster.cfg.use1.cache.amazonaws.com:11211',
+    useLegacyCommand: true, // Uses 'get AmazonElastiCache:cluster' instead of 'config get cluster'
+  },
+});
+```
+
+# IPv6 Support
+
+The Memcache client fully supports IPv6 addresses using standard bracket notation in URIs.
+
+## Connecting to IPv6 Nodes
+
+```javascript
+import { Memcache } from 'memcache';
+
+// IPv6 loopback
+const client = new Memcache('[::1]:11211');
+
+// Multiple IPv6 nodes
+const client = new Memcache({
+  nodes: [
+    '[::1]:11211',
+    '[2001:db8::1]:11211',
+    'memcache://[2001:db8::2]:11212',
+  ],
+});
+
+await client.connect();
+```
+
+## IPv6 in Auto Discovery
+
+When auto discovery returns IPv6 node addresses, the client automatically brackets them for correct URI handling:
+
+```javascript
+const client = new Memcache({
+  nodes: [],
+  autoDiscover: {
+    enabled: true,
+    configEndpoint: '[2001:db8::1]:11211',
+  },
+});
+
+await client.connect();
+// Discovered IPv6 nodes are added as [host]:port automatically
+```
+
+## IPv6 Node IDs
+
+Node IDs for IPv6 addresses use bracket notation to avoid ambiguity:
+
+```javascript
+const client = new Memcache({
+  nodes: ['[::1]:11211', '[2001:db8::1]:11212'],
+});
+
+console.log(client.nodeIds);
+// ['[::1]:11211', '[2001:db8::1]:11212']
+```
 
 # Contributing
 
