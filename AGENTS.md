@@ -2,9 +2,10 @@
 
 Guidelines for AI coding agents (Claude, Gemini, Codex).
 
-## Project
+## Mandatory with all changes
 
-Memcache is a Node.js Memcache client library built with TypeScript. It provides a complete implementation of the Memcache protocol with support for multiple nodes, consistent hashing (Ketama algorithm), replication, and hook/event capabilities via hookified.
+- `pnpm build` must be successful
+- `pnpm test` must be successful with 100% code coverage
 
 ## Commands
 
