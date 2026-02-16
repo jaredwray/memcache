@@ -72,13 +72,14 @@ bench.add(`memcached set/get (v${memcachedVersion})`, async () => {
 	memcachedIndex++;
 });
 
-await bench.run();
-
-const output = tinybenchPrinter.toMarkdown(bench);
-console.log(output);
-console.log("");
-
-await memcacheClient.flush();
-await memcacheClient.disconnect();
-memjsClient.close();
-memcachedClient.end();
+try {
+	await bench.run();
+	const output = tinybenchPrinter.toMarkdown(bench);
+	console.log(output);
+	console.log("");
+} finally {
+	await memcacheClient.flush();
+	await memcacheClient.disconnect();
+	memjsClient.close();
+	memcachedClient.end();
+}
