@@ -615,6 +615,36 @@ describe("Memcache AutoDiscovery Integration", () => {
 		});
 	});
 
+	describe("quit stops auto discovery", () => {
+		it("should stop auto discovery when quit is called", async () => {
+			const server = new FakeConfigServer({
+				version: 1,
+				nodes: ["host1|10.0.0.1|11211"],
+			});
+			await server.start();
+
+			const client = new Memcache({
+				nodes: [],
+				autoDiscover: {
+					enabled: true,
+					configEndpoint: server.endpoint,
+				},
+			});
+
+			client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+			client.on(MemcacheEvents.ERROR, () => {});
+
+			await client.connect();
+			await client.quit();
+
+			// Auto discovery should be stopped
+			// @ts-expect-error - accessing private field for testing
+			expect(client._autoDiscovery).toBeUndefined();
+
+			await server.stop();
+		});
+	});
+
 	describe("applyClusterConfig", () => {
 		it("should add new nodes from discovered config", async () => {
 			const client = new Memcache({
