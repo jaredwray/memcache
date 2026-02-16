@@ -24,6 +24,9 @@ importers:
       '@types/memcached':
         specifier: ^2.2.10
         version: 2.2.10
+      '@types/memjs':
+        specifier: ^1.3.3
+        version: 1.3.3
       '@types/node':
         specifier: ^25.2.3
         version: 25.2.3
@@ -761,6 +764,9 @@ packages:
 
   '@types/memcached@2.2.10':
     resolution: {integrity: sha512-AM9smvZN55Gzs2wRrqeMHVP7KE8KWgCJO/XL5yCly2xF6EKa4YlbpK+cLSAH4NG/Ah64HrlegmGqW8kYws7Vxg==}
+
+  '@types/memjs@1.3.3':
+    resolution: {integrity: sha512-OqZuZ2T0ErrygA/WUqQjmsB1GpxAt84OCgKPKbsSWwYKA/oe/lTiqvqMgFOv/Ngl8p+nytgdhrdxJtikOgimCg==}
 
   '@types/node@25.2.3':
     resolution: {integrity: sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ==}
@@ -1804,6 +1810,10 @@ snapshots:
   '@types/estree@1.0.8': {}
 
   '@types/memcached@2.2.10':
+    dependencies:
+      '@types/node': 25.2.3
+
+  '@types/memjs@1.3.3':
     dependencies:
       '@types/node': 25.2.3
 
