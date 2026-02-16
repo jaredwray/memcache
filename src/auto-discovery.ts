@@ -191,7 +191,8 @@ export class AutoDiscovery extends Hookified {
 	 */
 	public static nodeId(node: DiscoveredNode): string {
 		const host = node.ip || node.hostname;
-		return `${host}:${node.port}`;
+		const wrappedHost = host.includes(":") ? `[${host}]` : host;
+		return `${wrappedHost}:${node.port}`;
 	}
 
 	private async ensureConfigNode(): Promise<MemcacheNode> {

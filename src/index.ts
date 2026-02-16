@@ -1250,7 +1250,8 @@ export class Memcache extends Hookified {
 			if (!currentNodeIds.has(id)) {
 				try {
 					const host = node.ip || node.hostname;
-					await this.addNode(`${host}:${node.port}`);
+					const wrappedHost = host.includes(":") ? `[${host}]` : host;
+					await this.addNode(`${wrappedHost}:${node.port}`);
 				} catch (error) {
 					this.emit(MemcacheEvents.ERROR, id, error);
 				}

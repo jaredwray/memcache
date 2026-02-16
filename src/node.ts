@@ -111,7 +111,12 @@ export class MemcacheNode extends Hookified {
 	 * Get the unique identifier for this node (host:port format)
 	 */
 	public get id(): string {
-		return this._port === 0 ? this._host : `${this._host}:${this._port}`;
+		if (this._port === 0) {
+			return this._host;
+		}
+
+		const host = this._host.includes(":") ? `[${this._host}]` : this._host;
+		return `${host}:${this._port}`;
 	}
 
 	/**

@@ -169,6 +169,26 @@ describe("AutoDiscovery", () => {
 				}),
 			).toBe("myhost.cache.amazonaws.com:11211");
 		});
+
+		it("should bracket IPv6 addresses", () => {
+			expect(
+				AutoDiscovery.nodeId({
+					hostname: "myhost.cache.amazonaws.com",
+					ip: "2001:db8::1",
+					port: 11211,
+				}),
+			).toBe("[2001:db8::1]:11211");
+		});
+
+		it("should bracket IPv6 hostname when IP is empty", () => {
+			expect(
+				AutoDiscovery.nodeId({
+					hostname: "::1",
+					ip: "",
+					port: 11211,
+				}),
+			).toBe("[::1]:11211");
+		});
 	});
 
 	describe("constructor and properties", () => {
@@ -736,6 +756,26 @@ describe("Memcache AutoDiscovery Integration", () => {
 			});
 
 			expect(client.nodeIds).toEqual(["10.0.0.1:11211"]);
+		});
+
+		it("should bracket IPv6 addresses when adding nodes", async () => {
+			const client = new Memcache({
+				nodes: [],
+			});
+
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{ hostname: "host1", ip: "2001:db8::1", port: 11211 },
+					{ hostname: "host2", ip: "10.0.0.1", port: 11211 },
+				],
+			});
+
+			expect(client.nodeIds).toContain("[2001:db8::1]:11211");
+			expect(client.nodeIds).toContain("10.0.0.1:11211");
 		});
 	});
 });
@@ -1341,6 +1381,34 @@ describe("AutoDiscovery additional coverage", () => {
 		// We can verify this by checking that the discovery is still running
 		// (if polls overlapped and broke state, it could crash)
 		expect(discovery.isRunning).toBe(true);
+
+		await discovery.stop();
+	});
+
+	it("should discover and parse IPv6 nodes end-to-end", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|2001:db8::1|11211", "host2|10.0.0.1|11212"],
+		});
+		await server.start();
+
+		const discovery = new AutoDiscovery({
+			configEndpoint: server.endpoint,
+			pollingInterval: 60000,
+			useLegacyCommand: false,
+			timeout: 5000,
+			keepAlive: true,
+			keepAliveDelay: 1000,
+		});
+
+		const config = await discovery.start();
+		expect(config.version).toBe(1);
+		expect(config.nodes).toHaveLength(2);
+		expect(config.nodes[0].ip).toBe("2001:db8::1");
+
+		// Verify nodeId brackets the IPv6 address
+		expect(AutoDiscovery.nodeId(config.nodes[0])).toBe("[2001:db8::1]:11211");
+		expect(AutoDiscovery.nodeId(config.nodes[1])).toBe("10.0.0.1:11212");
 
 		await discovery.stop();
 	});

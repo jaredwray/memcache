@@ -84,8 +84,8 @@ describe("Memcache", () => {
 				nodes: ["[::1]:11211", "memcache://[2001:db8::1]:11212"],
 			});
 			expect(testClient.nodeIds).toHaveLength(2);
-			expect(testClient.nodeIds).toContain("::1:11211");
-			expect(testClient.nodeIds).toContain("2001:db8::1:11212");
+			expect(testClient.nodeIds).toContain("[::1]:11211");
+			expect(testClient.nodeIds).toContain("[2001:db8::1]:11212");
 		});
 
 		it("should create instance with single node from string parameter", () => {
