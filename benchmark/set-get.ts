@@ -13,7 +13,8 @@ function cleanVersion(version: string): string {
 const memcachedVersion = cleanVersion(pkg.devDependencies.memcached);
 const memjsVersion = cleanVersion(pkg.devDependencies.memjs);
 
-const bench = new Bench({ name: "set-get", iterations: 10_000 });
+const ITERATIONS = 10_000;
+const bench = new Bench({ name: "set-get", iterations: ITERATIONS });
 
 // Clients
 const memcacheClient = new Memcache("localhost:11211");
@@ -41,10 +42,10 @@ function memcachedGet(key: string): Promise<string | undefined> {
 
 // Pre-generate keys and values
 const keys = Array.from(
-	{ length: 10_000 },
+	{ length: ITERATIONS },
 	(_, i) => `bench-${i}-${faker.string.alphanumeric(8)}`,
 );
-const values = Array.from({ length: 10_000 }, () => faker.lorem.word());
+const values = Array.from({ length: ITERATIONS }, () => faker.lorem.word());
 
 await memcacheClient.connect();
 
