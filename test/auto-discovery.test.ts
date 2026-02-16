@@ -245,6 +245,35 @@ describe("AutoDiscovery", () => {
 			);
 		});
 
+		it("should reset isRunning when start fails and allow retry", async () => {
+			discovery = new AutoDiscovery({
+				configEndpoint: "127.0.0.1:1", // unreachable port
+				pollingInterval: 60000,
+				useLegacyCommand: false,
+				timeout: 1000,
+				keepAlive: true,
+				keepAliveDelay: 1000,
+			});
+
+			await expect(discovery.start()).rejects.toThrow();
+			expect(discovery.isRunning).toBe(false);
+
+			// Should be able to start again after failure
+			server = new FakeConfigServer({
+				version: 1,
+				nodes: ["host1|10.0.0.1|11211"],
+			});
+			await server.start();
+
+			// Reconfigure to point at the working server
+			// @ts-expect-error - accessing private field for testing
+			discovery._configEndpoint = server.endpoint;
+
+			const config = await discovery.start();
+			expect(discovery.isRunning).toBe(true);
+			expect(config.version).toBe(1);
+		});
+
 		it("should stop correctly", async () => {
 			server = new FakeConfigServer({
 				version: 1,

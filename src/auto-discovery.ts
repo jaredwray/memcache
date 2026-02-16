@@ -72,8 +72,15 @@ export class AutoDiscovery extends Hookified {
 
 		this._isRunning = true;
 
-		const configNode = await this.ensureConfigNode();
-		const config = await this.fetchConfig(configNode);
+		let config: ClusterConfig;
+		try {
+			const configNode = await this.ensureConfigNode();
+			config = await this.fetchConfig(configNode);
+		} catch (error) {
+			this._isRunning = false;
+			throw error;
+		}
+
 		this._configVersion = config.version;
 		this.emit("autoDiscover", config);
 
