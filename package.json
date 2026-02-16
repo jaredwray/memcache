@@ -37,6 +37,14 @@
   ],
   "author": "Jared Wray <me@jaredwray.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jaredwray/memcache"
+  },
+  "bugs": {
+    "url": "https://github.com/jaredwray/memcache/issues"
+  },
+  "homepage": "https://github.com/jaredwray/memcache#readme",
   "devDependencies": {
     "@biomejs/biome": "^2.3.15",
     "@faker-js/faker": "^10.3.0",
