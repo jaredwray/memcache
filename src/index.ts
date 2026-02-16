@@ -1,8 +1,11 @@
 import { Hookified } from "hookified";
+import { AutoDiscovery } from "./auto-discovery.js";
 import { KetamaHash } from "./ketama.js";
 import { ModulaHash } from "./modula.js";
 import { type CommandOptions, createNode, MemcacheNode } from "./node.js";
 import {
+	type AutoDiscoverOptions,
+	type ClusterConfig,
 	type ExecuteOptions,
 	type HashProvider,
 	MemcacheEvents,
@@ -13,6 +16,8 @@ import {
 } from "./types.js";
 
 export {
+	type AutoDiscoverOptions,
+	type ClusterConfig,
 	type ExecuteOptions,
 	type HashProvider,
 	MemcacheEvents,
@@ -49,6 +54,8 @@ export class Memcache extends Hookified {
 	private _retryBackoff: RetryBackoffFunction;
 	private _retryOnlyIdempotent: boolean;
 	private _sasl: SASLCredentials | undefined;
+	private _autoDiscovery: AutoDiscovery | undefined;
+	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 
 	constructor(options?: string | MemcacheOptions) {
 		super();
@@ -76,6 +83,7 @@ export class Memcache extends Hookified {
 			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
+			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
 			const nodeUris = options?.nodes || ["localhost:11211"];
@@ -456,6 +464,11 @@ export class Memcache extends Hookified {
 
 		// Connect to all nodes
 		await Promise.all(this._nodes.map((node) => node.connect()));
+
+		// Start auto discovery if enabled
+		if (this._autoDiscoverOptions?.enabled && !this._autoDiscovery) {
+			await this.startAutoDiscovery();
+		}
 	}
 
 	/**
@@ -947,6 +960,11 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<void>}
 	 */
 	public async quit(): Promise<void> {
+		if (this._autoDiscovery) {
+			await this._autoDiscovery.stop();
+			this._autoDiscovery = undefined;
+		}
+
 		await Promise.all(
 			this._nodes.map(async (node) => {
 				if (node.isConnected()) {
@@ -961,6 +979,11 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<void>}
 	 */
 	public async disconnect(): Promise<void> {
+		if (this._autoDiscovery) {
+			await this._autoDiscovery.stop();
+			this._autoDiscovery = undefined;
+		}
+
 		await Promise.all(this._nodes.map((node) => node.disconnect()));
 	}
 
@@ -1153,7 +1176,100 @@ export class Memcache extends Hookified {
 		);
 		node.on("miss", (key: string) => this.emit(MemcacheEvents.MISS, key));
 	}
+
+	private async startAutoDiscovery(): Promise<void> {
+		const options = this._autoDiscoverOptions;
+		/* v8 ignore next -- @preserve */
+		if (!options) {
+			return;
+		}
+
+		const configEndpoint =
+			options.configEndpoint ||
+			(this._nodes.length > 0 ? this._nodes[0].id : "localhost:11211");
+
+		this._autoDiscovery = new AutoDiscovery({
+			configEndpoint,
+			pollingInterval: options.pollingInterval ?? 60_000,
+			useLegacyCommand: options.useLegacyCommand ?? false,
+			timeout: this._timeout,
+			keepAlive: this._keepAlive,
+			keepAliveDelay: this._keepAliveDelay,
+			sasl: this._sasl,
+		});
+
+		/* v8 ignore next -- @preserve */
+		this._autoDiscovery.on("autoDiscover", (config: ClusterConfig) => {
+			this.emit(MemcacheEvents.AUTO_DISCOVER, config);
+		});
+		/* v8 ignore next -- @preserve */
+		this._autoDiscovery.on("autoDiscoverError", (error: Error) => {
+			this.emit(MemcacheEvents.AUTO_DISCOVER_ERROR, error);
+		});
+		this._autoDiscovery.on(
+			"autoDiscoverUpdate",
+			/* v8 ignore next -- @preserve */
+			async (config: ClusterConfig) => {
+				this.emit(MemcacheEvents.AUTO_DISCOVER_UPDATE, config);
+				try {
+					await this.applyClusterConfig(config);
+				} catch (error) {
+					this.emit(MemcacheEvents.AUTO_DISCOVER_ERROR, error);
+				}
+			},
+		);
+
+		try {
+			const initialConfig = await this._autoDiscovery.start();
+			/* v8 ignore next -- @preserve */
+			await this.applyClusterConfig(initialConfig);
+		} catch (error) {
+			// Discovery errors are non-fatal
+			this.emit(MemcacheEvents.AUTO_DISCOVER_ERROR, error);
+		}
+	}
+
+	private async applyClusterConfig(config: ClusterConfig): Promise<void> {
+		if (config.nodes.length === 0) {
+			this.emit(
+				MemcacheEvents.AUTO_DISCOVER_ERROR,
+				new Error("Discovery returned zero nodes; keeping current topology"),
+			);
+			return;
+		}
+
+		const discoveredNodeIds = new Set(
+			config.nodes.map((n) => AutoDiscovery.nodeId(n)),
+		);
+
+		const currentNodeIds = new Set(this.nodeIds);
+
+		// Add new nodes
+		for (const node of config.nodes) {
+			const id = AutoDiscovery.nodeId(node);
+			if (!currentNodeIds.has(id)) {
+				try {
+					const host = node.ip || node.hostname;
+					await this.addNode(`${host}:${node.port}`);
+				} catch (error) {
+					this.emit(MemcacheEvents.ERROR, id, error);
+				}
+			}
+		}
+
+		// Remove nodes no longer in the cluster
+		for (const nodeId of currentNodeIds) {
+			if (!discoveredNodeIds.has(nodeId)) {
+				try {
+					await this.removeNode(nodeId);
+				} catch (error) {
+					this.emit(MemcacheEvents.ERROR, nodeId, error);
+				}
+			}
+		}
+	}
 }
 
-export { createNode, MemcacheNode, ModulaHash };
+export { AutoDiscovery, createNode, MemcacheNode, ModulaHash };
+export type { DiscoveredNode } from "./types.js";
 export default Memcache;

@@ -29,6 +29,9 @@ export enum MemcacheEvents {
 	INFO = "info",
 	TIMEOUT = "timeout",
 	CLOSE = "close",
+	AUTO_DISCOVER = "autoDiscover",
+	AUTO_DISCOVER_ERROR = "autoDiscoverError",
+	AUTO_DISCOVER_UPDATE = "autoDiscoverUpdate",
 }
 
 /**
@@ -115,10 +118,68 @@ export interface MemcacheOptions {
 	 * before accepting commands.
 	 */
 	sasl?: SASLCredentials;
+
+	/**
+	 * AWS ElastiCache Auto Discovery configuration.
+	 * When enabled, the client will periodically poll the configuration endpoint
+	 * to detect cluster topology changes and automatically update the node list.
+	 */
+	autoDiscover?: AutoDiscoverOptions;
 }
 
 export interface MemcacheStats {
 	[key: string]: string;
+}
+
+/**
+ * Configuration for AWS ElastiCache Auto Discovery.
+ * When enabled, the client connects to a configuration endpoint and periodically
+ * polls for cluster topology changes, automatically adding/removing nodes.
+ */
+export interface AutoDiscoverOptions {
+	/**
+	 * Enable auto discovery of cluster nodes.
+	 */
+	enabled: boolean;
+	/**
+	 * How often to poll for topology changes, in milliseconds.
+	 * @default 60000
+	 */
+	pollingInterval?: number;
+	/**
+	 * The configuration endpoint to use for discovery.
+	 * This is typically the .cfg endpoint from ElastiCache.
+	 * If not specified, the first node in the nodes array will be used.
+	 */
+	configEndpoint?: string;
+	/**
+	 * Use the legacy `get AmazonElastiCache:cluster` command
+	 * instead of `config get cluster` (for engine versions < 1.4.14).
+	 * @default false
+	 */
+	useLegacyCommand?: boolean;
+}
+
+/**
+ * Represents a discovered node from the ElastiCache cluster configuration.
+ */
+export interface DiscoveredNode {
+	/** The hostname of the node */
+	hostname: string;
+	/** The IP address of the node (may be empty string) */
+	ip: string;
+	/** The port number of the node */
+	port: number;
+}
+
+/**
+ * Represents the parsed result of an ElastiCache cluster config response.
+ */
+export interface ClusterConfig {
+	/** The config version number (increments on topology changes) */
+	version: number;
+	/** The list of discovered nodes */
+	nodes: DiscoveredNode[];
 }
 
 export interface ExecuteOptions {
