@@ -83,7 +83,7 @@ export class MemcacheNode extends Hookified {
 	private _binaryBuffer: Buffer = Buffer.alloc(0);
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
-		super();
+		super({ throwOnEmptyListeners: false });
 		this._host = host;
 		this._port = port;
 		this._timeout = options?.timeout || 5000;

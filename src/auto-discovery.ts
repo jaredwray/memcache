@@ -36,7 +36,7 @@ export class AutoDiscovery extends Hookified {
 	private _isPolling = false;
 
 	constructor(options: AutoDiscoveryOptions) {
-		super();
+		super({ throwOnEmptyListeners: false });
 		this._configEndpoint = options.configEndpoint;
 		this._pollingInterval = options.pollingInterval;
 		this._useLegacyCommand = options.useLegacyCommand;

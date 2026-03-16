@@ -1372,7 +1372,7 @@ describe("Memcache", () => {
 		it("should allow removing hook listeners", async () => {
 			const hookMock = vi.fn();
 
-			client.onHook("before:get", hookMock);
+			const hook = client.onHook("before:get", hookMock);
 
 			await client.connect();
 			const key = generateKey("remove-hook");
@@ -1384,7 +1384,7 @@ describe("Memcache", () => {
 			expect(hookMock).toHaveBeenCalledTimes(1);
 
 			// Remove the hook
-			client.removeHook("before:get", hookMock);
+			client.removeHook(hook as any);
 
 			// Second call should not trigger the hook
 			await client.get(key);
@@ -1418,10 +1418,10 @@ describe("Memcache", () => {
 			expect(duration).toBeGreaterThanOrEqual(18); // At least 18ms to account for timing imprecision
 		});
 
-		it("should handle hook errors based on throwHookErrors setting", async () => {
-			// Test with throwHookErrors = true (should throw)
+		it("should handle hook errors based on throwOnHookError setting", async () => {
+			// Test with throwOnHookError = true (should throw)
 			const errorClient = new Memcache();
-			errorClient.throwHookErrors = true;
+			errorClient.throwOnHookError = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
 				throw new Error("Hook error");
@@ -1440,9 +1440,9 @@ describe("Memcache", () => {
 
 			await errorClient.disconnect();
 
-			// Test with throwHookErrors = false (should not throw)
+			// Test with throwOnHookError = false (should not throw)
 			const noErrorClient = new Memcache();
-			noErrorClient.throwHookErrors = false;
+			noErrorClient.throwOnHookError = false;
 
 			const errorHook2 = vi.fn().mockImplementation(() => {
 				throw new Error("Hook error 2");
@@ -1500,7 +1500,7 @@ describe("Memcache", () => {
 		it("should allow using onceHook for single execution", async () => {
 			const onceHookMock = vi.fn();
 
-			client.onceHook("before:get", onceHookMock);
+			client.onceHook({ event: "before:get", handler: onceHookMock });
 
 			await client.connect();
 			const key = generateKey("once-hook");
@@ -2203,7 +2203,7 @@ describe("Memcache", () => {
 		it("should support removing prepend hooks", async () => {
 			const hookMock = vi.fn();
 
-			client.onHook("before:prepend", hookMock);
+			const hook = client.onHook("before:prepend", hookMock);
 
 			await client.connect();
 			await client.set("remove-prepend-hook", "value");
@@ -2213,7 +2213,7 @@ describe("Memcache", () => {
 			expect(hookMock).toHaveBeenCalledTimes(1);
 
 			// Remove the hook
-			client.removeHook("before:prepend", hookMock);
+			client.removeHook(hook as any);
 
 			// Second call should not trigger the hook
 			await client.prepend("remove-prepend-hook", "another-");
@@ -2300,9 +2300,9 @@ describe("Memcache", () => {
 			expect(getValue).toBe(undefined);
 		});
 
-		it("should handle delete hook errors with throwHookErrors", async () => {
+		it("should handle delete hook errors with throwOnHookError", async () => {
 			const errorClient = new Memcache();
-			errorClient.throwHookErrors = true;
+			errorClient.throwOnHookError = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
 				throw new Error("Delete hook error");
@@ -2682,9 +2682,9 @@ describe("Memcache", () => {
 		// CAS functionality requires gets command with CAS tokens
 		// These can be re-added once CAS is properly implemented
 
-		it("should handle cas hook errors with throwHookErrors", async () => {
+		it("should handle cas hook errors with throwOnHookError", async () => {
 			const errorClient = new Memcache();
-			errorClient.throwHookErrors = true;
+			errorClient.throwOnHookError = true;
 
 			const errorHook = vi.fn().mockImplementation(() => {
 				throw new Error("CAS hook error");
