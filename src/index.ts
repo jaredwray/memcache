@@ -18,6 +18,7 @@ import {
 export {
 	type AutoDiscoverOptions,
 	type ClusterConfig,
+	type DiscoveredNode,
 	type ExecuteOptions,
 	type HashProvider,
 	MemcacheEvents,
@@ -1271,6 +1272,5 @@ export class Memcache extends Hookified {
 	}
 }
 
-export type { DiscoveredNode } from "./types.js";
 export { AutoDiscovery, createNode, MemcacheNode, ModulaHash };
 export default Memcache;
