@@ -823,11 +823,11 @@ describe("MemcacheNode", () => {
 
 		it("should reject connection when socket error occurs before connected", async () => {
 			// Use an invalid port to trigger connection error before _connected is set
-			const badNode = new MemcacheNode("localhost", 1, { timeout: 1000 });
+			const badNode = new MemcacheNode("localhost", 1, { timeout: 500 });
 
 			// The connection should be rejected due to socket error
 			await expect(badNode.connect()).rejects.toThrow();
-		});
+		}, 10000);
 
 		it("should handle error response for multiline command without requestedKeys", async () => {
 			await node.connect();

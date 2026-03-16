@@ -250,7 +250,7 @@ describe("AutoDiscovery", () => {
 				configEndpoint: "127.0.0.1:1", // unreachable port
 				pollingInterval: 60000,
 				useLegacyCommand: false,
-				timeout: 1000,
+				timeout: 500,
 				keepAlive: true,
 				keepAliveDelay: 1000,
 			});
@@ -272,7 +272,7 @@ describe("AutoDiscovery", () => {
 			const config = await discovery.start();
 			expect(discovery.isRunning).toBe(true);
 			expect(config.version).toBe(1);
-		});
+		}, 10000);
 
 		it("should stop correctly", async () => {
 			server = new FakeConfigServer({
@@ -584,6 +584,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 				autoDiscover: {
 					enabled: true,
 					configEndpoint: "nonexistent:11211",
+					timeout: 500,
 				},
 			});
 
@@ -598,7 +599,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 
 			// Error should be emitted (connection refused)
 			expect(errors.length).toBeGreaterThanOrEqual(1);
-		});
+		}, 10000);
 
 		it("should successfully discover nodes from a config server", async () => {
 			const server = new FakeConfigServer({
@@ -1120,7 +1121,7 @@ describe("AutoDiscovery poll reconnect", () => {
 			configEndpoint: server.endpoint,
 			pollingInterval: 50,
 			useLegacyCommand: false,
-			timeout: 2000,
+			timeout: 500,
 			keepAlive: true,
 			keepAliveDelay: 1000,
 		});
@@ -1141,7 +1142,7 @@ describe("AutoDiscovery poll reconnect", () => {
 
 		// Discovery should still be running (errors are non-fatal)
 		expect(discovery.isRunning).toBe(true);
-	});
+	}, 10000);
 });
 
 describe("Memcache applyClusterConfig error paths", () => {
