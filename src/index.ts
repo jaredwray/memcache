@@ -1271,6 +1271,6 @@ export class Memcache extends Hookified {
 	}
 }
 
-export { AutoDiscovery, createNode, MemcacheNode, ModulaHash };
 export type { DiscoveredNode } from "./types.js";
+export { AutoDiscovery, createNode, MemcacheNode, ModulaHash };
 export default Memcache;
