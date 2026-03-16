@@ -59,7 +59,7 @@ export class Memcache extends Hookified {
 	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 
 	constructor(options?: string | MemcacheOptions) {
-		super();
+		super({ throwOnEmptyListeners: false });
 
 		// Handle string parameter as a single node URI
 		if (typeof options === "string") {
