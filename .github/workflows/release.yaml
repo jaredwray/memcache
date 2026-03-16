@@ -6,36 +6,56 @@ on:
     types: [released]
 
 permissions:
-  contents: read    
+  contents: read
 
 jobs:
-  build-test-release:
-
+  build:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: Use Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 24
-
     - name: Install Dependencies
       run: npm install pnpm -g && pnpm install
-
-    - name: Test Services
-      run: pnpm test:services:start
-
-    - name: Build    
+    - name: Build
       run: pnpm build
 
-    - name: Testing    
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - name: Install Dependencies
+      run: npm install pnpm -g && pnpm install
+    - name: Test Services
+      run: pnpm test:services:start
+    - name: Build
+      run: pnpm build
+    - name: Testing
       run: pnpm test:ci
 
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - name: Install Dependencies
+      run: npm install pnpm -g && pnpm install
+    - name: Build
+      run: pnpm build
     - name: Publish
       run: |
         npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
         npm publish --ignore-scripts
       env:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
