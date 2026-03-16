@@ -1372,7 +1372,7 @@ describe("Memcache", () => {
 		it("should allow removing hook listeners", async () => {
 			const hookMock = vi.fn();
 
-			const hook = client.onHook("before:get", hookMock);
+			client.onHook("before:get", hookMock);
 
 			await client.connect();
 			const key = generateKey("remove-hook");
@@ -1384,7 +1384,7 @@ describe("Memcache", () => {
 			expect(hookMock).toHaveBeenCalledTimes(1);
 
 			// Remove the hook
-			client.removeHook(hook as any);
+			client.removeHook({ event: "before:get", handler: hookMock });
 
 			// Second call should not trigger the hook
 			await client.get(key);
@@ -2203,7 +2203,7 @@ describe("Memcache", () => {
 		it("should support removing prepend hooks", async () => {
 			const hookMock = vi.fn();
 
-			const hook = client.onHook("before:prepend", hookMock);
+			client.onHook("before:prepend", hookMock);
 
 			await client.connect();
 			await client.set("remove-prepend-hook", "value");
@@ -2213,7 +2213,7 @@ describe("Memcache", () => {
 			expect(hookMock).toHaveBeenCalledTimes(1);
 
 			// Remove the hook
-			client.removeHook(hook as any);
+			client.removeHook({ event: "before:prepend", handler: hookMock });
 
 			// Second call should not trigger the hook
 			await client.prepend("remove-prepend-hook", "another-");
