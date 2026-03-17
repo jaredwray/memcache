@@ -1,5 +1,6 @@
 import { Hookified } from "hookified";
 import { AutoDiscovery } from "./auto-discovery.js";
+import { BroadcastHash } from "./broadcast.js";
 import { KetamaHash } from "./ketama.js";
 import { ModulaHash } from "./modula.js";
 import { type CommandOptions, createNode, MemcacheNode } from "./node.js";
@@ -1272,5 +1273,5 @@ export class Memcache extends Hookified {
 	}
 }
 
-export { AutoDiscovery, createNode, MemcacheNode, ModulaHash };
+export { AutoDiscovery, BroadcastHash, createNode, MemcacheNode, ModulaHash };
 export default Memcache;
