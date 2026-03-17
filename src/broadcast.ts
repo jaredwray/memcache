@@ -25,8 +25,12 @@ export class BroadcastHash implements HashProvider {
 	/** Map of node IDs to MemcacheNode instances */
 	private nodeMap: Map<string, MemcacheNode>;
 
+	/** Cached array of nodes, rebuilt only on add/remove */
+	private nodeCache: Array<MemcacheNode>;
+
 	constructor() {
 		this.nodeMap = new Map();
+		this.nodeCache = [];
 	}
 
 	/**
@@ -34,7 +38,7 @@ export class BroadcastHash implements HashProvider {
 	 * @returns Array of all MemcacheNode instances
 	 */
 	public get nodes(): Array<MemcacheNode> {
-		return Array.from(this.nodeMap.values());
+		return [...this.nodeCache];
 	}
 
 	/**
@@ -43,6 +47,7 @@ export class BroadcastHash implements HashProvider {
 	 */
 	public addNode(node: MemcacheNode): void {
 		this.nodeMap.set(node.id, node);
+		this.rebuildCache();
 	}
 
 	/**
@@ -51,6 +56,7 @@ export class BroadcastHash implements HashProvider {
 	 */
 	public removeNode(id: string): void {
 		this.nodeMap.delete(id);
+		this.rebuildCache();
 	}
 
 	/**
@@ -69,6 +75,13 @@ export class BroadcastHash implements HashProvider {
 	 * @returns Array of all MemcacheNode instances
 	 */
 	public getNodesByKey(_key: string): Array<MemcacheNode> {
-		return Array.from(this.nodeMap.values());
+		return [...this.nodeCache];
+	}
+
+	/**
+	 * Rebuilds the cached node array from the map.
+	 */
+	private rebuildCache(): void {
+		this.nodeCache = [...this.nodeMap.values()];
 	}
 }
