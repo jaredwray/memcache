@@ -55,8 +55,9 @@ export class BroadcastHash implements HashProvider {
 	 * @param id - The node ID (e.g., "localhost:11211")
 	 */
 	public removeNode(id: string): void {
-		this.nodeMap.delete(id);
-		this.rebuildCache();
+		if (this.nodeMap.delete(id)) {
+			this.rebuildCache();
+		}
 	}
 
 	/**
