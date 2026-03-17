@@ -14,7 +14,6 @@ Nodejs Memcache Client
 - [Getting Started](#getting-started)
   - [Installation](#installation)
   - [Basic Usage](#basic-usage)
-  - [Custom Connection](#custom-connection)
 - [API](#api)
   - [Constructor](#constructor)
   - [Properties](#properties)
@@ -47,6 +46,7 @@ Nodejs Memcache Client
 - [Distribution Algorithms](#distribution-algorithms)
   - [KetamaHash (Default)](#ketamahash-default)
   - [ModulaHash](#modulahash)
+  - [BroadcastHash](#broadcasthash)
   - [Choosing an Algorithm](#choosing-an-algorithm)
 - [Retry Configuration](#retry-configuration)
   - [Basic Retry Setup](#basic-retry-setup)
@@ -65,6 +65,7 @@ Nodejs Memcache Client
   - [Auto Discovery Events](#auto-discovery-events)
   - [Legacy Command Support](#legacy-command-support)
 - [IPv6 Support](#ipv6-support)
+- [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -583,15 +584,39 @@ const client = new Memcache({
 // server2 will receive approximately 25% of keys
 ```
 
+## BroadcastHash
+
+BroadcastHash sends every operation to all nodes in the cluster. Instead of partitioning keys across nodes, every `getNodesByKey()` call returns all nodes, so reads and writes are broadcast to every server.
+
+```javascript
+import { Memcache, BroadcastHash } from 'memcache';
+
+// Use BroadcastHash for full replication
+const client = new Memcache({
+  nodes: ['server1:11211', 'server2:11211', 'server3:11211'],
+  hash: new BroadcastHash()
+});
+
+// Every set/get/delete hits all three nodes
+await client.set('mykey', 'Hello!');
+```
+
+**Characteristics:**
+- Every operation targets all nodes
+- No key partitioning — all nodes hold the same data
+- Reads return the first successful result from any node
+- Writes succeed only if all nodes succeed
+- Best for replication, broadcast invalidation, or small clusters where all nodes should be in sync
+
 ## Choosing an Algorithm
 
-| Feature | KetamaHash | ModulaHash |
-|---------|------------|------------|
-| Key redistribution on node change | Minimal (~1/n keys) | All keys may move |
-| Complexity | Higher (virtual nodes) | Lower (simple modulo) |
-| Performance | Slightly slower | Faster |
-| Best for | Dynamic scaling | Fixed clusters |
-| Weighted nodes | Yes | Yes |
+| Feature | KetamaHash | ModulaHash | BroadcastHash |
+|---------|------------|------------|---------------|
+| Key redistribution on node change | Minimal (~1/n keys) | All keys may move | N/A (all nodes always) |
+| Complexity | Higher (virtual nodes) | Lower (simple modulo) | Simplest |
+| Performance | Slightly slower | Faster | Depends on node count |
+| Best for | Dynamic scaling | Fixed clusters | Replication |
+| Weighted nodes | Yes | Yes | No |
 
 **Use KetamaHash (default) when:**
 - Your cluster size may change dynamically
@@ -602,6 +627,11 @@ const client = new Memcache({
 - Your cluster size is fixed
 - You prefer simplicity over minimal redistribution
 - You're in a testing or development environment
+
+**Use BroadcastHash when:**
+- You want all nodes to hold the same data
+- You need broadcast cache invalidation across all nodes
+- You're running a small cluster where replication is more important than partitioning
 
 # Retry Configuration
 
