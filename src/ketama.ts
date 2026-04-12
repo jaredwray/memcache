@@ -460,7 +460,7 @@ export class KetamaHash implements HashProvider {
 		/* v8 ignore next -- @preserve */
 		if (!node) return [];
 
-		const result = [node];
+		const result = Object.freeze([node]) as Array<MemcacheNode>;
 
 		// Bounded cache — clear all when full (simple eviction)
 		if (this._cache.size >= CACHE_MAX) {
