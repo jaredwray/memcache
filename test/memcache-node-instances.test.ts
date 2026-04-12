@@ -53,6 +53,7 @@ describe("MemcacheNode Instances Support", () => {
 
 			const testClient = new Memcache({
 				nodes: [node1, node2],
+				lazyConnect: true,
 			});
 
 			expect(testClient.nodeIds).toHaveLength(2);
@@ -72,6 +73,7 @@ describe("MemcacheNode Instances Support", () => {
 
 			const testClient = new Memcache({
 				nodes: ["localhost:11211", node1, "server2:11212"],
+				lazyConnect: true,
 			});
 
 			expect(testClient.nodeIds).toHaveLength(3);
@@ -91,6 +93,7 @@ describe("MemcacheNode Instances Support", () => {
 
 			const testClient = new Memcache({
 				nodes: [node1, node2, node3],
+				lazyConnect: true,
 			});
 
 			expect(testClient.nodeIds).toHaveLength(3);

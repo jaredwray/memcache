@@ -74,7 +74,7 @@ export class MemcacheNode extends Hookified {
 	private _weight: number;
 	private _connected: boolean = false;
 	private _commandQueue: CommandQueueItem[] = [];
-	private _buffer: string = "";
+	private _buffer: Buffer = Buffer.alloc(0);
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
 	private _pendingValueBytes: number = 0;
@@ -215,11 +215,6 @@ export class MemcacheNode extends Hookified {
 
 			this._socket.setTimeout(this._timeout);
 
-			// Don't set encoding initially if SASL is configured (need raw buffers for binary protocol)
-			if (!this._sasl) {
-				this._socket.setEncoding("utf8");
-			}
-
 			this._socket.on("connect", async () => {
 				this._connected = true;
 
@@ -243,10 +238,8 @@ export class MemcacheNode extends Hookified {
 				}
 			});
 
-			this._socket.on("data", (data: string | Buffer) => {
-				// For non-SASL connections, data will be strings (utf8 encoding set)
-				// For SASL connections, data handler is managed by binary* methods
-				if (typeof data === "string") {
+			this._socket.on("data", (data: Buffer) => {
+				if (!this._sasl) {
 					this.handleData(data);
 				}
 			});
@@ -298,7 +291,7 @@ export class MemcacheNode extends Hookified {
 				new Error("Connection reset for reconnection"),
 			);
 			// Clear the buffer and current command state
-			this._buffer = "";
+			this._buffer = Buffer.alloc(0);
 			this._currentCommand = undefined;
 			this._multilineData = [];
 			this._pendingValueBytes = 0;
@@ -329,21 +322,26 @@ export class MemcacheNode extends Hookified {
 			const authPacket = buildSaslPlainRequest(sasl.username, sasl.password);
 
 			// Temporary binary data handler for SASL authentication
+			const chunks: Buffer[] = [];
+			let chunksLen = 0;
 			const binaryHandler = (data: Buffer) => {
-				this._binaryBuffer = Buffer.concat([this._binaryBuffer, data]);
+				chunks.push(data);
+				chunksLen += data.length;
 
 				// Need at least header size to parse response
 				/* v8 ignore next 3 -- @preserve */
-				if (this._binaryBuffer.length < HEADER_SIZE) {
+				if (chunksLen < HEADER_SIZE) {
 					return;
 				}
 
+				this._binaryBuffer =
+					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
 				const header = deserializeHeader(this._binaryBuffer);
 				const totalLength = HEADER_SIZE + header.totalBodyLength;
 
 				// Wait for complete packet
 				/* v8 ignore next 3 -- @preserve */
-				if (this._binaryBuffer.length < totalLength) {
+				if (chunksLen < totalLength) {
 					return;
 				}
 
@@ -389,21 +387,25 @@ export class MemcacheNode extends Hookified {
 		const socket = this._socket;
 
 		return new Promise((resolve) => {
-			let buffer = Buffer.alloc(0);
+			const chunks: Buffer[] = [];
+			let chunksLen = 0;
 
 			const dataHandler = (data: Buffer) => {
-				buffer = Buffer.concat([buffer, data]);
+				chunks.push(data);
+				chunksLen += data.length;
 
 				/* v8 ignore next 3 -- @preserve */
-				if (buffer.length < HEADER_SIZE) {
+				if (chunksLen < HEADER_SIZE) {
 					return;
 				}
 
+				const buffer =
+					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
 				const header = deserializeHeader(buffer);
 				const totalLength = HEADER_SIZE + header.totalBodyLength;
 
 				/* v8 ignore next 3 -- @preserve */
-				if (buffer.length < totalLength) {
+				if (chunksLen < totalLength) {
 					return;
 				}
 
@@ -608,10 +610,26 @@ export class MemcacheNode extends Hookified {
 		const stats: Record<string, string> = {};
 
 		return new Promise((resolve) => {
-			let buffer = Buffer.alloc(0);
+			const chunks: Buffer[] = [];
+			let chunksLen = 0;
+			let consumed = 0;
 
 			const dataHandler = (data: Buffer) => {
-				buffer = Buffer.concat([buffer, data]);
+				chunks.push(data);
+				chunksLen += data.length;
+
+				// Flatten only when we have unconsumed data to parse
+				let buffer: Buffer;
+				if (chunks.length === 1) {
+					buffer = consumed === 0 ? chunks[0] : chunks[0].subarray(consumed);
+				} else {
+					buffer = Buffer.concat(chunks, chunksLen).subarray(consumed);
+					// Replace queue with single consolidated buffer
+					chunks.length = 0;
+					chunks.push(buffer);
+					chunksLen = buffer.length;
+					consumed = 0;
+				}
 
 				while (buffer.length >= HEADER_SIZE) {
 					const header = deserializeHeader(buffer);
@@ -642,6 +660,7 @@ export class MemcacheNode extends Hookified {
 						stats[key] = value;
 					}
 
+					consumed += totalLength;
 					buffer = buffer.subarray(totalLength);
 				}
 			};
@@ -712,15 +731,19 @@ export class MemcacheNode extends Hookified {
 		});
 	}
 
-	private handleData(data: string): void {
-		this._buffer += data;
+	private handleData(data: Buffer | string): void {
+		const chunk = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+		this._buffer =
+			this._buffer.length === 0 ? chunk : Buffer.concat([this._buffer, chunk]);
 
 		while (true) {
 			// If we're waiting for value data, try to read it first
 			if (this._pendingValueBytes > 0) {
 				if (this._buffer.length >= this._pendingValueBytes + 2) {
-					const value = this._buffer.substring(0, this._pendingValueBytes);
-					this._buffer = this._buffer.substring(this._pendingValueBytes + 2);
+					const value = this._buffer
+						.subarray(0, this._pendingValueBytes)
+						.toString("utf8");
+					this._buffer = this._buffer.subarray(this._pendingValueBytes + 2);
 					this._multilineData.push(value);
 					this._pendingValueBytes = 0;
 				} else {
@@ -732,8 +755,8 @@ export class MemcacheNode extends Hookified {
 			const lineEnd = this._buffer.indexOf("\r\n");
 			if (lineEnd === -1) break;
 
-			const line = this._buffer.substring(0, lineEnd);
-			this._buffer = this._buffer.substring(lineEnd + 2);
+			const line = this._buffer.subarray(0, lineEnd).toString("utf8");
+			this._buffer = this._buffer.subarray(lineEnd + 2);
 
 			this.processLine(line);
 		}
@@ -749,10 +772,13 @@ export class MemcacheNode extends Hookified {
 			if (line === "END") {
 				const stats: MemcacheStats = {};
 				for (const statLine of this._multilineData) {
-					const [, key, value] = statLine.split(" ");
+					const sp1 = statLine.indexOf(" ");
+					const sp2 = statLine.indexOf(" ", sp1 + 1);
 					/* v8 ignore next -- @preserve */
-					if (key && value) {
-						stats[key] = value;
+					if (sp1 !== -1 && sp2 !== -1) {
+						stats[statLine.substring(sp1 + 1, sp2)] = statLine.substring(
+							sp2 + 1,
+						);
 					}
 				}
 				this._currentCommand.resolve(stats);
@@ -781,9 +807,11 @@ export class MemcacheNode extends Hookified {
 
 		if (this._currentCommand.isConfig) {
 			if (line.startsWith("CONFIG ")) {
-				const parts = line.split(" ");
-				const bytes = Number.parseInt(parts[3], 10);
-				this._pendingValueBytes = bytes;
+				// CONFIG <component> <flags> <bytes>
+				const sp1 = line.indexOf(" ");
+				const sp2 = line.indexOf(" ", sp1 + 1);
+				const sp3 = line.indexOf(" ", sp2 + 1);
+				this._pendingValueBytes = Number.parseInt(line.substring(sp3 + 1), 10);
 			} else if (line === "END") {
 				const result =
 					this._multilineData.length > 0 ? this._multilineData : undefined;
@@ -813,9 +841,16 @@ export class MemcacheNode extends Hookified {
 			}
 
 			if (line.startsWith("VALUE ")) {
-				const parts = line.split(" ");
-				const key = parts[1];
-				const bytes = parseInt(parts[3], 10);
+				// VALUE <key> <flags> <bytes> [casunique]
+				const sp1 = line.indexOf(" ");
+				const sp2 = line.indexOf(" ", sp1 + 1);
+				const sp3 = line.indexOf(" ", sp2 + 1);
+				const sp4 = line.indexOf(" ", sp3 + 1);
+				const key = line.substring(sp1 + 1, sp2);
+				const bytes = parseInt(
+					sp4 === -1 ? line.substring(sp3 + 1) : line.substring(sp3 + 1, sp4),
+					10,
+				);
 				if (this._currentCommand.requestedKeys) {
 					this._currentCommand.foundKeys?.push(key);
 				}

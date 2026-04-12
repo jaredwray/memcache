@@ -63,6 +63,7 @@ describe("Memcache", () => {
 					"tcp://192.168.1.100:11212",
 					"server3",
 				],
+				lazyConnect: true,
 			});
 			expect(testClient.nodeIds).toHaveLength(3);
 			expect(testClient.nodeIds).toContain("localhost:11211");
@@ -73,6 +74,7 @@ describe("Memcache", () => {
 		it("should handle Unix socket URIs in nodes", () => {
 			const testClient = new Memcache({
 				nodes: ["unix:///var/run/memcached.sock", "/tmp/memcached.sock"],
+				lazyConnect: true,
 			});
 			expect(testClient.nodeIds).toHaveLength(2);
 			expect(testClient.nodeIds).toContain("/var/run/memcached.sock");
@@ -82,6 +84,7 @@ describe("Memcache", () => {
 		it("should handle IPv6 addresses in nodes", () => {
 			const testClient = new Memcache({
 				nodes: ["[::1]:11211", "memcache://[2001:db8::1]:11212"],
+				lazyConnect: true,
 			});
 			expect(testClient.nodeIds).toHaveLength(2);
 			expect(testClient.nodeIds).toContain("[::1]:11211");
@@ -96,7 +99,10 @@ describe("Memcache", () => {
 		});
 
 		it("should parse string parameter with protocol", () => {
-			const testClient = new Memcache("memcache://192.168.1.100:11212");
+			const testClient = new Memcache({
+				nodes: ["memcache://192.168.1.100:11212"],
+				lazyConnect: true,
+			});
 			expect(testClient.nodeIds).toHaveLength(1);
 			expect(testClient.nodeIds).toContain("192.168.1.100:11212");
 		});
@@ -109,7 +115,10 @@ describe("Memcache", () => {
 		});
 
 		it("should handle simple hostname in string parameter", () => {
-			const testClient = new Memcache("myserver");
+			const testClient = new Memcache({
+				nodes: ["myserver"],
+				lazyConnect: true,
+			});
 			expect(testClient.nodeIds).toHaveLength(1);
 			expect(testClient.nodeIds).toContain("myserver:11211");
 		});
@@ -815,8 +824,30 @@ describe("Memcache", () => {
 			expect(client.isConnected()).toBe(false);
 		});
 
+		it("should default lazyConnect to true", () => {
+			const testClient = new Memcache();
+			expect(testClient.lazyConnect).toBe(true);
+			expect(testClient.isConnected()).toBe(false);
+			testClient.disconnect();
+		});
+
+		it("should support lazyConnect false option", () => {
+			const testClient = new Memcache({ lazyConnect: false });
+			expect(testClient.lazyConnect).toBe(false);
+			testClient.disconnect();
+		});
+
+		it("should eagerly connect when lazyConnect is false", async () => {
+			const testClient = new Memcache({ lazyConnect: false });
+			await new Promise((resolve) => {
+				testClient.once("connect", resolve);
+			});
+			expect(testClient.isConnected()).toBe(true);
+			await testClient.disconnect();
+		});
+
 		it("should lazy connect when not connected", async () => {
-			// With new architecture, connections are lazy - node connects on first use
+			// With lazyConnect true (default), connections only happen on first use
 			const testClient = new Memcache();
 			expect(testClient.isConnected()).toBe(false);
 
@@ -853,6 +884,7 @@ describe("Memcache", () => {
 			const client14 = new Memcache({
 				nodes: ["192.0.2.0:11211"], // TEST-NET-1, will timeout
 				timeout: 100, // Very short timeout
+				lazyConnect: true,
 			});
 
 			// Try to connect to all nodes (which will fail)
