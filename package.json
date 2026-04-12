@@ -2,23 +2,24 @@
   "name": "memcache",
   "version": "1.5.0",
   "description": "Nodejs Memcache Client",
-  "main": "dist/index.js",
+  "main": "./dist/index.cjs",
   "type": "module",
-  "types": "dist/index.d.ts",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
       },
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "rimraf ./dist && tsup src/index.ts --format cjs,esm --dts --clean",
+    "build": "tsdown",
     "prepublishOnly": "pnpm build",
     "lint": "biome check --write --error-on-warnings",
     "test": "pnpm lint && vitest run --coverage",
@@ -57,9 +58,9 @@
     "memjs": "^1.3.2",
     "rimraf": "^6.1.3",
     "tinybench": "^6.0.0",
-    "tsup": "^8.5.1",
+    "tsdown": "^0.21.7",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   },
   "dependencies": {
@@ -68,5 +69,6 @@
   "files": [
     "dist",
     "LICENSE"
-  ]
+  ],
+  "module": "./dist/index.mjs"
 }
