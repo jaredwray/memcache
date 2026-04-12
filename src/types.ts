@@ -122,7 +122,7 @@ export interface MemcacheOptions {
 	/**
 	 * When true, nodes will not connect until the first command is executed.
 	 * When false, nodes connect eagerly during construction.
-	 * @default false
+	 * @default true
 	 */
 	lazyConnect?: boolean;
 

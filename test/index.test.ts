@@ -824,32 +824,31 @@ describe("Memcache", () => {
 			expect(client.isConnected()).toBe(false);
 		});
 
-		it("should default lazyConnect to false", () => {
-			const testClient = new Memcache({ lazyConnect: false });
-			expect(testClient.lazyConnect).toBe(false);
-			testClient.disconnect();
-		});
-
-		it("should support lazyConnect option", () => {
-			const testClient = new Memcache({ lazyConnect: true });
+		it("should default lazyConnect to true", () => {
+			const testClient = new Memcache();
 			expect(testClient.lazyConnect).toBe(true);
 			expect(testClient.isConnected()).toBe(false);
 			testClient.disconnect();
 		});
 
+		it("should support lazyConnect false option", () => {
+			const testClient = new Memcache({ lazyConnect: false });
+			expect(testClient.lazyConnect).toBe(false);
+			testClient.disconnect();
+		});
+
 		it("should eagerly connect when lazyConnect is false", async () => {
 			const testClient = new Memcache({ lazyConnect: false });
-			// Give the eager connect a moment to complete
 			await new Promise((resolve) => {
-				setTimeout(resolve, 100);
+				testClient.once("connect", resolve);
 			});
 			expect(testClient.isConnected()).toBe(true);
 			await testClient.disconnect();
 		});
 
 		it("should lazy connect when not connected", async () => {
-			// With lazyConnect true, connections only happen on first use
-			const testClient = new Memcache({ lazyConnect: true });
+			// With lazyConnect true (default), connections only happen on first use
+			const testClient = new Memcache();
 			expect(testClient.isConnected()).toBe(false);
 
 			// This should auto-connect

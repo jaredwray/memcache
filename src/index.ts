@@ -74,7 +74,7 @@ export class Memcache extends Hookified {
 			this._retryBackoff = defaultRetryBackoff;
 			this._retryOnlyIdempotent = true;
 			this._sasl = undefined;
-			this._lazyConnect = false;
+			this._lazyConnect = true;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -87,7 +87,7 @@ export class Memcache extends Hookified {
 			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
-			this._lazyConnect = options?.lazyConnect ?? false;
+			this._lazyConnect = options?.lazyConnect ?? true;
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -98,7 +98,11 @@ export class Memcache extends Hookified {
 		}
 
 		if (!this._lazyConnect) {
-			this.connect().catch(() => {});
+			process.nextTick(() => {
+				this.connect().catch((error: unknown) => {
+					this.emit(MemcacheEvents.ERROR, "connect", error);
+				});
+			});
 		}
 	}
 
@@ -291,7 +295,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Whether nodes defer connecting until the first command is executed.
 	 * @returns {boolean}
-	 * @default false
+	 * @default true
 	 */
 	public get lazyConnect(): boolean {
 		return this._lazyConnect;

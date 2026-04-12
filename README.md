@@ -205,7 +205,7 @@ const client = new Memcache({
 - `retryDelay?: number` - Base delay in milliseconds between retries (default: 100)
 - `retryBackoff?: RetryBackoffFunction` - Function to calculate backoff delay (default: fixed delay)
 - `retryOnlyIdempotent?: boolean` - Only retry commands marked as idempotent (default: true)
-- `lazyConnect?: boolean` - When `true`, nodes will not connect until the first command is executed. When `false`, nodes connect eagerly during construction (default: false)
+- `lazyConnect?: boolean` - When `true`, nodes will not connect until the first command is executed. When `false`, nodes connect eagerly during construction (default: true)
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
@@ -241,7 +241,7 @@ Get or set the backoff function for calculating retry delays.
 Get or set whether retries are restricted to idempotent commands only (default: true).
 
 ### `lazyConnect: boolean` (readonly)
-Whether nodes defer connecting until the first command is executed (default: false).
+Whether nodes defer connecting until the first command is executed (default: true).
 
 ## Connection Management
 
