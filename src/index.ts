@@ -48,6 +48,15 @@ export const exponentialRetryBackoff: RetryBackoffFunction = (
 // Pre-compiled regex for key validation (avoid re-compiling per call)
 const KEY_INVALID_CHARS = /[\s\r\n\0]/;
 
+/**
+ * Check if all results match an expected value.
+ * Fast-paths single-element arrays to avoid .every() overhead.
+ */
+function allResultsEqual(results: unknown[], expected: string): boolean {
+	if (results.length === 1) return results[0] === expected;
+	return results.every((r) => r === expected);
+}
+
 export class Memcache extends Hookified {
 	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
@@ -687,7 +696,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
 			await this.afterHook("cas", {
@@ -730,7 +739,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (hasHooks) {
 			await this.afterHook("set", { key, value, exptime, flags, success });
@@ -766,7 +775,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
 			await this.afterHook("add", { key, value, exptime, flags, success });
@@ -802,7 +811,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
 			await this.afterHook("replace", { key, value, exptime, flags, success });
@@ -831,7 +840,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
 			await this.afterHook("append", { key, value, success });
@@ -860,7 +869,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
 			await this.afterHook("prepend", { key, value, success });
@@ -885,7 +894,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(`delete ${key}`, nodes);
-		const success = results.every((result) => result === "DELETED");
+		const success = allResultsEqual(results, "DELETED");
 
 		if (this._hasHooks) {
 			await this.afterHook("delete", { key, success });
@@ -973,7 +982,7 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(`touch ${key} ${exptime}`, nodes);
-		const success = results.every((result) => result === "TOUCHED");
+		const success = allResultsEqual(results, "TOUCHED");
 
 		if (this._hasHooks) {
 			await this.afterHook("touch", { key, exptime, success });
@@ -1007,7 +1016,7 @@ export class Memcache extends Hookified {
 		);
 
 		// All must return OK
-		return results.every((r) => r === "OK");
+		return allResultsEqual(results, "OK");
 	}
 
 	/**
