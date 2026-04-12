@@ -88,9 +88,13 @@ describe("Package Exports", () => {
 		expect(packageJson.exports["."]).toBeDefined();
 
 		// Check import condition
-		expect(packageJson.exports["."].import).toBe("./dist/index.mjs");
+		expect(packageJson.exports["."].import).toBeDefined();
+		expect(packageJson.exports["."].import.types).toBe("./dist/index.d.mts");
+		expect(packageJson.exports["."].import.default).toBe("./dist/index.mjs");
 
 		// Check require condition
-		expect(packageJson.exports["."].require).toBe("./dist/index.cjs");
+		expect(packageJson.exports["."].require).toBeDefined();
+		expect(packageJson.exports["."].require.types).toBe("./dist/index.d.cts");
+		expect(packageJson.exports["."].require.default).toBe("./dist/index.cjs");
 	});
 });
