@@ -8,6 +8,24 @@ import type { MemcacheNode } from "./node.js";
 export type HashFunction = (input: Buffer) => number;
 
 /**
+ * Internal hash function type that operates on strings directly.
+ */
+type StringHashFunction = (input: string) => number;
+
+/**
+ * FNV-1a 32-bit hash operating directly on a JS string.
+ * Returns unsigned 32-bit integer.
+ */
+function fnv1aString(input: string): number {
+	let hash = 0x811c9dc5; // FNV offset basis
+	for (let i = 0; i < input.length; i++) {
+		hash ^= input.charCodeAt(i);
+		hash = (hash * 0x01000193) | 0; // FNV prime, keep as int32
+	}
+	return hash >>> 0; // Convert to unsigned
+}
+
+/**
  * Creates a hash function using a built-in Node.js crypto algorithm.
  * @param algorithm - The name of the hashing algorithm (e.g., "sha1", "md5")
  * @returns A HashFunction that uses the specified algorithm
@@ -16,6 +34,13 @@ const hashFunctionForBuiltin =
 	(algorithm: string): HashFunction =>
 	(value) =>
 		createHash(algorithm).update(value).digest().readUInt32BE(0);
+
+/**
+ * Wraps a Buffer-based HashFunction into a StringHashFunction.
+ */
+function wrapBufferHash(fn: HashFunction): StringHashFunction {
+	return (input: string) => fn(Buffer.from(input));
+}
 
 /**
  * A distribution hash implementation using modulo-based hashing.
@@ -40,8 +65,8 @@ export class ModulaHash implements HashProvider {
 	/** The name of this distribution strategy */
 	public readonly name = "modula";
 
-	/** The hash function used to compute key hashes */
-	private readonly hashFn: HashFunction;
+	/** The string-native hash function used on the hot path */
+	private readonly hashStr: StringHashFunction;
 
 	/** Map of node IDs to MemcacheNode instances */
 	private nodeMap: Map<string, MemcacheNode>;
@@ -70,10 +95,12 @@ export class ModulaHash implements HashProvider {
 	 * ```
 	 */
 	constructor(hashFn?: string | HashFunction) {
-		this.hashFn =
-			typeof hashFn === "string"
-				? hashFunctionForBuiltin(hashFn)
-				: (hashFn ?? hashFunctionForBuiltin("sha1"));
+		this.hashStr =
+			hashFn === undefined
+				? fnv1aString
+				: typeof hashFn === "string"
+					? wrapBufferHash(hashFunctionForBuiltin(hashFn))
+					: wrapBufferHash(hashFn);
 		this.nodeMap = new Map();
 		this.nodeList = [];
 	}
@@ -166,7 +193,7 @@ export class ModulaHash implements HashProvider {
 		}
 
 		// Hash the key and get unsigned 32-bit integer
-		const hash = this.hashFn(Buffer.from(key));
+		const hash = this.hashStr(key);
 
 		// Modulo to get node index from weighted list
 		const index = hash % this.nodeList.length;

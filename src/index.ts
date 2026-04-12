@@ -45,6 +45,9 @@ export const exponentialRetryBackoff: RetryBackoffFunction = (
 	baseDelay,
 ) => baseDelay * 2 ** attempt;
 
+// Pre-compiled regex for key validation (avoid re-compiling per call)
+const KEY_INVALID_CHARS = /[\s\r\n\0]/;
+
 export class Memcache extends Hookified {
 	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
@@ -502,37 +505,38 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<string | undefined>}
 	 */
 	public async get(key: string): Promise<string | undefined> {
-		await this.beforeHook("get", { key });
+		const hasHooks = this._hasHooks;
+		if (hasHooks) {
+			await this.beforeHook("get", { key });
+		}
 
 		this.validateKey(key);
 
 		const nodes = await this.getNodesByKey(key);
+		const commandOptions = {
+			isMultiline: true,
+			requestedKeys: [key],
+		};
 
-		// Query all nodes (supports replication strategies)
-		const promises = nodes.map(async (node) => {
+		let value: string | undefined;
+
+		// Primary-first strategy: try nodes sequentially, fall back on failure
+		for (const node of nodes) {
 			try {
-				const result = await node.command(`get ${key}`, {
-					isMultiline: true,
-					requestedKeys: [key],
-				});
+				const result = await node.command(`get ${key}`, commandOptions);
 
 				if (result?.values && result.values.length > 0) {
-					return result.values[0];
+					value = result.values[0];
+					break;
 				}
-				return undefined;
 			} catch {
-				// If one node fails, try the others
-				return undefined;
+				// Try next node
 			}
-		});
+		}
 
-		// Wait for all nodes to respond
-		const results = await Promise.all(promises);
-
-		// Return the first successful result
-		const value = results.find((v) => v !== undefined);
-
-		await this.afterHook("get", { key, value });
+		if (hasHooks) {
+			await this.afterHook("get", { key, value });
+		}
 
 		return value;
 	}
@@ -545,15 +549,18 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<Map<string, string>>}
 	 */
 	public async gets(keys: string[]): Promise<Map<string, string>> {
-		await this.beforeHook("gets", { keys });
+		if (this._hasHooks) {
+			await this.beforeHook("gets", { keys });
+		}
 
 		// Validate all keys
 		for (const key of keys) {
 			this.validateKey(key);
 		}
 
-		// Group keys by all their replica nodes
+		// Group keys by primary node (first node returned by hash provider)
 		const keysByNode = new Map<MemcacheNode, string[]>();
+		const keyToReplicas = new Map<string, MemcacheNode[]>();
 
 		for (const key of keys) {
 			const nodes = this._hash.getNodesByKey(key);
@@ -562,17 +569,24 @@ export class Memcache extends Hookified {
 				throw new Error(`No node available for key: ${key}`);
 			}
 
-			// Add key to all replica nodes
-			for (const node of nodes) {
-				if (!keysByNode.has(node)) {
-					keysByNode.set(node, []);
-				}
-				// biome-ignore lint/style/noNonNullAssertion: we just set it
-				keysByNode.get(node)!.push(key);
+			// Route to primary node (first in list)
+			const primary = nodes[0];
+			if (!keysByNode.has(primary)) {
+				keysByNode.set(primary, []);
+			}
+			// biome-ignore lint/style/noNonNullAssertion: we just set it
+			keysByNode.get(primary)!.push(key);
+
+			// Track replicas for fallback
+			if (nodes.length > 1) {
+				keyToReplicas.set(key, nodes.slice(1));
 			}
 		}
 
-		// Execute commands in parallel across all nodes (including replicas)
+		// Query primary nodes in parallel
+		const map = new Map<string, string>();
+		const missingKeys: string[] = [];
+
 		const promises = Array.from(keysByNode.entries()).map(
 			async ([node, nodeKeys]) => {
 				try {
@@ -584,35 +598,62 @@ export class Memcache extends Hookified {
 						requestedKeys: nodeKeys,
 					});
 
-					return result;
+					return { nodeKeys, result };
 				} catch {
-					// If one node fails, continue with others
 					/* v8 ignore next -- @preserve */
-					return undefined;
+					return { nodeKeys, result: undefined };
 				}
 			},
 		);
 
 		const results = await Promise.all(promises);
 
-		// Merge results into Map (first successful value for each key wins)
-		const map = new Map<string, string>();
-
-		for (const result of results) {
+		// Collect results and track misses for fallback
+		for (const { nodeKeys, result } of results) {
 			if (result?.foundKeys && result.values) {
-				// Map found keys to their values
 				for (let i = 0; i < result.foundKeys.length; i++) {
 					if (result.values[i] !== undefined) {
-						// Only set if key doesn't exist yet (first successful result wins)
-						if (!map.has(result.foundKeys[i])) {
-							map.set(result.foundKeys[i], result.values[i]);
-						}
+						map.set(result.foundKeys[i], result.values[i]);
 					}
+				}
+			}
+
+			// Find keys that failed or weren't found
+			for (const key of nodeKeys) {
+				if (!map.has(key) && keyToReplicas.has(key)) {
+					missingKeys.push(key);
 				}
 			}
 		}
 
-		await this.afterHook("gets", { keys, values: map });
+		// Fallback to replicas for missing keys (primary-first strategy)
+		for (const key of missingKeys) {
+			const replicas = keyToReplicas.get(key);
+			/* v8 ignore next -- @preserve */
+			if (!replicas) continue;
+
+			for (const replica of replicas) {
+				try {
+					if (!replica.isConnected()) await replica.connect();
+
+					const result = await replica.command(`get ${key}`, {
+						isMultiline: true,
+						requestedKeys: [key],
+					});
+
+					if (result?.values && result.values.length > 0) {
+						map.set(key, result.values[0]);
+						break;
+					}
+				} catch {
+					// Try next replica
+				}
+			}
+		}
+
+		if (this._hasHooks) {
+			await this.afterHook("gets", { keys, values: map });
+		}
 
 		return map;
 	}
@@ -635,7 +676,9 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
-		await this.beforeHook("cas", { key, value, casToken, exptime, flags });
+		if (this._hasHooks) {
+			await this.beforeHook("cas", { key, value, casToken, exptime, flags });
+		}
 
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -646,14 +689,16 @@ export class Memcache extends Hookified {
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("cas", {
-			key,
-			value,
-			casToken,
-			exptime,
-			flags,
-			success,
-		});
+		if (this._hasHooks) {
+			await this.afterHook("cas", {
+				key,
+				value,
+				casToken,
+				exptime,
+				flags,
+				success,
+			});
+		}
 
 		return success;
 	}
@@ -674,18 +719,22 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
-		await this.beforeHook("set", { key, value, exptime, flags });
+		const hasHooks = this._hasHooks;
+		if (hasHooks) {
+			await this.beforeHook("set", { key, value, exptime, flags });
+		}
 
 		this.validateKey(key);
-		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
-		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
+		const bytes = Buffer.byteLength(value);
+		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${value}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("set", { key, value, exptime, flags, success });
+		if (hasHooks) {
+			await this.afterHook("set", { key, value, exptime, flags, success });
+		}
 
 		return success;
 	}
@@ -706,7 +755,9 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
-		await this.beforeHook("add", { key, value, exptime, flags });
+		if (this._hasHooks) {
+			await this.beforeHook("add", { key, value, exptime, flags });
+		}
 
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -717,7 +768,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("add", { key, value, exptime, flags, success });
+		if (this._hasHooks) {
+			await this.afterHook("add", { key, value, exptime, flags, success });
+		}
 
 		return success;
 	}
@@ -738,7 +791,9 @@ export class Memcache extends Hookified {
 		exptime: number = 0,
 		flags: number = 0,
 	): Promise<boolean> {
-		await this.beforeHook("replace", { key, value, exptime, flags });
+		if (this._hasHooks) {
+			await this.beforeHook("replace", { key, value, exptime, flags });
+		}
 
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -749,7 +804,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("replace", { key, value, exptime, flags, success });
+		if (this._hasHooks) {
+			await this.afterHook("replace", { key, value, exptime, flags, success });
+		}
 
 		return success;
 	}
@@ -763,7 +820,9 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async append(key: string, value: string): Promise<boolean> {
-		await this.beforeHook("append", { key, value });
+		if (this._hasHooks) {
+			await this.beforeHook("append", { key, value });
+		}
 
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -774,7 +833,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("append", { key, value, success });
+		if (this._hasHooks) {
+			await this.afterHook("append", { key, value, success });
+		}
 
 		return success;
 	}
@@ -788,7 +849,9 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async prepend(key: string, value: string): Promise<boolean> {
-		await this.beforeHook("prepend", { key, value });
+		if (this._hasHooks) {
+			await this.beforeHook("prepend", { key, value });
+		}
 
 		this.validateKey(key);
 		const valueStr = String(value);
@@ -799,7 +862,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(command, nodes);
 		const success = results.every((result) => result === "STORED");
 
-		await this.afterHook("prepend", { key, value, success });
+		if (this._hasHooks) {
+			await this.afterHook("prepend", { key, value, success });
+		}
 
 		return success;
 	}
@@ -812,7 +877,9 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async delete(key: string): Promise<boolean> {
-		await this.beforeHook("delete", { key });
+		if (this._hasHooks) {
+			await this.beforeHook("delete", { key });
+		}
 
 		this.validateKey(key);
 
@@ -820,7 +887,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(`delete ${key}`, nodes);
 		const success = results.every((result) => result === "DELETED");
 
-		await this.afterHook("delete", { key, success });
+		if (this._hasHooks) {
+			await this.afterHook("delete", { key, success });
+		}
 
 		return success;
 	}
@@ -837,7 +906,9 @@ export class Memcache extends Hookified {
 		key: string,
 		value: number = 1,
 	): Promise<number | undefined> {
-		await this.beforeHook("incr", { key, value });
+		if (this._hasHooks) {
+			await this.beforeHook("incr", { key, value });
+		}
 
 		this.validateKey(key);
 
@@ -847,7 +918,9 @@ export class Memcache extends Hookified {
 			| number
 			| undefined;
 
-		await this.afterHook("incr", { key, value, newValue });
+		if (this._hasHooks) {
+			await this.afterHook("incr", { key, value, newValue });
+		}
 
 		return newValue;
 	}
@@ -864,7 +937,9 @@ export class Memcache extends Hookified {
 		key: string,
 		value: number = 1,
 	): Promise<number | undefined> {
-		await this.beforeHook("decr", { key, value });
+		if (this._hasHooks) {
+			await this.beforeHook("decr", { key, value });
+		}
 
 		this.validateKey(key);
 
@@ -874,7 +949,9 @@ export class Memcache extends Hookified {
 			| number
 			| undefined;
 
-		await this.afterHook("decr", { key, value, newValue });
+		if (this._hasHooks) {
+			await this.afterHook("decr", { key, value, newValue });
+		}
 
 		return newValue;
 	}
@@ -888,7 +965,9 @@ export class Memcache extends Hookified {
 	 * @returns {Promise<boolean>}
 	 */
 	public async touch(key: string, exptime: number): Promise<boolean> {
-		await this.beforeHook("touch", { key, exptime });
+		if (this._hasHooks) {
+			await this.beforeHook("touch", { key, exptime });
+		}
 
 		this.validateKey(key);
 
@@ -896,7 +975,9 @@ export class Memcache extends Hookified {
 		const results = await this.execute(`touch ${key} ${exptime}`, nodes);
 		const success = results.every((result) => result === "TOUCHED");
 
-		await this.afterHook("touch", { key, exptime, success });
+		if (this._hasHooks) {
+			await this.afterHook("touch", { key, exptime, success });
+		}
 
 		return success;
 	}
@@ -1041,6 +1122,11 @@ export class Memcache extends Hookified {
 			throw new Error(`No node available for key: ${key}`);
 		}
 
+		// Fast path: skip loop when single node is already connected (common case)
+		if (nodes.length === 1 && nodes[0].isConnected()) {
+			return nodes;
+		}
+
 		// Lazy connect if not connected
 		for (const node of nodes) {
 			if (!node.isConnected()) {
@@ -1073,6 +1159,19 @@ export class Memcache extends Hookified {
 		const isIdempotent = options?.idempotent === true;
 		const maxRetries =
 			this._retryOnlyIdempotent && !isIdempotent ? 0 : configuredRetries;
+
+		// Fast path: single node (common case) — avoid map + Promise.all overhead
+		if (nodes.length === 1) {
+			const result = await this.executeWithRetry(
+				nodes[0],
+				command,
+				options?.commandOptions,
+				maxRetries,
+				retryDelay,
+				retryBackoff,
+			);
+			return [result];
+		}
 
 		const promises = nodes.map(async (node) => {
 			return this.executeWithRetry(
@@ -1108,7 +1207,7 @@ export class Memcache extends Hookified {
 		if (key.length > 250) {
 			throw new Error("Key length cannot exceed 250 characters");
 		}
-		if (/[\s\r\n\0]/.test(key)) {
+		if (KEY_INVALID_CHARS.test(key)) {
 			throw new Error(
 				"Key cannot contain spaces, newlines, or null characters",
 			);
@@ -1116,6 +1215,14 @@ export class Memcache extends Hookified {
 	}
 
 	// Private methods
+
+	/**
+	 * Fast check for whether any hooks are registered.
+	 * Avoids the overhead of async beforeHook/afterHook calls when no hooks exist.
+	 */
+	private get _hasHooks(): boolean {
+		return this.hooks.size > 0;
+	}
 
 	/**
 	 * Sleep utility for retry delays.
@@ -1144,6 +1251,15 @@ export class Memcache extends Hookified {
 		retryDelay: number,
 		retryBackoff: RetryBackoffFunction,
 	): Promise<unknown> {
+		// Fast path: no retries configured (default)
+		if (maxRetries === 0) {
+			try {
+				return await node.command(command, commandOptions);
+			} catch {
+				return undefined;
+			}
+		}
+
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
 				return await node.command(command, commandOptions);

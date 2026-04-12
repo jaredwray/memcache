@@ -15,6 +15,25 @@ import type { MemcacheNode } from "./node.js";
 export type HashFunction = (input: Buffer) => number;
 
 /**
+ * Internal hash function type that operates on strings directly,
+ * avoiding Buffer.from() allocation on the hot path.
+ */
+type StringHashFunction = (input: string) => number;
+
+/**
+ * FNV-1a 32-bit hash operating directly on a JS string.
+ * Much faster than crypto hashes for routing decisions.
+ */
+function fnv1aString(input: string): number {
+	let hash = 0x811c9dc5; // FNV offset basis
+	for (let i = 0; i < input.length; i++) {
+		hash ^= input.charCodeAt(i);
+		hash = (hash * 0x01000193) | 0; // FNV prime, keep as int32
+	}
+	return hash;
+}
+
+/**
  * Creates a hash function using a built-in Node.js crypto algorithm.
  * @param algorithm - The name of the hashing algorithm (e.g., "sha1", "md5")
  * @returns A HashFunction that uses the specified algorithm
@@ -23,6 +42,13 @@ const hashFunctionForBuiltin =
 	(algorithm: string): HashFunction =>
 	(value) =>
 		createHash(algorithm).update(value).digest().readInt32BE();
+
+/**
+ * Wraps a Buffer-based HashFunction into a StringHashFunction.
+ */
+function wrapBufferHash(fn: HashFunction): StringHashFunction {
+	return (input: string) => fn(Buffer.from(input));
+}
 
 /**
  * Extracts the key from a node, whether it's a string or an object with a key property.
@@ -74,8 +100,8 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 */
 	public static baseWeight = 50;
 
-	/** The hash function used to compute node positions on the ring */
-	private readonly hashFn: HashFunction;
+	/** The string-native hash function used on the hot path */
+	private readonly hashStr: StringHashFunction;
 
 	/** The sorted array of [hash, node key] tuples representing virtual nodes on the ring */
 	private _clock: HashClock = [];
@@ -122,10 +148,14 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 */
 	constructor(
 		initialNodes: ReadonlyArray<TNode | { weight: number; node: TNode }> = [],
-		hashFn: string | HashFunction = "sha1",
+		hashFn?: string | HashFunction,
 	) {
-		this.hashFn =
-			typeof hashFn === "string" ? hashFunctionForBuiltin(hashFn) : hashFn;
+		this.hashStr =
+			hashFn === undefined
+				? fnv1aString
+				: typeof hashFn === "string"
+					? wrapBufferHash(hashFunctionForBuiltin(hashFn))
+					: wrapBufferHash(hashFn);
 		for (const node of initialNodes) {
 			if (typeof node === "object" && "weight" in node && "node" in node) {
 				this.addNode(node.node, node.weight);
@@ -223,8 +253,8 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 * @returns The index in the clock array
 	 */
 	private getIndexForInput(input: string | Buffer) {
-		const hash = this.hashFn(
-			typeof input === "string" ? Buffer.from(input) : input,
+		const hash = this.hashStr(
+			typeof input === "string" ? input : input.toString("utf8"),
 		);
 		return binarySearchRing(this._clock, hash);
 	}
@@ -283,7 +313,7 @@ export class HashRing<TNode extends string | { key: string } = string> {
 	 */
 	private addNodeToClock(key: string, weight: number) {
 		for (let i = weight; i > 0; i--) {
-			const hash = this.hashFn(Buffer.from(`${key}\0${i}`));
+			const hash = this.hashStr(`${key}\0${i}`);
 			this._clock.push([hash, key]);
 		}
 
