@@ -100,6 +100,7 @@ export class Memcache extends Hookified {
 		if (!this._lazyConnect) {
 			process.nextTick(() => {
 				this.connect().catch((error: unknown) => {
+					/* v8 ignore next -- @preserve */
 					this.emit(MemcacheEvents.ERROR, "connect", error);
 				});
 			});
