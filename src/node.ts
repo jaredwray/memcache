@@ -214,6 +214,7 @@ export class MemcacheNode extends Hookified {
 			});
 
 			this._socket.setTimeout(this._timeout);
+			this._socket.setNoDelay(true);
 
 			this._socket.on("connect", async () => {
 				this._connected = true;
@@ -716,6 +717,7 @@ export class MemcacheNode extends Hookified {
 			throw new Error(`Not connected to memcache server ${this.id}`);
 		}
 
+		const wire = `${cmd}\r\n`;
 		return new Promise((resolve, reject) => {
 			this._commandQueue.push({
 				command: cmd,
@@ -727,7 +729,7 @@ export class MemcacheNode extends Hookified {
 				requestedKeys: options?.requestedKeys,
 			});
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			this._socket!.write(`${cmd}\r\n`);
+			this._socket!.write(wire);
 		});
 	}
 

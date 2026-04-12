@@ -730,7 +730,10 @@ export class Memcache extends Hookified {
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
-		const success = results.every((result) => result === "STORED");
+		const success =
+			results.length === 1
+				? results[0] === "STORED"
+				: results.every((result) => result === "STORED");
 
 		if (hasHooks) {
 			await this.afterHook("set", { key, value, exptime, flags, success });

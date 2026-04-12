@@ -333,6 +333,8 @@ export class HashRing<TNode extends string | { key: string } = string> {
  * const targetNode = distribution.getNodesByKey('my-key')[0];
  * ```
  */
+const CACHE_MAX = 5000;
+
 export class KetamaHash implements HashProvider {
 	/** The name of this distribution strategy */
 	public readonly name = "ketama";
@@ -342,6 +344,9 @@ export class KetamaHash implements HashProvider {
 
 	/** Map of node IDs to MemcacheNode instances */
 	private nodeMap: Map<string, MemcacheNode>;
+
+	/** Bounded cache: key → [node] array to avoid re-hashing and array allocation */
+	private _cache = new Map<string, Array<MemcacheNode>>();
 
 	/**
 	 * Creates a new KetamaDistributionHash instance.
@@ -386,6 +391,7 @@ export class KetamaHash implements HashProvider {
 		this.nodeMap.set(node.id, node);
 		// Add to hash ring with weight
 		this.hashRing.addNode(node.id, node.weight);
+		this._cache.clear();
 	}
 
 	/**
@@ -403,6 +409,7 @@ export class KetamaHash implements HashProvider {
 		this.nodeMap.delete(id);
 		// Remove from hash ring
 		this.hashRing.removeNode(id);
+		this._cache.clear();
 	}
 
 	/**
@@ -439,6 +446,9 @@ export class KetamaHash implements HashProvider {
 	 * ```
 	 */
 	public getNodesByKey(key: string): Array<MemcacheNode> {
+		const cached = this._cache.get(key);
+		if (cached) return cached;
+
 		// Get the node from hash ring
 		const nodeId = this.hashRing.getNode(key);
 		if (!nodeId) {
@@ -448,7 +458,17 @@ export class KetamaHash implements HashProvider {
 		// Map back to MemcacheNode
 		const node = this.nodeMap.get(nodeId);
 		/* v8 ignore next -- @preserve */
-		return node ? [node] : [];
+		if (!node) return [];
+
+		const result = [node];
+
+		// Bounded cache — clear all when full (simple eviction)
+		if (this._cache.size >= CACHE_MAX) {
+			this._cache.clear();
+		}
+
+		this._cache.set(key, result);
+		return result;
 	}
 }
 
