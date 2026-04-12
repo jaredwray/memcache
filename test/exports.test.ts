@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 describe("Package Exports", () => {
 	it("should export main class from ESM", async () => {
 		// Import from the built package
-		const module = await import("../dist/index.js");
+		const module = await import("../dist/index.mjs");
 
 		expect(module).toBeDefined();
 		expect(module.default).toBeDefined();
@@ -19,14 +19,14 @@ describe("Package Exports", () => {
 	});
 
 	it("should export named exports from ESM", async () => {
-		const module = await import("../dist/index.js");
+		const module = await import("../dist/index.mjs");
 
 		expect(module.createNode).toBeDefined();
 		expect(typeof module.createNode).toBe("function");
 	});
 
 	it("should have valid TypeScript declarations for ESM", () => {
-		const dtsPath = join(__dirname, "../dist/index.d.ts");
+		const dtsPath = join(__dirname, "../dist/index.d.mts");
 		const dtsContent = readFileSync(dtsPath, "utf-8");
 
 		expect(dtsContent).toBeDefined();
@@ -64,7 +64,7 @@ describe("Package Exports", () => {
 	});
 
 	it("should have matching type declarations between ESM and CommonJS", () => {
-		const dtsPath = join(__dirname, "../dist/index.d.ts");
+		const dtsPath = join(__dirname, "../dist/index.d.mts");
 		const dctsPath = join(__dirname, "../dist/index.d.cts");
 
 		const dtsContent = readFileSync(dtsPath, "utf-8");
@@ -79,8 +79,8 @@ describe("Package Exports", () => {
 		const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 
 		// Check main fields
-		expect(packageJson.main).toBe("dist/index.js");
-		expect(packageJson.types).toBe("dist/index.d.ts");
+		expect(packageJson.main).toBe("dist/index.mjs");
+		expect(packageJson.types).toBe("dist/index.d.mts");
 		expect(packageJson.type).toBe("module");
 
 		// Check exports
@@ -89,8 +89,8 @@ describe("Package Exports", () => {
 
 		// Check import condition
 		expect(packageJson.exports["."].import).toBeDefined();
-		expect(packageJson.exports["."].import.types).toBe("./dist/index.d.ts");
-		expect(packageJson.exports["."].import.default).toBe("./dist/index.js");
+		expect(packageJson.exports["."].import.types).toBe("./dist/index.d.mts");
+		expect(packageJson.exports["."].import.default).toBe("./dist/index.mjs");
 
 		// Check require condition
 		expect(packageJson.exports["."].require).toBeDefined();
