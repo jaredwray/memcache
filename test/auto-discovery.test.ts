@@ -581,6 +581,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should emit AUTO_DISCOVER_ERROR when discovery fails", async () => {
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 				autoDiscover: {
 					enabled: true,
 					configEndpoint: "nonexistent:11211",
@@ -610,6 +611,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 				autoDiscover: {
 					enabled: true,
 					configEndpoint: server.endpoint,
@@ -645,6 +647,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 				autoDiscover: {
 					enabled: true,
 					configEndpoint: server.endpoint,
@@ -675,6 +678,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 				autoDiscover: {
 					enabled: true,
 					configEndpoint: server.endpoint,
@@ -699,6 +703,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should add new nodes from discovered config", async () => {
 			const client = new Memcache({
 				nodes: ["10.0.0.1:11211"],
+				lazyConnect: true,
 			});
 
 			// @ts-expect-error - accessing private method for testing
@@ -717,6 +722,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should remove nodes not in discovered config", async () => {
 			const client = new Memcache({
 				nodes: ["10.0.0.1:11211", "10.0.0.2:11211"],
+				lazyConnect: true,
 			});
 
 			// @ts-expect-error - accessing private method for testing
@@ -732,6 +738,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should not remove nodes when config returns empty list", async () => {
 			const client = new Memcache({
 				nodes: ["10.0.0.1:11211"],
+				lazyConnect: true,
 			});
 
 			const errors: unknown[] = [];
@@ -754,6 +761,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should use hostname when IP is empty", async () => {
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 			});
 
 			// Remove the default localhost node
@@ -777,6 +785,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should handle no changes gracefully", async () => {
 			const client = new Memcache({
 				nodes: ["10.0.0.1:11211"],
+				lazyConnect: true,
 			});
 
 			// @ts-expect-error - accessing private method for testing
@@ -791,6 +800,7 @@ describe("Memcache AutoDiscovery Integration", () => {
 		it("should bracket IPv6 addresses when adding nodes", async () => {
 			const client = new Memcache({
 				nodes: [],
+				lazyConnect: true,
 			});
 
 			await client.removeNode("localhost:11211");
@@ -1149,6 +1159,7 @@ describe("Memcache applyClusterConfig error paths", () => {
 	it("should emit ERROR when addNode throws (duplicate node)", async () => {
 		const client = new Memcache({
 			nodes: ["10.0.0.1:11211"],
+			lazyConnect: true,
 		});
 
 		const errors: unknown[] = [];
@@ -1178,6 +1189,7 @@ describe("Memcache applyClusterConfig error paths", () => {
 	it("should emit ERROR when removeNode throws", async () => {
 		const client = new Memcache({
 			nodes: ["10.0.0.1:11211", "10.0.0.2:11211"],
+			lazyConnect: true,
 		});
 
 		const errors: unknown[] = [];
@@ -1251,6 +1263,7 @@ describe("Memcache startAutoDiscovery", () => {
 
 		const client = new Memcache({
 			nodes: ["10.0.0.1:11211"],
+			lazyConnect: true,
 			autoDiscover: {
 				enabled: true,
 				configEndpoint: server.endpoint,

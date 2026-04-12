@@ -120,6 +120,13 @@ export interface MemcacheOptions {
 	sasl?: SASLCredentials;
 
 	/**
+	 * When true, nodes will not connect until the first command is executed.
+	 * When false, nodes connect eagerly during construction.
+	 * @default false
+	 */
+	lazyConnect?: boolean;
+
+	/**
 	 * AWS ElastiCache Auto Discovery configuration.
 	 * When enabled, the client will periodically poll the configuration endpoint
 	 * to detect cluster topology changes and automatically update the node list.

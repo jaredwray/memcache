@@ -118,6 +118,7 @@ describe("SASL Authentication", () => {
 		it("should authenticate with SASL credentials in options", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -128,6 +129,7 @@ describe("SASL Authentication", () => {
 		it("should perform get/set operations with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -153,6 +155,7 @@ describe("SASL Authentication", () => {
 		it("should fail connection with invalid SASL credentials", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: "invalid", password: "invalid" },
 			});
 
@@ -164,6 +167,7 @@ describe("SASL Authentication", () => {
 		it("should perform incr/decr operations with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -191,6 +195,7 @@ describe("SASL Authentication", () => {
 		it("should perform add/replace operations with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -224,6 +229,7 @@ describe("SASL Authentication", () => {
 		it("should perform append/prepend operations with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -254,6 +260,7 @@ describe("SASL Authentication", () => {
 		it("should perform touch operation with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -280,6 +287,7 @@ describe("SASL Authentication", () => {
 		it("should get version with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -296,6 +304,7 @@ describe("SASL Authentication", () => {
 		it("should get stats with SASL using binary protocol", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -312,6 +321,7 @@ describe("SASL Authentication", () => {
 		it("should return undefined for binaryGet on non-existent key", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
@@ -326,6 +336,7 @@ describe("SASL Authentication", () => {
 		it("should call binaryQuit without error", async () => {
 			client = new Memcache({
 				nodes: [`${SASL_HOST}:${SASL_PORT}`],
+				lazyConnect: true,
 				sasl: { username: TEST_USER, password: TEST_PASS },
 			});
 
