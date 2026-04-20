@@ -817,6 +817,27 @@ describe("Memcache", () => {
 				"Key cannot contain spaces, newlines, or null characters",
 			);
 		});
+
+		it("should default maxKeySize to 250", () => {
+			expect(client.maxKeySize).toBe(250);
+		});
+
+		it("should honor maxKeySize passed via constructor options", () => {
+			const customClient = new Memcache({ maxKeySize: 10 });
+			expect(customClient.maxKeySize).toBe(10);
+			expect(() => customClient.validateKey("a".repeat(11))).toThrow(
+				"Key length cannot exceed 10 characters",
+			);
+			expect(() => customClient.validateKey("a".repeat(10))).not.toThrow();
+		});
+
+		it("should honor maxKeySize updated via setter", () => {
+			client.maxKeySize = 5;
+			expect(client.maxKeySize).toBe(5);
+			expect(() => client.validateKey("abcdef")).toThrow(
+				"Key length cannot exceed 5 characters",
+			);
+		});
 	});
 
 	describe("Connection Management", () => {

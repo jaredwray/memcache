@@ -127,6 +127,12 @@ export interface MemcacheOptions {
 	lazyConnect?: boolean;
 
 	/**
+	 * The maximum allowed key size (in characters). Memcache protocol max is 250.
+	 * @default 250
+	 */
+	maxKeySize?: number;
+
+	/**
 	 * AWS ElastiCache Auto Discovery configuration.
 	 * When enabled, the client will periodically poll the configuration endpoint
 	 * to detect cluster topology changes and automatically update the node list.

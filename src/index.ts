@@ -71,6 +71,7 @@ export class Memcache extends Hookified {
 	private _autoDiscovery: AutoDiscovery | undefined;
 	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 	private readonly _lazyConnect: boolean;
+	private _maxKeySize: number;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -87,6 +88,7 @@ export class Memcache extends Hookified {
 			this._retryOnlyIdempotent = true;
 			this._sasl = undefined;
 			this._lazyConnect = true;
+			this._maxKeySize = 250;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -100,6 +102,7 @@ export class Memcache extends Hookified {
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
 			this._lazyConnect = options?.lazyConnect ?? true;
+			this._maxKeySize = options?.maxKeySize ?? 250;
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -183,6 +186,24 @@ export class Memcache extends Hookified {
 	 */
 	public set timeout(value: number) {
 		this._timeout = value;
+	}
+
+	/**
+	 * Get the maximum allowed key size (in characters).
+	 * @returns {number}
+	 * @default 250
+	 */
+	public get maxKeySize(): number {
+		return this._maxKeySize;
+	}
+
+	/**
+	 * Set the maximum allowed key size (in characters). Memcache protocol max is 250.
+	 * @param {number} value
+	 * @default 250
+	 */
+	public set maxKeySize(value: number) {
+		this._maxKeySize = value;
 	}
 
 	/**
@@ -1199,7 +1220,7 @@ export class Memcache extends Hookified {
 	/**
 	 * Validates a Memcache key according to protocol requirements.
 	 * @param {string} key - The key to validate
-	 * @throws {Error} If the key is empty, exceeds 250 characters, or contains invalid characters
+	 * @throws {Error} If the key is empty, exceeds `maxKeySize` characters, or contains invalid characters
 	 *
 	 * @example
 	 * ```typescript
@@ -1213,8 +1234,10 @@ export class Memcache extends Hookified {
 		if (!key || key.length === 0) {
 			throw new Error("Key cannot be empty");
 		}
-		if (key.length > 250) {
-			throw new Error("Key length cannot exceed 250 characters");
+		if (key.length > this._maxKeySize) {
+			throw new Error(
+				`Key length cannot exceed ${this._maxKeySize} characters`,
+			);
 		}
 		if (KEY_INVALID_CHARS.test(key)) {
 			throw new Error(
