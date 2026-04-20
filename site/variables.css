@@ -1,0 +1,48 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-hover: rgba(88, 144, 72, 0.5);
+  --surface: #f3f6f1;
+  --surface-hover: rgba(88, 144, 72, 0.08);
+  --muted: #6b7280;
+  --muted-fg: rgba(0, 0, 0, 0.5);
+  --code-bg: rgba(88, 144, 72, 0.08);
+  --pre-bg: rgba(88, 144, 72, 0.05);
+  --link: #4a7e3c;
+  --scrollbar: rgba(0, 0, 0, 0.2);
+  --header-height: 81px;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-hover: rgba(88, 144, 72, 0.5);
+  --surface: #f3f6f1;
+  --surface-hover: rgba(88, 144, 72, 0.08);
+  --muted: #6b7280;
+  --muted-fg: rgba(0, 0, 0, 0.5);
+  --code-bg: rgba(88, 144, 72, 0.08);
+  --pre-bg: rgba(88, 144, 72, 0.05);
+  --link: #4a7e3c;
+  --scrollbar: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] {
+  --bg: #121712;
+  --fg: #f5f7f4;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-hover: rgba(140, 196, 120, 0.5);
+  --surface: #1d241d;
+  --surface-hover: rgba(140, 196, 120, 0.12);
+  --muted: #c5cdd3;
+  --muted-fg: rgba(255, 255, 255, 0.65);
+  --code-bg: rgba(140, 196, 120, 0.12);
+  --pre-bg: rgba(140, 196, 120, 0.08);
+  --link: #8cc478;
+  --scrollbar: rgba(255, 255, 255, 0.2);
+}
