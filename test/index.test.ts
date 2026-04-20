@@ -853,16 +853,16 @@ describe("Memcache", () => {
 		it("should honor maxValueSize passed via constructor options", () => {
 			const customClient = new Memcache({ maxValueSize: 10 });
 			expect(customClient.maxValueSize).toBe(10);
-			expect(() => customClient.validateValue(11)).toThrow(
+			expect(() => customClient.validateValue("a".repeat(11))).toThrow(
 				"Value size cannot exceed 10 bytes",
 			);
-			expect(() => customClient.validateValue(10)).not.toThrow();
+			expect(() => customClient.validateValue("a".repeat(10))).not.toThrow();
 		});
 
 		it("should honor maxValueSize updated via setter", () => {
 			client.maxValueSize = 8;
 			expect(client.maxValueSize).toBe(8);
-			expect(() => client.validateValue(9)).toThrow(
+			expect(() => client.validateValue("a".repeat(9))).toThrow(
 				"Value size cannot exceed 8 bytes",
 			);
 		});
@@ -874,6 +874,31 @@ describe("Memcache", () => {
 			expect(clamped.maxValueSize).toBe(0);
 			client.maxValueSize = -1;
 			expect(client.maxValueSize).toBe(0);
+		});
+
+		it("should fall back to 0 when maxValueSize is set to NaN", () => {
+			client.maxValueSize = Number.NaN;
+			expect(client.maxValueSize).toBe(0);
+			const nanClient = new Memcache({ maxValueSize: Number.NaN });
+			expect(nanClient.maxValueSize).toBe(1048576);
+		});
+
+		it("should fall back to 0 when maxKeySize is set to NaN", () => {
+			client.maxKeySize = Number.NaN;
+			expect(client.maxKeySize).toBe(0);
+			const nanClient = new Memcache({ maxKeySize: Number.NaN });
+			expect(nanClient.maxKeySize).toBe(250);
+		});
+
+		it("should fall back to 0 when retries is set to NaN", () => {
+			client.retries = Number.NaN;
+			expect(client.retries).toBe(0);
+		});
+
+		it("should return the byte length from validateValue", () => {
+			expect(client.validateValue("hello")).toBe(5);
+			// "€" is 3 bytes in UTF-8
+			expect(client.validateValue("€")).toBe(3);
 		});
 
 		it("should throw on set when value exceeds maxValueSize", async () => {
