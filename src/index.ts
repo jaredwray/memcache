@@ -72,6 +72,7 @@ export class Memcache extends Hookified {
 	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 	private readonly _lazyConnect: boolean;
 	private _maxKeySize: number;
+	private _maxValueSize: number;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -89,6 +90,7 @@ export class Memcache extends Hookified {
 			this._sasl = undefined;
 			this._lazyConnect = true;
 			this._maxKeySize = 250;
+			this._maxValueSize = 1048576;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -102,7 +104,22 @@ export class Memcache extends Hookified {
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
 			this._lazyConnect = options?.lazyConnect ?? true;
-			this._maxKeySize = Math.max(0, Math.floor(options?.maxKeySize ?? 250));
+			this._maxKeySize = Math.max(
+				0,
+				Math.floor(
+					Number.isFinite(options?.maxKeySize)
+						? (options?.maxKeySize as number)
+						: 250,
+				),
+			);
+			this._maxValueSize = Math.max(
+				0,
+				Math.floor(
+					Number.isFinite(options?.maxValueSize)
+						? (options?.maxValueSize as number)
+						: 1048576,
+				),
+			);
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -203,7 +220,31 @@ export class Memcache extends Hookified {
 	 * @default 250
 	 */
 	public set maxKeySize(value: number) {
-		this._maxKeySize = Math.max(0, Math.floor(value));
+		this._maxKeySize = Math.max(
+			0,
+			Math.floor(Number.isFinite(value) ? value : 0),
+		);
+	}
+
+	/**
+	 * Get the maximum allowed value size (in bytes).
+	 * @returns {number}
+	 * @default 1048576
+	 */
+	public get maxValueSize(): number {
+		return this._maxValueSize;
+	}
+
+	/**
+	 * Set the maximum allowed value size (in bytes). Memcached default max is 1048576 (1 MiB).
+	 * @param {number} value
+	 * @default 1048576
+	 */
+	public set maxValueSize(value: number) {
+		this._maxValueSize = Math.max(
+			0,
+			Math.floor(Number.isFinite(value) ? value : 0),
+		);
 	}
 
 	/**
@@ -266,7 +307,7 @@ export class Memcache extends Hookified {
 	 * @default 0
 	 */
 	public set retries(value: number) {
-		this._retries = Math.max(0, Math.floor(value));
+		this._retries = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
 	}
 
 	/**
@@ -712,7 +753,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
+		const bytes = this.validateValue(valueStr);
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -755,7 +796,7 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		const bytes = Buffer.byteLength(value);
+		const bytes = this.validateValue(value);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${value}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -791,7 +832,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
+		const bytes = this.validateValue(valueStr);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -827,7 +868,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
+		const bytes = this.validateValue(valueStr);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -856,7 +897,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
+		const bytes = this.validateValue(valueStr);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -885,7 +926,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const valueStr = String(value);
-		const bytes = Buffer.byteLength(valueStr);
+		const bytes = this.validateValue(valueStr);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -1244,6 +1285,31 @@ export class Memcache extends Hookified {
 				"Key cannot contain spaces, newlines, or null characters",
 			);
 		}
+	}
+
+	/**
+	 * Validates the size of a Memcache value against `maxValueSize`.
+	 * Performs an O(1) character-length pre-check before calling
+	 * `Buffer.byteLength`, since UTF-8 byte length is always >= character length.
+	 * @param {string} value - The value to validate
+	 * @returns {number} The encoded byte length of the value
+	 * @throws {Error} If the value exceeds `maxValueSize` bytes
+	 *
+	 * @example
+	 * ```typescript
+	 * const bytes = client.validateValue("hello"); // returns 5
+	 * client.validateValue("a".repeat(2_000_000)); // Throws: Value size cannot exceed 1048576 bytes
+	 * ```
+	 */
+	public validateValue(value: string): number {
+		if (value.length > this._maxValueSize) {
+			throw new Error(`Value size cannot exceed ${this._maxValueSize} bytes`);
+		}
+		const bytes = Buffer.byteLength(value);
+		if (bytes > this._maxValueSize) {
+			throw new Error(`Value size cannot exceed ${this._maxValueSize} bytes`);
+		}
+		return bytes;
 	}
 
 	// Private methods

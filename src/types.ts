@@ -133,6 +133,12 @@ export interface MemcacheOptions {
 	maxKeySize?: number;
 
 	/**
+	 * The maximum allowed value size in bytes. Memcached default max is 1048576 (1 MiB).
+	 * @default 1048576
+	 */
+	maxValueSize?: number;
+
+	/**
 	 * AWS ElastiCache Auto Discovery configuration.
 	 * When enabled, the client will periodically poll the configuration endpoint
 	 * to detect cluster topology changes and automatically update the node list.

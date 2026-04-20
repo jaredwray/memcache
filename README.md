@@ -206,6 +206,8 @@ const client = new Memcache({
 - `retryBackoff?: RetryBackoffFunction` - Function to calculate backoff delay (default: fixed delay)
 - `retryOnlyIdempotent?: boolean` - Only retry commands marked as idempotent (default: true)
 - `lazyConnect?: boolean` - When `true`, nodes will not connect until the first command is executed. When `false`, nodes connect eagerly during construction (default: true)
+- `maxKeySize?: number` - Maximum allowed key size in characters (default: 250, memcache protocol max)
+- `maxValueSize?: number` - Maximum allowed value size in bytes (default: 1048576, memcached default)
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
@@ -239,6 +241,12 @@ Get or set the backoff function for calculating retry delays.
 
 ### `retryOnlyIdempotent: boolean`
 Get or set whether retries are restricted to idempotent commands only (default: true).
+
+### `maxKeySize: number`
+Get or set the maximum allowed key size in characters (default: 250). Memcache protocol max is 250.
+
+### `maxValueSize: number`
+Get or set the maximum allowed value size in bytes (default: 1048576). Writes (`set`, `add`, `replace`, `append`, `prepend`, `cas`) throw when the encoded value exceeds this limit. Raise it if your memcached server is started with a larger `-I` item size.
 
 ### `lazyConnect: boolean` (readonly)
 Whether nodes defer connecting until the first command is executed (default: true).
