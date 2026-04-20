@@ -72,6 +72,7 @@ export class Memcache extends Hookified {
 	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 	private readonly _lazyConnect: boolean;
 	private _maxKeySize: number;
+	private _maxValueSize: number;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -89,6 +90,7 @@ export class Memcache extends Hookified {
 			this._sasl = undefined;
 			this._lazyConnect = true;
 			this._maxKeySize = 250;
+			this._maxValueSize = 1048576;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -103,6 +105,10 @@ export class Memcache extends Hookified {
 			this._sasl = options?.sasl;
 			this._lazyConnect = options?.lazyConnect ?? true;
 			this._maxKeySize = Math.max(0, Math.floor(options?.maxKeySize ?? 250));
+			this._maxValueSize = Math.max(
+				0,
+				Math.floor(options?.maxValueSize ?? 1048576),
+			);
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -204,6 +210,24 @@ export class Memcache extends Hookified {
 	 */
 	public set maxKeySize(value: number) {
 		this._maxKeySize = Math.max(0, Math.floor(value));
+	}
+
+	/**
+	 * Get the maximum allowed value size (in bytes).
+	 * @returns {number}
+	 * @default 1048576
+	 */
+	public get maxValueSize(): number {
+		return this._maxValueSize;
+	}
+
+	/**
+	 * Set the maximum allowed value size (in bytes). Memcached default max is 1048576 (1 MiB).
+	 * @param {number} value
+	 * @default 1048576
+	 */
+	public set maxValueSize(value: number) {
+		this._maxValueSize = Math.max(0, Math.floor(value));
 	}
 
 	/**
@@ -713,6 +737,7 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
+		this.validateValue(bytes);
 		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -756,6 +781,7 @@ export class Memcache extends Hookified {
 
 		this.validateKey(key);
 		const bytes = Buffer.byteLength(value);
+		this.validateValue(bytes);
 		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${value}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -792,6 +818,7 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
+		this.validateValue(bytes);
 		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -828,6 +855,7 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
+		this.validateValue(bytes);
 		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -857,6 +885,7 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
+		this.validateValue(bytes);
 		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -886,6 +915,7 @@ export class Memcache extends Hookified {
 		this.validateKey(key);
 		const valueStr = String(value);
 		const bytes = Buffer.byteLength(valueStr);
+		this.validateValue(bytes);
 		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
@@ -1243,6 +1273,23 @@ export class Memcache extends Hookified {
 			throw new Error(
 				"Key cannot contain spaces, newlines, or null characters",
 			);
+		}
+	}
+
+	/**
+	 * Validates the size of a Memcache value against `maxValueSize`.
+	 * @param {number} bytes - The byte length of the value to validate
+	 * @throws {Error} If the value exceeds `maxValueSize` bytes
+	 *
+	 * @example
+	 * ```typescript
+	 * client.validateValue(Buffer.byteLength("hello")); // OK
+	 * client.validateValue(2_000_000); // Throws: Value size cannot exceed 1048576 bytes
+	 * ```
+	 */
+	public validateValue(bytes: number): void {
+		if (bytes > this._maxValueSize) {
+			throw new Error(`Value size cannot exceed ${this._maxValueSize} bytes`);
 		}
 	}
 

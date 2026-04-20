@@ -840,6 +840,93 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("Value Validation", () => {
+		it("should default maxValueSize to 1048576", () => {
+			expect(client.maxValueSize).toBe(1048576);
+		});
+
+		it("should default maxValueSize to 1048576 for string-param constructor", () => {
+			const stringClient = new Memcache("localhost:11211");
+			expect(stringClient.maxValueSize).toBe(1048576);
+		});
+
+		it("should honor maxValueSize passed via constructor options", () => {
+			const customClient = new Memcache({ maxValueSize: 10 });
+			expect(customClient.maxValueSize).toBe(10);
+			expect(() => customClient.validateValue(11)).toThrow(
+				"Value size cannot exceed 10 bytes",
+			);
+			expect(() => customClient.validateValue(10)).not.toThrow();
+		});
+
+		it("should honor maxValueSize updated via setter", () => {
+			client.maxValueSize = 8;
+			expect(client.maxValueSize).toBe(8);
+			expect(() => client.validateValue(9)).toThrow(
+				"Value size cannot exceed 8 bytes",
+			);
+		});
+
+		it("should floor fractional maxValueSize and clamp negatives to 0", () => {
+			const floored = new Memcache({ maxValueSize: 12.9 });
+			expect(floored.maxValueSize).toBe(12);
+			const clamped = new Memcache({ maxValueSize: -5 });
+			expect(clamped.maxValueSize).toBe(0);
+			client.maxValueSize = -1;
+			expect(client.maxValueSize).toBe(0);
+		});
+
+		it("should throw on set when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.set("k", "hello")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should throw on add when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.add("k", "hello")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should throw on replace when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.replace("k", "hello")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should throw on append when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.append("k", "hello")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should throw on prepend when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.prepend("k", "hello")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should throw on cas when value exceeds maxValueSize", async () => {
+			const customClient = new Memcache({ maxValueSize: 4 });
+			await expect(customClient.cas("k", "hello", "1")).rejects.toThrow(
+				"Value size cannot exceed 4 bytes",
+			);
+		});
+
+		it("should enforce maxValueSize by bytes, not characters", async () => {
+			// "€" is 3 bytes in UTF-8 but 1 character
+			const customClient = new Memcache({ maxValueSize: 2 });
+			await expect(customClient.set("k", "€")).rejects.toThrow(
+				"Value size cannot exceed 2 bytes",
+			);
+		});
+	});
+
 	describe("Connection Management", () => {
 		it("should handle connection state", () => {
 			expect(client.isConnected()).toBe(false);
