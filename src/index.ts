@@ -102,7 +102,7 @@ export class Memcache extends Hookified {
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
 			this._lazyConnect = options?.lazyConnect ?? true;
-			this._maxKeySize = options?.maxKeySize ?? 250;
+			this._maxKeySize = Math.max(0, Math.floor(options?.maxKeySize ?? 250));
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -203,7 +203,7 @@ export class Memcache extends Hookified {
 	 * @default 250
 	 */
 	public set maxKeySize(value: number) {
-		this._maxKeySize = value;
+		this._maxKeySize = Math.max(0, Math.floor(value));
 	}
 
 	/**
