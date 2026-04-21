@@ -952,6 +952,106 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("Expiration Validation", () => {
+		it("should default maxExpiration to 2592000", () => {
+			expect(client.maxExpiration).toBe(2592000);
+		});
+
+		it("should default maxExpiration to 2592000 for string-param constructor", () => {
+			const stringClient = new Memcache("localhost:11211");
+			expect(stringClient.maxExpiration).toBe(2592000);
+		});
+
+		it("should honor maxExpiration passed via constructor options", () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			expect(customClient.maxExpiration).toBe(60);
+			expect(() => customClient.validateExpiration(61)).toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+			expect(() => customClient.validateExpiration(60)).not.toThrow();
+		});
+
+		it("should honor maxExpiration updated via setter", () => {
+			client.maxExpiration = 30;
+			expect(client.maxExpiration).toBe(30);
+			expect(() => client.validateExpiration(31)).toThrow(
+				"Expiration cannot exceed 30 seconds",
+			);
+		});
+
+		it("should floor fractional maxExpiration and clamp negatives to 0", () => {
+			const floored = new Memcache({ maxExpiration: 12.9 });
+			expect(floored.maxExpiration).toBe(12);
+			const clamped = new Memcache({ maxExpiration: -5 });
+			expect(clamped.maxExpiration).toBe(0);
+			client.maxExpiration = -1;
+			expect(client.maxExpiration).toBe(0);
+		});
+
+		it("should fall back to 0 when maxExpiration is set to NaN", () => {
+			client.maxExpiration = Number.NaN;
+			expect(client.maxExpiration).toBe(0);
+			const nanClient = new Memcache({ maxExpiration: Number.NaN });
+			expect(nanClient.maxExpiration).toBe(2592000);
+		});
+
+		it("should always allow exptime 0 (no expiration)", () => {
+			client.maxExpiration = 10;
+			expect(() => client.validateExpiration(0)).not.toThrow();
+		});
+
+		it("should throw on set when exptime exceeds maxExpiration", async () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			await expect(customClient.set("k", "v", 61)).rejects.toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+		});
+
+		it("should throw on add when exptime exceeds maxExpiration", async () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			await expect(customClient.add("k", "v", 61)).rejects.toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+		});
+
+		it("should throw on replace when exptime exceeds maxExpiration", async () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			await expect(customClient.replace("k", "v", 61)).rejects.toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+		});
+
+		it("should throw on cas when exptime exceeds maxExpiration", async () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			await expect(customClient.cas("k", "v", "1", 61)).rejects.toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+		});
+
+		it("should throw on touch when exptime exceeds maxExpiration", async () => {
+			const customClient = new Memcache({ maxExpiration: 60 });
+			await expect(customClient.touch("k", 61)).rejects.toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
+		});
+
+		it("should reject Unix timestamps at the default maxExpiration", async () => {
+			const defaultClient = new Memcache();
+			const unixTimestamp = Math.floor(Date.now() / 1000) + 3600;
+			await expect(defaultClient.set("k", "v", unixTimestamp)).rejects.toThrow(
+				"Expiration cannot exceed 2592000 seconds",
+			);
+		});
+
+		it("should allow Unix timestamps when maxExpiration is raised", () => {
+			const permissive = new Memcache({
+				maxExpiration: Number.MAX_SAFE_INTEGER,
+			});
+			const unixTimestamp = Math.floor(Date.now() / 1000) + 3600;
+			expect(() => permissive.validateExpiration(unixTimestamp)).not.toThrow();
+		});
+	});
+
 	describe("Connection Management", () => {
 		it("should handle connection state", () => {
 			expect(client.isConnected()).toBe(false);

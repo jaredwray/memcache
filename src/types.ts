@@ -139,6 +139,15 @@ export interface MemcacheOptions {
 	maxValueSize?: number;
 
 	/**
+	 * The maximum allowed expiration time in seconds. Memcached treats values greater
+	 * than 2592000 (30 days) as absolute Unix timestamps, so the default rejects any
+	 * ambiguous relative TTLs. `0` (no expiration) is always allowed. Raise this value
+	 * if you need to pass Unix timestamps as expirations.
+	 * @default 2592000
+	 */
+	maxExpiration?: number;
+
+	/**
 	 * AWS ElastiCache Auto Discovery configuration.
 	 * When enabled, the client will periodically poll the configuration endpoint
 	 * to detect cluster topology changes and automatically update the node list.

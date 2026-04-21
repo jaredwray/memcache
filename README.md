@@ -208,6 +208,7 @@ const client = new Memcache({
 - `lazyConnect?: boolean` - When `true`, nodes will not connect until the first command is executed. When `false`, nodes connect eagerly during construction (default: true)
 - `maxKeySize?: number` - Maximum allowed key size in characters (default: 250, memcache protocol max)
 - `maxValueSize?: number` - Maximum allowed value size in bytes (default: 1048576, memcached default)
+- `maxExpiration?: number` - Maximum allowed expiration in seconds (default: 2592000, memcached's 30-day relative-time boundary). Values above this throw. `0` (no expiration) is always allowed. Raise this if you need to pass absolute Unix timestamps as expirations.
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
@@ -247,6 +248,9 @@ Get or set the maximum allowed key size in characters (default: 250). Memcache p
 
 ### `maxValueSize: number`
 Get or set the maximum allowed value size in bytes (default: 1048576). Writes (`set`, `add`, `replace`, `append`, `prepend`, `cas`) throw when the encoded value exceeds this limit. Raise it if your memcached server is started with a larger `-I` item size.
+
+### `maxExpiration: number`
+Get or set the maximum allowed expiration in seconds (default: 2592000). Writes that accept an expiration (`set`, `add`, `replace`, `cas`, `touch`) throw when `exptime` exceeds this limit. `0` (no expiration) is always allowed. Memcached treats any `exptime` greater than 2592000 as an absolute Unix timestamp, so the default guards against accidentally setting a TTL that memcached interprets as "already expired." Raise this if you need to pass Unix timestamps.
 
 ### `lazyConnect: boolean` (readonly)
 Whether nodes defer connecting until the first command is executed (default: true).
