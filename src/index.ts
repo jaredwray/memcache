@@ -785,10 +785,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		this.validateExpiration(exptime);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
+		const command = `cas ${key} ${flags} ${sanitizedExptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -830,9 +830,9 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		this.validateExpiration(exptime);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const bytes = this.validateValue(value);
-		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${value}`;
+		const command = `set ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${value}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -866,10 +866,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		this.validateExpiration(exptime);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
+		const command = `add ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -903,10 +903,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		this.validateExpiration(exptime);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
+		const command = `replace ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -1078,10 +1078,13 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
-		this.validateExpiration(exptime);
+		const sanitizedExptime = this.validateExpiration(exptime);
 
 		const nodes = await this.getNodesByKey(key);
-		const results = await this.execute(`touch ${key} ${exptime}`, nodes);
+		const results = await this.execute(
+			`touch ${key} ${sanitizedExptime}`,
+			nodes,
+		);
 		const success = allResultsEqual(results, "TOUCHED");
 
 		if (this._hasHooks) {
@@ -1351,24 +1354,34 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Validates a Memcache expiration time against `maxExpiration`. `0` (no expiration)
-	 * is always allowed; any other value exceeding the limit throws.
+	 * Validates a Memcache expiration time against `maxExpiration` and returns a
+	 * sanitized integer value suitable for the wire protocol. Non-finite inputs
+	 * (e.g. NaN) and negative values are coerced to `0` (no expiration);
+	 * fractional values are floored. `0` is always allowed; any sanitized value
+	 * exceeding the limit throws.
 	 * @param {number} exptime - The expiration time in seconds
-	 * @throws {Error} If the expiration exceeds `maxExpiration` seconds
+	 * @returns {number} The sanitized expiration time in seconds
+	 * @throws {Error} If the sanitized expiration exceeds `maxExpiration` seconds
 	 *
 	 * @example
 	 * ```typescript
-	 * client.validateExpiration(60); // OK
-	 * client.validateExpiration(0); // OK (no expiration)
+	 * client.validateExpiration(60); // returns 60
+	 * client.validateExpiration(0); // returns 0 (no expiration)
+	 * client.validateExpiration(1.9); // returns 1
+	 * client.validateExpiration(Number.NaN); // returns 0
 	 * client.validateExpiration(2592001); // Throws: Expiration cannot exceed 2592000 seconds
 	 * ```
 	 */
-	public validateExpiration(exptime: number): void {
-		if (exptime !== 0 && exptime > this._maxExpiration) {
+	public validateExpiration(exptime: number): number {
+		const sanitized = Math.floor(
+			Number.isFinite(exptime) ? Math.max(0, exptime) : 0,
+		);
+		if (sanitized !== 0 && sanitized > this._maxExpiration) {
 			throw new Error(
 				`Expiration cannot exceed ${this._maxExpiration} seconds`,
 			);
 		}
+		return sanitized;
 	}
 
 	// Private methods

@@ -997,7 +997,40 @@ describe("Memcache", () => {
 
 		it("should always allow exptime 0 (no expiration)", () => {
 			client.maxExpiration = 10;
-			expect(() => client.validateExpiration(0)).not.toThrow();
+			expect(client.validateExpiration(0)).toBe(0);
+		});
+
+		it("should return the sanitized exptime for valid inputs", () => {
+			expect(client.validateExpiration(60)).toBe(60);
+			expect(client.validateExpiration(client.maxExpiration)).toBe(
+				client.maxExpiration,
+			);
+		});
+
+		it("should floor fractional exptime values", () => {
+			expect(client.validateExpiration(1.9)).toBe(1);
+			expect(client.validateExpiration(60.5)).toBe(60);
+		});
+
+		it("should clamp negative exptime values to 0", () => {
+			expect(client.validateExpiration(-1)).toBe(0);
+			expect(client.validateExpiration(-9999)).toBe(0);
+		});
+
+		it("should coerce NaN and non-finite exptime to 0", () => {
+			expect(client.validateExpiration(Number.NaN)).toBe(0);
+			expect(client.validateExpiration(Number.POSITIVE_INFINITY)).toBe(0);
+			expect(client.validateExpiration(Number.NEGATIVE_INFINITY)).toBe(0);
+		});
+
+		it("should compare against maxExpiration after sanitization", () => {
+			client.maxExpiration = 60;
+			// Floors to 60 — within limit
+			expect(client.validateExpiration(60.9)).toBe(60);
+			// Floors to 61 — over limit
+			expect(() => client.validateExpiration(61.2)).toThrow(
+				"Expiration cannot exceed 60 seconds",
+			);
 		});
 
 		it("should throw on set when exptime exceeds maxExpiration", async () => {
