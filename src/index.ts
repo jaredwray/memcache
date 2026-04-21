@@ -73,6 +73,7 @@ export class Memcache extends Hookified {
 	private readonly _lazyConnect: boolean;
 	private _maxKeySize: number;
 	private _maxValueSize: number;
+	private _maxExpiration: number;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -91,6 +92,7 @@ export class Memcache extends Hookified {
 			this._lazyConnect = true;
 			this._maxKeySize = 250;
 			this._maxValueSize = 1048576;
+			this._maxExpiration = 2592000;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -118,6 +120,14 @@ export class Memcache extends Hookified {
 					Number.isFinite(options?.maxValueSize)
 						? (options?.maxValueSize as number)
 						: 1048576,
+				),
+			);
+			this._maxExpiration = Math.max(
+				0,
+				Math.floor(
+					Number.isFinite(options?.maxExpiration)
+						? (options?.maxExpiration as number)
+						: 2592000,
 				),
 			);
 			this._autoDiscoverOptions = options?.autoDiscover;
@@ -242,6 +252,29 @@ export class Memcache extends Hookified {
 	 */
 	public set maxValueSize(value: number) {
 		this._maxValueSize = Math.max(
+			0,
+			Math.floor(Number.isFinite(value) ? value : 0),
+		);
+	}
+
+	/**
+	 * Get the maximum allowed expiration time (in seconds).
+	 * @returns {number}
+	 * @default 2592000
+	 */
+	public get maxExpiration(): number {
+		return this._maxExpiration;
+	}
+
+	/**
+	 * Set the maximum allowed expiration time (in seconds). Memcached treats values
+	 * greater than 2592000 (30 days) as absolute Unix timestamps. `0` (no expiration)
+	 * is always allowed regardless of this limit.
+	 * @param {number} value
+	 * @default 2592000
+	 */
+	public set maxExpiration(value: number) {
+		this._maxExpiration = Math.max(
 			0,
 			Math.floor(Number.isFinite(value) ? value : 0),
 		);
@@ -752,9 +785,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `cas ${key} ${flags} ${exptime} ${bytes} ${casToken}\r\n${valueStr}`;
+		const command = `cas ${key} ${flags} ${sanitizedExptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -796,8 +830,9 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const bytes = this.validateValue(value);
-		const command = `set ${key} ${flags} ${exptime} ${bytes}\r\n${value}`;
+		const command = `set ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${value}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -831,9 +866,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `add ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
+		const command = `add ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -867,9 +903,10 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
+		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `replace ${key} ${flags} ${exptime} ${bytes}\r\n${valueStr}`;
+		const command = `replace ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
 		const nodes = await this.getNodesByKey(key);
 		const results = await this.execute(command, nodes);
@@ -1041,9 +1078,13 @@ export class Memcache extends Hookified {
 		}
 
 		this.validateKey(key);
+		const sanitizedExptime = this.validateExpiration(exptime);
 
 		const nodes = await this.getNodesByKey(key);
-		const results = await this.execute(`touch ${key} ${exptime}`, nodes);
+		const results = await this.execute(
+			`touch ${key} ${sanitizedExptime}`,
+			nodes,
+		);
 		const success = allResultsEqual(results, "TOUCHED");
 
 		if (this._hasHooks) {
@@ -1310,6 +1351,37 @@ export class Memcache extends Hookified {
 			throw new Error(`Value size cannot exceed ${this._maxValueSize} bytes`);
 		}
 		return bytes;
+	}
+
+	/**
+	 * Validates a Memcache expiration time against `maxExpiration` and returns a
+	 * sanitized integer value suitable for the wire protocol. Non-finite inputs
+	 * (e.g. NaN) and negative values are coerced to `0` (no expiration);
+	 * fractional values are floored. `0` is always allowed; any sanitized value
+	 * exceeding the limit throws.
+	 * @param {number} exptime - The expiration time in seconds
+	 * @returns {number} The sanitized expiration time in seconds
+	 * @throws {Error} If the sanitized expiration exceeds `maxExpiration` seconds
+	 *
+	 * @example
+	 * ```typescript
+	 * client.validateExpiration(60); // returns 60
+	 * client.validateExpiration(0); // returns 0 (no expiration)
+	 * client.validateExpiration(1.9); // returns 1
+	 * client.validateExpiration(Number.NaN); // returns 0
+	 * client.validateExpiration(2592001); // Throws: Expiration cannot exceed 2592000 seconds
+	 * ```
+	 */
+	public validateExpiration(exptime: number): number {
+		const sanitized = Math.floor(
+			Number.isFinite(exptime) ? Math.max(0, exptime) : 0,
+		);
+		if (sanitized !== 0 && sanitized > this._maxExpiration) {
+			throw new Error(
+				`Expiration cannot exceed ${this._maxExpiration} seconds`,
+			);
+		}
+		return sanitized;
 	}
 
 	// Private methods
