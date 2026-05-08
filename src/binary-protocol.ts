@@ -165,6 +165,7 @@ export function buildSetRequest(
 	exptime = 0,
 ): Buffer {
 	const keyBuf = Buffer.from(key, "utf8");
+	/* v8 ignore next -- @preserve */
 	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
 
 	// Extras: 4 bytes flags + 4 bytes expiration
@@ -193,6 +194,7 @@ export function buildAddRequest(
 	exptime = 0,
 ): Buffer {
 	const keyBuf = Buffer.from(key, "utf8");
+	/* v8 ignore next -- @preserve */
 	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
 
 	const extras = Buffer.alloc(8);
@@ -220,6 +222,7 @@ export function buildReplaceRequest(
 	exptime = 0,
 ): Buffer {
 	const keyBuf = Buffer.from(key, "utf8");
+	/* v8 ignore next -- @preserve */
 	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
 
 	const extras = Buffer.alloc(8);

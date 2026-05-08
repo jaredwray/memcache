@@ -486,6 +486,24 @@ describe("KetamaHash", () => {
 			// Heavy node should handle more keys than light node
 			expect(heavyCount).toBeGreaterThan(lightCount);
 		});
+
+		it("should evict cache once it exceeds the bounded size", () => {
+			const distribution = new KetamaHash();
+			distribution.addNode(new MemcacheNode("localhost", 11211));
+
+			// CACHE_MAX in ketama.ts is 5000 — fill it past the threshold.
+			// On the entry that crosses CACHE_MAX, the cache is cleared before
+			// inserting, leaving a single entry.
+			const CACHE_MAX = 5000;
+			for (let i = 0; i <= CACHE_MAX; i++) {
+				distribution.getNodesByKey(`evict-key-${i}`);
+			}
+
+			const cache = (
+				distribution as unknown as { _cache: Map<string, unknown> }
+			)._cache;
+			expect(cache.size).toBe(1);
+		});
 	});
 
 	describe("integration", () => {

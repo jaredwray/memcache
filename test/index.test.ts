@@ -3409,6 +3409,137 @@ describe("Memcache", () => {
 
 			await multiNodeClient.disconnect();
 		});
+
+		it("should fallback to replica nodes on gets when primary misses", async () => {
+			const multiNodeClient = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+			});
+			await multiNodeClient.connect();
+
+			const [primaryNode, replicaNode] = multiNodeClient.nodes;
+
+			const key = generateKey("gets-replica");
+			const value = generateValue();
+
+			// Make sure key only exists on replica
+			await primaryNode.command(`delete ${key}`).catch(() => undefined);
+			await replicaNode.command(
+				`set ${key} 0 0 ${Buffer.byteLength(value)}\r\n${value}`,
+			);
+
+			// Force gets() to route to primary first, then fallback to replica
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(() => [
+				primaryNode,
+				replicaNode,
+			]);
+
+			const result = await multiNodeClient.gets([key]);
+			expect(result.get(key)).toBe(value);
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should return primary result and replica fallback for mixed gets", async () => {
+			const multiNodeClient = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+			});
+			await multiNodeClient.connect();
+
+			const [primaryNode, replicaNode] = multiNodeClient.nodes;
+
+			const primaryKey = generateKey("gets-primary-hit");
+			const replicaKey = generateKey("gets-replica-only");
+			const primaryValue = generateValue();
+			const replicaValue = generateValue();
+
+			// Primary has primaryKey only; replica has replicaKey only
+			await primaryNode.command(
+				`set ${primaryKey} 0 0 ${Buffer.byteLength(primaryValue)}\r\n${primaryValue}`,
+			);
+			await primaryNode.command(`delete ${replicaKey}`).catch(() => undefined);
+			await replicaNode.command(`delete ${primaryKey}`).catch(() => undefined);
+			await replicaNode.command(
+				`set ${replicaKey} 0 0 ${Buffer.byteLength(replicaValue)}\r\n${replicaValue}`,
+			);
+
+			// Both keys route to the same primary with the same replica list,
+			// so the multi-key code path tracks replicas + missing keys correctly
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(() => [
+				primaryNode,
+				replicaNode,
+			]);
+
+			const result = await multiNodeClient.gets([primaryKey, replicaKey]);
+			expect(result.get(primaryKey)).toBe(primaryValue);
+			expect(result.get(replicaKey)).toBe(replicaValue);
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should leave key missing when no replica has the value", async () => {
+			const multiNodeClient = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+			});
+			await multiNodeClient.connect();
+
+			const [primaryNode, replicaNode] = multiNodeClient.nodes;
+
+			const key = generateKey("gets-replica-miss");
+
+			// Ensure key exists on neither node
+			await primaryNode.command(`delete ${key}`).catch(() => undefined);
+			await replicaNode.command(`delete ${key}`).catch(() => undefined);
+
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(() => [
+				primaryNode,
+				replicaNode,
+			]);
+
+			const result = await multiNodeClient.gets([key]);
+			expect(result.has(key)).toBe(false);
+
+			await multiNodeClient.disconnect();
+		});
+
+		it("should try next replica when first replica throws on gets", async () => {
+			const multiNodeClient = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212", "localhost:11213"],
+			});
+			await multiNodeClient.connect();
+
+			const [primaryNode, failingReplica, goodReplica] = multiNodeClient.nodes;
+
+			const key = generateKey("gets-replica-throw");
+			const value = generateValue();
+
+			await primaryNode.command(`delete ${key}`).catch(() => undefined);
+			await failingReplica.command(`delete ${key}`).catch(() => undefined);
+			await goodReplica.command(
+				`set ${key} 0 0 ${Buffer.byteLength(value)}\r\n${value}`,
+			);
+
+			// Force first replica to throw to exercise the catch / next-replica path
+			const originalCommand = failingReplica.command.bind(failingReplica);
+			vi.spyOn(failingReplica, "command").mockImplementation(
+				async (cmd: string, options?: any) => {
+					if (cmd.startsWith("get ")) {
+						throw new Error("Simulated replica failure");
+					}
+					return originalCommand(cmd, options);
+				},
+			);
+
+			vi.spyOn(multiNodeClient.hash, "getNodesByKey").mockImplementation(() => [
+				primaryNode,
+				failingReplica,
+				goodReplica,
+			]);
+
+			const result = await multiNodeClient.gets([key]);
+			expect(result.get(key)).toBe(value);
+
+			await multiNodeClient.disconnect();
+		});
 	});
 
 	describe("Exports", () => {

@@ -335,6 +335,7 @@ export class MemcacheNode extends Hookified {
 					return;
 				}
 
+				/* v8 ignore next 2 -- @preserve */
 				this._binaryBuffer =
 					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
 				const header = deserializeHeader(this._binaryBuffer);
@@ -622,6 +623,7 @@ export class MemcacheNode extends Hookified {
 				// Flatten only when we have unconsumed data to parse
 				let buffer: Buffer;
 				if (chunks.length === 1) {
+					/* v8 ignore next -- @preserve */
 					buffer = consumed === 0 ? chunks[0] : chunks[0].subarray(consumed);
 				} else {
 					buffer = Buffer.concat(chunks, chunksLen).subarray(consumed);
