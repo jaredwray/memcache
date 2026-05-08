@@ -4,6 +4,7 @@ import Memcache, {
 	createNode,
 	defaultRetryBackoff,
 	exponentialRetryBackoff,
+	Hashery,
 	MemcacheEvents,
 	ModulaHash,
 	type RetryBackoffFunction,
@@ -837,6 +838,191 @@ describe("Memcache", () => {
 			expect(() => client.validateKey("abcdef")).toThrow(
 				"Key length cannot exceed 5 characters",
 			);
+		});
+	});
+
+	describe("hashLargeKey", () => {
+		it("should default hashLargeKey to false", () => {
+			expect(client.hashLargeKey).toBe(false);
+		});
+
+		it("should default hashLargeKey to false for string-param constructor", () => {
+			const stringClient = new Memcache("localhost:11211");
+			expect(stringClient.hashLargeKey).toBe(false);
+		});
+
+		it("should honor hashLargeKey passed via constructor options", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			expect(customClient.hashLargeKey).toBe(true);
+		});
+
+		it("should honor hashLargeKey updated via setter", () => {
+			client.hashLargeKey = true;
+			expect(client.hashLargeKey).toBe(true);
+			client.hashLargeKey = false;
+			expect(client.hashLargeKey).toBe(false);
+		});
+
+		it("should return the original key from resolveKey when hashLargeKey is false", () => {
+			const longKey = "a".repeat(300);
+			expect(client.hashLargeKey).toBe(false);
+			expect(client.resolveKey(longKey)).toBe(longKey);
+		});
+
+		it("should return the original key from resolveKey when key length is within maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const shortKey = "short-key";
+			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
+		});
+
+		it("should return original key when key length exactly equals maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const exactKey = "a".repeat(customClient.maxKeySize);
+			expect(customClient.resolveKey(exactKey)).toBe(exactKey);
+		});
+
+		it("should return djb2 hashed key when hashLargeKey is true and key exceeds maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const longKey = "a".repeat(300);
+			const hashed = customClient.resolveKey(longKey);
+			expect(hashed).not.toBe(longKey);
+			expect(hashed.length).toBeLessThanOrEqual(customClient.maxKeySize);
+			// djb2 produces 8-character hex strings
+			expect(hashed).toMatch(/^[0-9a-f]{1,8}$/);
+		});
+
+		it("should produce deterministic hashes (same key always produces same hash)", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const longKey = "a".repeat(300);
+			const hash1 = customClient.resolveKey(longKey);
+			const hash2 = customClient.resolveKey(longKey);
+			expect(hash1).toBe(hash2);
+		});
+
+		it("should produce different hashes for different keys", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const key1 = "a".repeat(300);
+			const key2 = "b".repeat(300);
+			expect(customClient.resolveKey(key1)).not.toBe(
+				customClient.resolveKey(key2),
+			);
+		});
+
+		it("should not throw on get when key exceeds maxKeySize and hashLargeKey is true", async () => {
+			const customClient = new Memcache({
+				hashLargeKey: true,
+				timeout: 100,
+			});
+			const longKey = "a".repeat(300);
+			// validateKey should not throw because the key is hashed before validation
+			// Actual network call may fail (no server), but we only verify no key-length error
+			try {
+				await customClient.get(longKey);
+			} catch (err) {
+				expect((err as Error).message).not.toContain(
+					"Key length cannot exceed",
+				);
+			}
+			await customClient.disconnect();
+		});
+
+		it("should still throw on get when key exceeds maxKeySize and hashLargeKey is false", async () => {
+			const longKey = "a".repeat(300);
+			await expect(client.get(longKey)).rejects.toThrow(
+				"Key length cannot exceed 250 characters",
+			);
+		});
+
+		it("should respect a custom maxKeySize when deciding to hash", () => {
+			const customClient = new Memcache({
+				hashLargeKey: true,
+				maxKeySize: 16,
+			});
+			const shortKey = "a".repeat(16);
+			const longKey = "a".repeat(17);
+			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
+			expect(customClient.resolveKey(longKey)).not.toBe(longKey);
+		});
+
+		describe("Hashery integration", () => {
+			it("exposes a default Hashery instance even when hashLargeKey is false", () => {
+				expect(client.hashery).toBeInstanceOf(Hashery);
+				expect(client.hashLargeKey).toBe(false);
+			});
+
+			it("exposes a default Hashery instance for the string-arg constructor", () => {
+				const stringClient = new Memcache("localhost:11211");
+				expect(stringClient.hashery).toBeInstanceOf(Hashery);
+			});
+
+			it("accepts true and creates a default Hashery", () => {
+				const c = new Memcache({ hashLargeKey: true });
+				expect(c.hashLargeKey).toBe(true);
+				expect(c.hashery).toBeInstanceOf(Hashery);
+			});
+
+			it("accepts a custom Hashery instance and enables hashing", () => {
+				const custom = new Hashery();
+				const c = new Memcache({ hashLargeKey: custom });
+				expect(c.hashLargeKey).toBe(true);
+				expect(c.hashery).toBe(custom);
+			});
+
+			it("respects defaultAlgorithmSync on the supplied Hashery", () => {
+				const longKey = "a".repeat(300);
+				const djb2Client = new Memcache({ hashLargeKey: true });
+				const fnv1Hashery = new Hashery({ defaultAlgorithmSync: "fnv1" });
+				const fnv1Client = new Memcache({ hashLargeKey: fnv1Hashery });
+				expect(djb2Client.resolveKey(longKey)).not.toBe(
+					fnv1Client.resolveKey(longKey),
+				);
+			});
+
+			it("uses the algorithm currently configured on the Hashery (mutable)", () => {
+				const longKey = "a".repeat(300);
+				const c = new Memcache({ hashLargeKey: true });
+				const djb2Hash = c.resolveKey(longKey);
+				c.hashery.defaultAlgorithmSync = "fnv1";
+				const fnv1Hash = c.resolveKey(longKey);
+				expect(djb2Hash).not.toBe(fnv1Hash);
+			});
+
+			it("allows swapping the Hashery via the setter", () => {
+				const c = new Memcache({ hashLargeKey: true });
+				const replacement = new Hashery({ defaultAlgorithmSync: "murmur" });
+				c.hashery = replacement;
+				expect(c.hashery).toBe(replacement);
+			});
+		});
+
+		it("gets should return values for all original keys when resolved keys collide", async () => {
+			// djb2 collisions are rare but possible; force one by overriding
+			// resolveKey so two distinct long inputs map to the same wire key.
+			const customClient = new Memcache({ hashLargeKey: true });
+			await customClient.connect();
+
+			const longKeyA = `${generateKey("collide-a")}-${"x".repeat(260)}`;
+			const longKeyB = `${generateKey("collide-b")}-${"y".repeat(260)}`;
+			const sharedHash = generateKey("shared");
+
+			const originalResolveKey = customClient.resolveKey.bind(customClient);
+			customClient.resolveKey = (key: string) => {
+				if (key === longKeyA || key === longKeyB) return sharedHash;
+				return originalResolveKey(key);
+			};
+
+			try {
+				const value = generateValue();
+				await customClient.set(longKeyA, value);
+
+				const results = await customClient.gets([longKeyA, longKeyB]);
+				expect(results.get(longKeyA)).toBe(value);
+				expect(results.get(longKeyB)).toBe(value);
+				expect(results.size).toBe(2);
+			} finally {
+				await customClient.delete(longKeyA);
+				await customClient.disconnect();
+			}
 		});
 	});
 
