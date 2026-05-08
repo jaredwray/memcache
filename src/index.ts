@@ -716,10 +716,7 @@ export class Memcache extends Hookified {
 		for (const { nodeKeys, result } of results) {
 			if (result?.foundKeys && result.values) {
 				for (let i = 0; i < result.foundKeys.length; i++) {
-					/* v8 ignore next -- @preserve */
-					if (result.values[i] !== undefined) {
-						map.set(result.foundKeys[i], result.values[i]);
-					}
+					map.set(result.foundKeys[i], result.values[i]);
 				}
 			}
 

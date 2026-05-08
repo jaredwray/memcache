@@ -623,8 +623,7 @@ export class MemcacheNode extends Hookified {
 				// Flatten only when we have unconsumed data to parse
 				let buffer: Buffer;
 				if (chunks.length === 1) {
-					/* v8 ignore next -- @preserve */
-					buffer = consumed === 0 ? chunks[0] : chunks[0].subarray(consumed);
+					buffer = chunks[0];
 				} else {
 					buffer = Buffer.concat(chunks, chunksLen).subarray(consumed);
 					// Replace queue with single consolidated buffer
