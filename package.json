@@ -67,6 +67,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "hashery": "^2.0.0",
     "hookified": "^2.2.0"
   },
   "files": [

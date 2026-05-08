@@ -1,3 +1,4 @@
+import { DJB2 } from "hashery";
 import { Hookified } from "hookified";
 import { AutoDiscovery } from "./auto-discovery.js";
 import { BroadcastHash } from "./broadcast.js";
@@ -48,6 +49,10 @@ export const exponentialRetryBackoff: RetryBackoffFunction = (
 // Pre-compiled regex for key validation (avoid re-compiling per call)
 const KEY_INVALID_CHARS = /[\s\r\n\0]/;
 
+// Shared djb2 hasher and encoder used when hashLargeKey is enabled
+const djb2Hasher = new DJB2();
+const keyEncoder = new TextEncoder();
+
 /**
  * Check if all results match an expected value.
  * Fast-paths single-element arrays to avoid .every() overhead.
@@ -74,6 +79,7 @@ export class Memcache extends Hookified {
 	private _maxKeySize: number;
 	private _maxValueSize: number;
 	private _maxExpiration: number;
+	private _hashLargeKey: boolean;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -93,6 +99,7 @@ export class Memcache extends Hookified {
 			this._maxKeySize = 250;
 			this._maxValueSize = 1048576;
 			this._maxExpiration = 2592000;
+			this._hashLargeKey = false;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -130,6 +137,7 @@ export class Memcache extends Hookified {
 						: 2592000,
 				),
 			);
+			this._hashLargeKey = options?.hashLargeKey ?? false;
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -234,6 +242,26 @@ export class Memcache extends Hookified {
 			0,
 			Math.floor(Number.isFinite(value) ? value : 0),
 		);
+	}
+
+	/**
+	 * Whether keys exceeding `maxKeySize` are hashed with djb2 instead of throwing.
+	 * @returns {boolean}
+	 * @default false
+	 */
+	public get hashLargeKey(): boolean {
+		return this._hashLargeKey;
+	}
+
+	/**
+	 * Enable or disable djb2 hashing of keys that exceed `maxKeySize`.
+	 * When true, oversized keys are deterministically hashed before validation.
+	 * When false, oversized keys throw a validation error.
+	 * @param {boolean} value
+	 * @default false
+	 */
+	public set hashLargeKey(value: boolean) {
+		this._hashLargeKey = value;
 	}
 
 	/**
@@ -614,12 +642,13 @@ export class Memcache extends Hookified {
 			await this.beforeHook("get", { key });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const commandOptions = {
 			isMultiline: true,
-			requestedKeys: [key],
+			requestedKeys: [resolvedKey],
 		};
 
 		let value: string | undefined;
@@ -627,7 +656,7 @@ export class Memcache extends Hookified {
 		// Primary-first strategy: try nodes sequentially, fall back on failure
 		for (const node of nodes) {
 			try {
-				const result = await node.command(`get ${key}`, commandOptions);
+				const result = await node.command(`get ${resolvedKey}`, commandOptions);
 
 				if (result?.values && result.values.length > 0) {
 					value = result.values[0];
@@ -657,20 +686,28 @@ export class Memcache extends Hookified {
 			await this.beforeHook("gets", { keys });
 		}
 
-		// Validate all keys
-		for (const key of keys) {
-			this.validateKey(key);
+		// Resolve and validate all keys, tracking the mapping so results can be
+		// returned keyed by the original (unresolved) key.
+		const resolvedKeys: string[] = new Array(keys.length);
+		const originalByResolved = new Map<string, string>();
+		for (let i = 0; i < keys.length; i++) {
+			const resolved = this.resolveKey(keys[i]);
+			this.validateKey(resolved);
+			resolvedKeys[i] = resolved;
+			originalByResolved.set(resolved, keys[i]);
 		}
 
-		// Group keys by primary node (first node returned by hash provider)
+		// Group resolved keys by primary node (first node returned by hash provider)
 		const keysByNode = new Map<MemcacheNode, string[]>();
 		const keyToReplicas = new Map<string, MemcacheNode[]>();
 
-		for (const key of keys) {
-			const nodes = this._hash.getNodesByKey(key);
-			/* v8 ignore next 3 -- @preserve */
+		for (const resolvedKey of resolvedKeys) {
+			const nodes = this._hash.getNodesByKey(resolvedKey);
+			/* v8 ignore next 4 -- @preserve */
 			if (nodes.length === 0) {
-				throw new Error(`No node available for key: ${key}`);
+				// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalByResolved
+				const originalKey = originalByResolved.get(resolvedKey)!;
+				throw new Error(`No node available for key: ${originalKey}`);
 			}
 
 			// Route to primary node (first in list)
@@ -679,17 +716,17 @@ export class Memcache extends Hookified {
 				keysByNode.set(primary, []);
 			}
 			// biome-ignore lint/style/noNonNullAssertion: we just set it
-			keysByNode.get(primary)!.push(key);
+			keysByNode.get(primary)!.push(resolvedKey);
 
 			// Track replicas for fallback
 			if (nodes.length > 1) {
-				keyToReplicas.set(key, nodes.slice(1));
+				keyToReplicas.set(resolvedKey, nodes.slice(1));
 			}
 		}
 
 		// Query primary nodes in parallel
 		const map = new Map<string, string>();
-		const missingKeys: string[] = [];
+		const missingResolvedKeys: string[] = [];
 
 		const promises = Array.from(keysByNode.entries()).map(
 			async ([node, nodeKeys]) => {
@@ -712,25 +749,30 @@ export class Memcache extends Hookified {
 
 		const results = await Promise.all(promises);
 
-		// Collect results and track misses for fallback
+		// Collect results (keyed by original) and track misses for fallback
 		for (const { nodeKeys, result } of results) {
 			if (result?.foundKeys && result.values) {
 				for (let i = 0; i < result.foundKeys.length; i++) {
-					map.set(result.foundKeys[i], result.values[i]);
+					const foundResolved = result.foundKeys[i];
+					// biome-ignore lint/style/noNonNullAssertion: foundResolved was in resolvedKeys we sent
+					const originalKey = originalByResolved.get(foundResolved)!;
+					map.set(originalKey, result.values[i]);
 				}
 			}
 
 			// Find keys that failed or weren't found
-			for (const key of nodeKeys) {
-				if (!map.has(key) && keyToReplicas.has(key)) {
-					missingKeys.push(key);
+			for (const resolvedKey of nodeKeys) {
+				// biome-ignore lint/style/noNonNullAssertion: nodeKeys are a subset of resolvedKeys
+				const originalKey = originalByResolved.get(resolvedKey)!;
+				if (!map.has(originalKey) && keyToReplicas.has(resolvedKey)) {
+					missingResolvedKeys.push(resolvedKey);
 				}
 			}
 		}
 
 		// Fallback to replicas for missing keys (primary-first strategy)
-		for (const key of missingKeys) {
-			const replicas = keyToReplicas.get(key);
+		for (const resolvedKey of missingResolvedKeys) {
+			const replicas = keyToReplicas.get(resolvedKey);
 			/* v8 ignore next -- @preserve */
 			if (!replicas) continue;
 
@@ -739,13 +781,15 @@ export class Memcache extends Hookified {
 					/* v8 ignore next -- @preserve */
 					if (!replica.isConnected()) await replica.connect();
 
-					const result = await replica.command(`get ${key}`, {
+					const result = await replica.command(`get ${resolvedKey}`, {
 						isMultiline: true,
-						requestedKeys: [key],
+						requestedKeys: [resolvedKey],
 					});
 
 					if (result?.values && result.values.length > 0) {
-						map.set(key, result.values[0]);
+						// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalByResolved
+						const originalKey = originalByResolved.get(resolvedKey)!;
+						map.set(originalKey, result.values[0]);
 						break;
 					}
 				} catch {
@@ -783,13 +827,14 @@ export class Memcache extends Hookified {
 			await this.beforeHook("cas", { key, value, casToken, exptime, flags });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `cas ${key} ${flags} ${sanitizedExptime} ${bytes} ${casToken}\r\n${valueStr}`;
+		const command = `cas ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes} ${casToken}\r\n${valueStr}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -828,12 +873,13 @@ export class Memcache extends Hookified {
 			await this.beforeHook("set", { key, value, exptime, flags });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const bytes = this.validateValue(value);
-		const command = `set ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${value}`;
+		const command = `set ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${value}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -864,13 +910,14 @@ export class Memcache extends Hookified {
 			await this.beforeHook("add", { key, value, exptime, flags });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `add ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
+		const command = `add ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -901,13 +948,14 @@ export class Memcache extends Hookified {
 			await this.beforeHook("replace", { key, value, exptime, flags });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `replace ${key} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
+		const command = `replace ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -931,12 +979,13 @@ export class Memcache extends Hookified {
 			await this.beforeHook("append", { key, value });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `append ${key} 0 0 ${bytes}\r\n${valueStr}`;
+		const command = `append ${resolvedKey} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -960,12 +1009,13 @@ export class Memcache extends Hookified {
 			await this.beforeHook("prepend", { key, value });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `prepend ${key} 0 0 ${bytes}\r\n${valueStr}`;
+		const command = `prepend ${resolvedKey} 0 0 ${bytes}\r\n${valueStr}`;
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(command, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -988,10 +1038,11 @@ export class Memcache extends Hookified {
 			await this.beforeHook("delete", { key });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(key);
-		const results = await this.execute(`delete ${key}`, nodes);
+		const nodes = await this.getNodesByKey(resolvedKey);
+		const results = await this.execute(`delete ${resolvedKey}`, nodes);
 		const success = allResultsEqual(results, "DELETED");
 
 		if (this._hasHooks) {
@@ -1017,10 +1068,11 @@ export class Memcache extends Hookified {
 			await this.beforeHook("incr", { key, value });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(key);
-		const results = await this.execute(`incr ${key} ${value}`, nodes);
+		const nodes = await this.getNodesByKey(resolvedKey);
+		const results = await this.execute(`incr ${resolvedKey} ${value}`, nodes);
 		const newValue = results.find((v) => typeof v === "number") as
 			| number
 			| undefined;
@@ -1048,10 +1100,11 @@ export class Memcache extends Hookified {
 			await this.beforeHook("decr", { key, value });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(key);
-		const results = await this.execute(`decr ${key} ${value}`, nodes);
+		const nodes = await this.getNodesByKey(resolvedKey);
+		const results = await this.execute(`decr ${resolvedKey} ${value}`, nodes);
 		const newValue = results.find((v) => typeof v === "number") as
 			| number
 			| undefined;
@@ -1076,12 +1129,13 @@ export class Memcache extends Hookified {
 			await this.beforeHook("touch", { key, exptime });
 		}
 
-		this.validateKey(key);
+		const resolvedKey = this.resolveKey(key);
+		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 
-		const nodes = await this.getNodesByKey(key);
+		const nodes = await this.getNodesByKey(resolvedKey);
 		const results = await this.execute(
-			`touch ${key} ${sanitizedExptime}`,
+			`touch ${resolvedKey} ${sanitizedExptime}`,
 			nodes,
 		);
 		const success = allResultsEqual(results, "TOUCHED");
@@ -1296,6 +1350,28 @@ export class Memcache extends Hookified {
 		});
 
 		return Promise.all(promises);
+	}
+
+	/**
+	 * Resolves a key for transmission to the memcache server. When `hashLargeKey`
+	 * is true and the key length exceeds `maxKeySize`, the key is replaced with a
+	 * djb2 hex digest (via the `hashery` library) so it fits within the limit.
+	 * Otherwise the original key is returned unchanged.
+	 * @param {string} key - The original cache key
+	 * @returns {string} The key to send to memcache (possibly hashed)
+	 *
+	 * @example
+	 * ```typescript
+	 * const client = new Memcache({ hashLargeKey: true });
+	 * client.resolveKey("a".repeat(300)); // returns 8-char djb2 hex digest
+	 * client.resolveKey("short-key");      // returns "short-key"
+	 * ```
+	 */
+	public resolveKey(key: string): string {
+		if (this._hashLargeKey && key.length > this._maxKeySize) {
+			return djb2Hasher.toHashSync(keyEncoder.encode(key));
+		}
+		return key;
 	}
 
 	/**

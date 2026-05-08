@@ -840,6 +840,110 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("hashLargeKey", () => {
+		it("should default hashLargeKey to false", () => {
+			expect(client.hashLargeKey).toBe(false);
+		});
+
+		it("should default hashLargeKey to false for string-param constructor", () => {
+			const stringClient = new Memcache("localhost:11211");
+			expect(stringClient.hashLargeKey).toBe(false);
+		});
+
+		it("should honor hashLargeKey passed via constructor options", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			expect(customClient.hashLargeKey).toBe(true);
+		});
+
+		it("should honor hashLargeKey updated via setter", () => {
+			client.hashLargeKey = true;
+			expect(client.hashLargeKey).toBe(true);
+			client.hashLargeKey = false;
+			expect(client.hashLargeKey).toBe(false);
+		});
+
+		it("should return the original key from resolveKey when hashLargeKey is false", () => {
+			const longKey = "a".repeat(300);
+			expect(client.hashLargeKey).toBe(false);
+			expect(client.resolveKey(longKey)).toBe(longKey);
+		});
+
+		it("should return the original key from resolveKey when key length is within maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const shortKey = "short-key";
+			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
+		});
+
+		it("should return original key when key length exactly equals maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const exactKey = "a".repeat(customClient.maxKeySize);
+			expect(customClient.resolveKey(exactKey)).toBe(exactKey);
+		});
+
+		it("should return djb2 hashed key when hashLargeKey is true and key exceeds maxKeySize", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const longKey = "a".repeat(300);
+			const hashed = customClient.resolveKey(longKey);
+			expect(hashed).not.toBe(longKey);
+			expect(hashed.length).toBeLessThanOrEqual(customClient.maxKeySize);
+			// djb2 produces 8-character hex strings
+			expect(hashed).toMatch(/^[0-9a-f]{1,8}$/);
+		});
+
+		it("should produce deterministic hashes (same key always produces same hash)", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const longKey = "a".repeat(300);
+			const hash1 = customClient.resolveKey(longKey);
+			const hash2 = customClient.resolveKey(longKey);
+			expect(hash1).toBe(hash2);
+		});
+
+		it("should produce different hashes for different keys", () => {
+			const customClient = new Memcache({ hashLargeKey: true });
+			const key1 = "a".repeat(300);
+			const key2 = "b".repeat(300);
+			expect(customClient.resolveKey(key1)).not.toBe(
+				customClient.resolveKey(key2),
+			);
+		});
+
+		it("should not throw on get when key exceeds maxKeySize and hashLargeKey is true", async () => {
+			const customClient = new Memcache({
+				hashLargeKey: true,
+				timeout: 100,
+			});
+			const longKey = "a".repeat(300);
+			// validateKey should not throw because the key is hashed before validation
+			// Actual network call may fail (no server), but we only verify no key-length error
+			try {
+				await customClient.get(longKey);
+			} catch (err) {
+				expect((err as Error).message).not.toContain(
+					"Key length cannot exceed",
+				);
+			}
+			await customClient.disconnect();
+		});
+
+		it("should still throw on get when key exceeds maxKeySize and hashLargeKey is false", async () => {
+			const longKey = "a".repeat(300);
+			await expect(client.get(longKey)).rejects.toThrow(
+				"Key length cannot exceed 250 characters",
+			);
+		});
+
+		it("should respect a custom maxKeySize when deciding to hash", () => {
+			const customClient = new Memcache({
+				hashLargeKey: true,
+				maxKeySize: 16,
+			});
+			const shortKey = "a".repeat(16);
+			const longKey = "a".repeat(17);
+			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
+			expect(customClient.resolveKey(longKey)).not.toBe(longKey);
+		});
+	});
+
 	describe("Value Validation", () => {
 		it("should default maxValueSize to 1048576", () => {
 			expect(client.maxValueSize).toBe(1048576);

@@ -209,6 +209,7 @@ const client = new Memcache({
 - `maxKeySize?: number` - Maximum allowed key size in characters (default: 250, memcache protocol max)
 - `maxValueSize?: number` - Maximum allowed value size in bytes (default: 1048576, memcached default)
 - `maxExpiration?: number` - Maximum allowed expiration in seconds (default: 2592000, memcached's 30-day relative-time boundary). Values above this throw. `0` (no expiration) is always allowed. Raise this if you need to pass absolute Unix timestamps as expirations.
+- `hashLargeKey?: boolean` - When `true`, keys longer than `maxKeySize` are deterministically hashed with djb2 (via the [`hashery`](https://github.com/jaredwray/hashery) library) before being sent to the server, instead of throwing. When `false`, oversized keys throw a validation error (default: false). Note: hashing is one-way and can collide; two distinct long keys could map to the same hashed key.
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
@@ -251,6 +252,16 @@ Get or set the maximum allowed value size in bytes (default: 1048576). Writes (`
 
 ### `maxExpiration: number`
 Get or set the maximum allowed expiration in seconds (default: 2592000). Writes that accept an expiration (`set`, `add`, `replace`, `cas`, `touch`) throw when `exptime` exceeds this limit. `0` (no expiration) is always allowed. Memcached treats any `exptime` greater than 2592000 as an absolute Unix timestamp, so the default guards against accidentally setting a TTL that memcached interprets as "already expired." Raise this if you need to pass Unix timestamps.
+
+### `hashLargeKey: boolean`
+Get or set whether keys exceeding `maxKeySize` are hashed with djb2 instead of throwing (default: false). When enabled, oversized keys are replaced with a short, deterministic djb2 hex digest (via the [`hashery`](https://github.com/jaredwray/hashery) library) before being sent to memcache, so any string length is accepted. The same input always produces the same hashed key, but distinct long keys can collide.
+
+```javascript
+const client = new Memcache({ hashLargeKey: true });
+const longKey = 'user:profile:' + 'x'.repeat(500);
+await client.set(longKey, 'value');     // hashed automatically
+await client.get(longKey);              // same hash, returns 'value'
+```
 
 ### `lazyConnect: boolean` (readonly)
 Whether nodes defer connecting until the first command is executed (default: true).
@@ -363,6 +374,9 @@ Validates a Memcache key according to protocol requirements. Throws error if:
 - Key is empty
 - Key exceeds 250 characters
 - Key contains spaces, newlines, or null characters
+
+### `resolveKey(key: string): string`
+Returns the key that will actually be sent to memcache. When [`hashLargeKey`](#hashlargekey-boolean) is `true` and the key length exceeds `maxKeySize`, returns a djb2 hex digest of the key (8-char hex). Otherwise returns the original key unchanged. Called automatically before `validateKey` in every command, so calling it manually is only needed when you want to inspect the on-wire key.
 
 ## Helper Functions
 

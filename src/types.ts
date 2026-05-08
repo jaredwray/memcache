@@ -133,6 +133,18 @@ export interface MemcacheOptions {
 	maxKeySize?: number;
 
 	/**
+	 * When true, keys whose length exceeds `maxKeySize` are deterministically
+	 * hashed with djb2 (via the `hashery` library) before being sent to the
+	 * server, so long keys do not throw a validation error. When false (default),
+	 * keys exceeding `maxKeySize` throw a validation error.
+	 *
+	 * Note: hashing is one-way and can collide. Two distinct long keys could map
+	 * to the same hashed key.
+	 * @default false
+	 */
+	hashLargeKey?: boolean;
+
+	/**
 	 * The maximum allowed value size in bytes. Memcached default max is 1048576 (1 MiB).
 	 * @default 1048576
 	 */
