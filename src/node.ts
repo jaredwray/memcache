@@ -857,8 +857,13 @@ export class MemcacheNode extends Hookified {
 				if (this._currentCommand.requestedKeys) {
 					this._currentCommand.foundKeys?.push(key);
 				}
-				// Set pending bytes so handleData will read the value
-				this._pendingValueBytes = bytes;
+				if (bytes === 0) {
+					// Empty value: push "" so foundKeys and _multilineData stay
+					// aligned. The trailing \r\n is consumed as an empty line.
+					this._multilineData.push("");
+				} else {
+					this._pendingValueBytes = bytes;
+				}
 			} else if (line === "END") {
 				let result:
 					| string[]

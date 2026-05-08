@@ -1429,6 +1429,23 @@ describe("Memcache", () => {
 			expect(results.has(key3)).toBe(false);
 		});
 
+		it("should return empty string for keys stored with empty value", async () => {
+			await client.connect();
+
+			const emptyKey = generateKey("empty");
+			const fullKey = generateKey("full");
+			const fullValue = generateValue();
+
+			await client.set(emptyKey, "");
+			await client.set(fullKey, fullValue);
+
+			expect(await client.get(emptyKey)).toBe("");
+
+			const results = await client.gets([emptyKey, fullKey]);
+			expect(results.get(emptyKey)).toBe("");
+			expect(results.get(fullKey)).toBe(fullValue);
+		});
+
 		it("should delete a key", async () => {
 			await client.connect();
 			const key = generateKey("delete");
