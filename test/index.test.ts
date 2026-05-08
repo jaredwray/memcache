@@ -4,6 +4,7 @@ import Memcache, {
 	createNode,
 	defaultRetryBackoff,
 	exponentialRetryBackoff,
+	Hashery,
 	MemcacheEvents,
 	ModulaHash,
 	type RetryBackoffFunction,
@@ -941,6 +942,57 @@ describe("Memcache", () => {
 			const longKey = "a".repeat(17);
 			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
 			expect(customClient.resolveKey(longKey)).not.toBe(longKey);
+		});
+
+		describe("Hashery integration", () => {
+			it("exposes a default Hashery instance even when hashLargeKey is false", () => {
+				expect(client.hashery).toBeInstanceOf(Hashery);
+				expect(client.hashLargeKey).toBe(false);
+			});
+
+			it("exposes a default Hashery instance for the string-arg constructor", () => {
+				const stringClient = new Memcache("localhost:11211");
+				expect(stringClient.hashery).toBeInstanceOf(Hashery);
+			});
+
+			it("accepts true and creates a default Hashery", () => {
+				const c = new Memcache({ hashLargeKey: true });
+				expect(c.hashLargeKey).toBe(true);
+				expect(c.hashery).toBeInstanceOf(Hashery);
+			});
+
+			it("accepts a custom Hashery instance and enables hashing", () => {
+				const custom = new Hashery();
+				const c = new Memcache({ hashLargeKey: custom });
+				expect(c.hashLargeKey).toBe(true);
+				expect(c.hashery).toBe(custom);
+			});
+
+			it("respects defaultAlgorithmSync on the supplied Hashery", () => {
+				const longKey = "a".repeat(300);
+				const djb2Client = new Memcache({ hashLargeKey: true });
+				const fnv1Hashery = new Hashery({ defaultAlgorithmSync: "fnv1" });
+				const fnv1Client = new Memcache({ hashLargeKey: fnv1Hashery });
+				expect(djb2Client.resolveKey(longKey)).not.toBe(
+					fnv1Client.resolveKey(longKey),
+				);
+			});
+
+			it("uses the algorithm currently configured on the Hashery (mutable)", () => {
+				const longKey = "a".repeat(300);
+				const c = new Memcache({ hashLargeKey: true });
+				const djb2Hash = c.resolveKey(longKey);
+				c.hashery.defaultAlgorithmSync = "fnv1";
+				const fnv1Hash = c.resolveKey(longKey);
+				expect(djb2Hash).not.toBe(fnv1Hash);
+			});
+
+			it("allows swapping the Hashery via the setter", () => {
+				const c = new Memcache({ hashLargeKey: true });
+				const replacement = new Hashery({ defaultAlgorithmSync: "murmur" });
+				c.hashery = replacement;
+				expect(c.hashery).toBe(replacement);
+			});
 		});
 
 		it("gets should return values for all original keys when resolved keys collide", async () => {

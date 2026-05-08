@@ -1,4 +1,4 @@
-import { DJB2 } from "hashery";
+import { Hashery } from "hashery";
 import { Hookified } from "hookified";
 import { AutoDiscovery } from "./auto-discovery.js";
 import { BroadcastHash } from "./broadcast.js";
@@ -49,9 +49,19 @@ export const exponentialRetryBackoff: RetryBackoffFunction = (
 // Pre-compiled regex for key validation (avoid re-compiling per call)
 const KEY_INVALID_CHARS = /[\s\r\n\0]/;
 
-// Shared djb2 hasher and encoder used when hashLargeKey is enabled
-const djb2Hasher = new DJB2();
-const keyEncoder = new TextEncoder();
+/**
+ * Resolve the user-supplied `hashLargeKey` option into the (enabled, hashery)
+ * pair used internally. A boolean value selects/disables the feature with a
+ * fresh Hashery; passing a Hashery instance enables the feature and uses that
+ * instance verbatim.
+ */
+function resolveHashLargeKeyOption(value: boolean | Hashery | undefined): {
+	enabled: boolean;
+	hashery: Hashery;
+} {
+	if (value instanceof Hashery) return { enabled: true, hashery: value };
+	return { enabled: value === true, hashery: new Hashery() };
+}
 
 /**
  * Check if all results match an expected value.
@@ -80,6 +90,7 @@ export class Memcache extends Hookified {
 	private _maxValueSize: number;
 	private _maxExpiration: number;
 	private _hashLargeKey: boolean;
+	private _hashery: Hashery;
 
 	constructor(options?: string | MemcacheOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -99,7 +110,9 @@ export class Memcache extends Hookified {
 			this._maxKeySize = 250;
 			this._maxValueSize = 1048576;
 			this._maxExpiration = 2592000;
-			this._hashLargeKey = false;
+			const stringResolved = resolveHashLargeKeyOption(undefined);
+			this._hashLargeKey = stringResolved.enabled;
+			this._hashery = stringResolved.hashery;
 			this.addNode(options);
 		} else {
 			// Handle MemcacheOptions object
@@ -137,7 +150,9 @@ export class Memcache extends Hookified {
 						: 2592000,
 				),
 			);
-			this._hashLargeKey = options?.hashLargeKey ?? false;
+			const optionsResolved = resolveHashLargeKeyOption(options?.hashLargeKey);
+			this._hashLargeKey = optionsResolved.enabled;
+			this._hashery = optionsResolved.hashery;
 			this._autoDiscoverOptions = options?.autoDiscover;
 
 			// Add nodes if provided, otherwise add default node
@@ -254,14 +269,35 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Enable or disable djb2 hashing of keys that exceed `maxKeySize`.
-	 * When true, oversized keys are deterministically hashed before validation.
-	 * When false, oversized keys throw a validation error.
+	 * Enable or disable hashing of keys that exceed `maxKeySize`.
+	 * When true, oversized keys are deterministically hashed before validation
+	 * using the configured `hashery` instance. When false, oversized keys throw
+	 * a validation error. To change the algorithm or providers, mutate or
+	 * replace the `hashery` property instead.
 	 * @param {boolean} value
 	 * @default false
 	 */
 	public set hashLargeKey(value: boolean) {
 		this._hashLargeKey = value;
+	}
+
+	/**
+	 * The `Hashery` instance used to hash oversized keys when `hashLargeKey`
+	 * is enabled. Always returns an instance, even when hashing is disabled,
+	 * so callers can pre-configure it (e.g. set `defaultAlgorithmSync` or
+	 * register custom providers) before flipping `hashLargeKey` on.
+	 * @returns {Hashery}
+	 */
+	public get hashery(): Hashery {
+		return this._hashery;
+	}
+
+	/**
+	 * Replace the `Hashery` instance used to hash oversized keys.
+	 * @param {Hashery} value
+	 */
+	public set hashery(value: Hashery) {
+		this._hashery = value;
 	}
 
 	/**
@@ -1378,7 +1414,7 @@ export class Memcache extends Hookified {
 	 */
 	public resolveKey(key: string): string {
 		if (this._hashLargeKey && key.length > this._maxKeySize) {
-			return djb2Hasher.toHashSync(keyEncoder.encode(key));
+			return this._hashery.toHashSync(key);
 		}
 		return key;
 	}
@@ -1666,5 +1702,12 @@ export class Memcache extends Hookified {
 	}
 }
 
-export { AutoDiscovery, BroadcastHash, createNode, MemcacheNode, ModulaHash };
+export {
+	AutoDiscovery,
+	BroadcastHash,
+	createNode,
+	Hashery,
+	MemcacheNode,
+	ModulaHash,
+};
 export default Memcache;

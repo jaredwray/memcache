@@ -1,3 +1,4 @@
+import type { Hashery } from "hashery";
 import type { CommandOptions, MemcacheNode } from "./node.js";
 
 /**
@@ -133,16 +134,19 @@ export interface MemcacheOptions {
 	maxKeySize?: number;
 
 	/**
-	 * When true, keys whose length exceeds `maxKeySize` are deterministically
-	 * hashed with djb2 (via the `hashery` library) before being sent to the
-	 * server, so long keys do not throw a validation error. When false (default),
-	 * keys exceeding `maxKeySize` throw a validation error.
+	 * Controls hashing of keys whose length exceeds `maxKeySize`.
+	 * - `false` (default): oversized keys throw a validation error.
+	 * - `true`: oversized keys are deterministically hashed with a default
+	 *   `Hashery` instance (djb2 sync) before being sent to the server.
+	 * - a `Hashery` instance: oversized keys are hashed with that instance,
+	 *   so callers can pick `fnv1` / `murmur` / `crc32`, plug in custom
+	 *   providers, enable caching, etc.
 	 *
-	 * Note: hashing is one-way and can collide. Two distinct long keys could map
-	 * to the same hashed key.
+	 * Note: hashing is one-way and can collide. Two distinct long keys could
+	 * map to the same hashed key.
 	 * @default false
 	 */
-	hashLargeKey?: boolean;
+	hashLargeKey?: boolean | Hashery;
 
 	/**
 	 * The maximum allowed value size in bytes. Memcached default max is 1048576 (1 MiB).

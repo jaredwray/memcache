@@ -209,7 +209,7 @@ const client = new Memcache({
 - `maxKeySize?: number` - Maximum allowed key size in characters (default: 250, memcache protocol max)
 - `maxValueSize?: number` - Maximum allowed value size in bytes (default: 1048576, memcached default)
 - `maxExpiration?: number` - Maximum allowed expiration in seconds (default: 2592000, memcached's 30-day relative-time boundary). Values above this throw. `0` (no expiration) is always allowed. Raise this if you need to pass absolute Unix timestamps as expirations.
-- `hashLargeKey?: boolean` - When `true`, keys longer than `maxKeySize` are deterministically hashed with djb2 (via the [`hashery`](https://github.com/jaredwray/hashery) library) before being sent to the server, instead of throwing. When `false`, oversized keys throw a validation error (default: false). Note: hashing is one-way and can collide; two distinct long keys could map to the same hashed key.
+- `hashLargeKey?: boolean | Hashery` - When `true`, keys longer than `maxKeySize` are deterministically hashed via [`hashery`](https://github.com/jaredwray/hashery) (djb2 sync by default) before being sent to the server, instead of throwing. Pass a configured `Hashery` instance (e.g. `new Hashery({ defaultAlgorithmSync: 'fnv1' })`) to choose a different sync algorithm or plug in custom providers. When `false`, oversized keys throw a validation error (default: false). Note: hashing is one-way and can collide; two distinct long keys could map to the same hashed key.
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
 
 ## Properties
@@ -254,13 +254,31 @@ Get or set the maximum allowed value size in bytes (default: 1048576). Writes (`
 Get or set the maximum allowed expiration in seconds (default: 2592000). Writes that accept an expiration (`set`, `add`, `replace`, `cas`, `touch`) throw when `exptime` exceeds this limit. `0` (no expiration) is always allowed. Memcached treats any `exptime` greater than 2592000 as an absolute Unix timestamp, so the default guards against accidentally setting a TTL that memcached interprets as "already expired." Raise this if you need to pass Unix timestamps.
 
 ### `hashLargeKey: boolean`
-Get or set whether keys exceeding `maxKeySize` are hashed with djb2 instead of throwing (default: false). When enabled, oversized keys are replaced with a short, deterministic djb2 hex digest (via the [`hashery`](https://github.com/jaredwray/hashery) library) before being sent to memcache, so any string length is accepted. The same input always produces the same hashed key, but distinct long keys can collide.
+Get or set whether keys exceeding `maxKeySize` are hashed instead of throwing (default: false). When enabled, oversized keys are replaced with a short, deterministic hex digest (via the [`hashery`](https://github.com/jaredwray/hashery) library, djb2 by default) before being sent to memcache, so any string length is accepted. The same input always produces the same hashed key, but distinct long keys can collide. To change algorithm or providers, configure the [`hashery`](#hashery-hashery) property.
 
 ```javascript
 const client = new Memcache({ hashLargeKey: true });
 const longKey = 'user:profile:' + 'x'.repeat(500);
 await client.set(longKey, 'value');     // hashed automatically
 await client.get(longKey);              // same hash, returns 'value'
+```
+
+### `hashery: Hashery`
+Get or set the `Hashery` instance used to hash oversized keys when `hashLargeKey` is enabled. Always returns an instance, even when hashing is disabled, so you can pre-configure it (algorithm, custom providers, caching) before flipping `hashLargeKey` on. `Hashery` is re-exported from this package for convenience.
+
+```javascript
+import Memcache, { Hashery } from 'memcache';
+
+// Simple — defaults to djb2 sync hashing
+const simple = new Memcache({ hashLargeKey: true });
+
+// Advanced — supply a Hashery preconfigured for fnv1
+const advanced = new Memcache({
+  hashLargeKey: new Hashery({ defaultAlgorithmSync: 'fnv1' }),
+});
+
+// Or mutate the instance after construction
+simple.hashery.defaultAlgorithmSync = 'murmur';
 ```
 
 ### `lazyConnect: boolean` (readonly)
@@ -376,7 +394,7 @@ Validates a Memcache key according to protocol requirements. Throws error if:
 - Key contains spaces, newlines, or null characters
 
 ### `resolveKey(key: string): string`
-Returns the key that will actually be sent to memcache. When [`hashLargeKey`](#hashlargekey-boolean) is `true` and the key length exceeds `maxKeySize`, returns a djb2 hex digest of the key (8-char hex). Otherwise returns the original key unchanged. Called automatically before `validateKey` in every command, so calling it manually is only needed when you want to inspect the on-wire key.
+Returns the key that will actually be sent to memcache. When [`hashLargeKey`](#hashlargekey-boolean) is `true` and the key length exceeds `maxKeySize`, returns a short hex digest produced by the configured [`hashery`](#hashery-hashery) instance (djb2 by default — 8 hex chars). Otherwise returns the original key unchanged. Called automatically before `validateKey` in every command, so calling it manually is only needed when you want to inspect the on-wire key.
 
 ## Helper Functions
 
