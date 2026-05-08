@@ -942,6 +942,36 @@ describe("Memcache", () => {
 			expect(customClient.resolveKey(shortKey)).toBe(shortKey);
 			expect(customClient.resolveKey(longKey)).not.toBe(longKey);
 		});
+
+		it("gets should return values for all original keys when resolved keys collide", async () => {
+			// djb2 collisions are rare but possible; force one by overriding
+			// resolveKey so two distinct long inputs map to the same wire key.
+			const customClient = new Memcache({ hashLargeKey: true });
+			await customClient.connect();
+
+			const longKeyA = `${generateKey("collide-a")}-${"x".repeat(260)}`;
+			const longKeyB = `${generateKey("collide-b")}-${"y".repeat(260)}`;
+			const sharedHash = generateKey("shared");
+
+			const originalResolveKey = customClient.resolveKey.bind(customClient);
+			customClient.resolveKey = (key: string) => {
+				if (key === longKeyA || key === longKeyB) return sharedHash;
+				return originalResolveKey(key);
+			};
+
+			try {
+				const value = generateValue();
+				await customClient.set(longKeyA, value);
+
+				const results = await customClient.gets([longKeyA, longKeyB]);
+				expect(results.get(longKeyA)).toBe(value);
+				expect(results.get(longKeyB)).toBe(value);
+				expect(results.size).toBe(2);
+			} finally {
+				await customClient.delete(longKeyA);
+				await customClient.disconnect();
+			}
+		});
 	});
 
 	describe("Value Validation", () => {

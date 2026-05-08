@@ -686,28 +686,32 @@ export class Memcache extends Hookified {
 			await this.beforeHook("gets", { keys });
 		}
 
-		// Resolve and validate all keys, tracking the mapping so results can be
-		// returned keyed by the original (unresolved) key.
-		const resolvedKeys: string[] = new Array(keys.length);
-		const originalByResolved = new Map<string, string>();
-		for (let i = 0; i < keys.length; i++) {
-			const resolved = this.resolveKey(keys[i]);
+		// Resolve and validate all keys. A single resolved key can map back to
+		// multiple original input keys when distinct inputs collide on djb2 (or
+		// when the caller passes duplicates), so track originals as an array.
+		const originalsByResolved = new Map<string, string[]>();
+		for (const inputKey of keys) {
+			const resolved = this.resolveKey(inputKey);
 			this.validateKey(resolved);
-			resolvedKeys[i] = resolved;
-			originalByResolved.set(resolved, keys[i]);
+			let originals = originalsByResolved.get(resolved);
+			if (!originals) {
+				originals = [];
+				originalsByResolved.set(resolved, originals);
+			}
+			originals.push(inputKey);
 		}
 
-		// Group resolved keys by primary node (first node returned by hash provider)
+		// Group unique resolved keys by primary node (first node returned by hash provider)
 		const keysByNode = new Map<MemcacheNode, string[]>();
 		const keyToReplicas = new Map<string, MemcacheNode[]>();
 
-		for (const resolvedKey of resolvedKeys) {
+		for (const resolvedKey of originalsByResolved.keys()) {
 			const nodes = this._hash.getNodesByKey(resolvedKey);
 			/* v8 ignore next 4 -- @preserve */
 			if (nodes.length === 0) {
-				// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalByResolved
-				const originalKey = originalByResolved.get(resolvedKey)!;
-				throw new Error(`No node available for key: ${originalKey}`);
+				// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalsByResolved
+				const firstOriginal = originalsByResolved.get(resolvedKey)![0];
+				throw new Error(`No node available for key: ${firstOriginal}`);
 			}
 
 			// Route to primary node (first in list)
@@ -749,22 +753,25 @@ export class Memcache extends Hookified {
 
 		const results = await Promise.all(promises);
 
-		// Collect results (keyed by original) and track misses for fallback
+		// Collect results (keyed by every original input key) and track misses for fallback
 		for (const { nodeKeys, result } of results) {
 			if (result?.foundKeys && result.values) {
 				for (let i = 0; i < result.foundKeys.length; i++) {
 					const foundResolved = result.foundKeys[i];
 					// biome-ignore lint/style/noNonNullAssertion: foundResolved was in resolvedKeys we sent
-					const originalKey = originalByResolved.get(foundResolved)!;
-					map.set(originalKey, result.values[i]);
+					const originals = originalsByResolved.get(foundResolved)!;
+					for (const original of originals) {
+						map.set(original, result.values[i]);
+					}
 				}
 			}
 
-			// Find keys that failed or weren't found
+			// Find keys that failed or weren't found. All originals for a given
+			// resolved key are set together, so checking the first is sufficient.
 			for (const resolvedKey of nodeKeys) {
-				// biome-ignore lint/style/noNonNullAssertion: nodeKeys are a subset of resolvedKeys
-				const originalKey = originalByResolved.get(resolvedKey)!;
-				if (!map.has(originalKey) && keyToReplicas.has(resolvedKey)) {
+				// biome-ignore lint/style/noNonNullAssertion: nodeKeys are unique resolved keys
+				const firstOriginal = originalsByResolved.get(resolvedKey)![0];
+				if (!map.has(firstOriginal) && keyToReplicas.has(resolvedKey)) {
 					missingResolvedKeys.push(resolvedKey);
 				}
 			}
@@ -787,9 +794,11 @@ export class Memcache extends Hookified {
 					});
 
 					if (result?.values && result.values.length > 0) {
-						// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalByResolved
-						const originalKey = originalByResolved.get(resolvedKey)!;
-						map.set(originalKey, result.values[0]);
+						// biome-ignore lint/style/noNonNullAssertion: resolvedKey is always in originalsByResolved
+						const originals = originalsByResolved.get(resolvedKey)!;
+						for (const original of originals) {
+							map.set(original, result.values[0]);
+						}
 						break;
 					}
 				} catch {
