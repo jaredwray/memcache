@@ -67,7 +67,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "hookified": "^2.1.1"
+    "hookified": "^2.2.0"
   },
   "files": [
     "dist",
