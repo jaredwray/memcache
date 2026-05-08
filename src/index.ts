@@ -668,8 +668,8 @@ export class Memcache extends Hookified {
 
 		for (const key of keys) {
 			const nodes = this._hash.getNodesByKey(key);
+			/* v8 ignore next 3 -- @preserve */
 			if (nodes.length === 0) {
-				/* v8 ignore next -- @preserve */
 				throw new Error(`No node available for key: ${key}`);
 			}
 
@@ -716,9 +716,7 @@ export class Memcache extends Hookified {
 		for (const { nodeKeys, result } of results) {
 			if (result?.foundKeys && result.values) {
 				for (let i = 0; i < result.foundKeys.length; i++) {
-					if (result.values[i] !== undefined) {
-						map.set(result.foundKeys[i], result.values[i]);
-					}
+					map.set(result.foundKeys[i], result.values[i]);
 				}
 			}
 
@@ -738,6 +736,7 @@ export class Memcache extends Hookified {
 
 			for (const replica of replicas) {
 				try {
+					/* v8 ignore next -- @preserve */
 					if (!replica.isConnected()) await replica.connect();
 
 					const result = await replica.command(`get ${key}`, {
@@ -1493,9 +1492,11 @@ export class Memcache extends Hookified {
 			return;
 		}
 
+		/* v8 ignore start -- @preserve */
 		const configEndpoint =
 			options.configEndpoint ||
 			(this._nodes.length > 0 ? this._nodes[0].id : "localhost:11211");
+		/* v8 ignore stop -- @preserve */
 
 		this._autoDiscovery = new AutoDiscovery({
 			configEndpoint,

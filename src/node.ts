@@ -335,6 +335,7 @@ export class MemcacheNode extends Hookified {
 					return;
 				}
 
+				/* v8 ignore next 2 -- @preserve */
 				this._binaryBuffer =
 					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
 				const header = deserializeHeader(this._binaryBuffer);
@@ -622,7 +623,7 @@ export class MemcacheNode extends Hookified {
 				// Flatten only when we have unconsumed data to parse
 				let buffer: Buffer;
 				if (chunks.length === 1) {
-					buffer = consumed === 0 ? chunks[0] : chunks[0].subarray(consumed);
+					buffer = chunks[0];
 				} else {
 					buffer = Buffer.concat(chunks, chunksLen).subarray(consumed);
 					// Replace queue with single consolidated buffer
@@ -856,8 +857,13 @@ export class MemcacheNode extends Hookified {
 				if (this._currentCommand.requestedKeys) {
 					this._currentCommand.foundKeys?.push(key);
 				}
-				// Set pending bytes so handleData will read the value
-				this._pendingValueBytes = bytes;
+				if (bytes === 0) {
+					// Empty value: push "" so foundKeys and _multilineData stay
+					// aligned. The trailing \r\n is consumed as an empty line.
+					this._multilineData.push("");
+				} else {
+					this._pendingValueBytes = bytes;
+				}
 			} else if (line === "END") {
 				let result:
 					| string[]

@@ -1,5 +1,14 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	OPCODE_GET,
+	OPCODE_NOOP,
+	OPCODE_STAT,
+	RESPONSE_MAGIC,
+	STATUS_INVALID_ARGUMENTS,
+	STATUS_SUCCESS,
+	serializeHeader,
+} from "../src/binary-protocol.js";
 import { createNode, MemcacheNode } from "../src/node";
 import {
 	generateKey,
@@ -884,6 +893,222 @@ describe("MemcacheNode", () => {
 			await expect(commandPromise).rejects.toThrow(
 				"SERVER_ERROR out of memory",
 			);
+		});
+	});
+
+	describe("binaryStats multi-chunk handling", () => {
+		const buildStatPacket = (key: string, value: string): Buffer => {
+			const keyBuf = Buffer.from(key, "utf8");
+			const valBuf = Buffer.from(value, "utf8");
+			const header = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				opcode: OPCODE_STAT,
+				keyLength: keyBuf.length,
+				status: STATUS_SUCCESS,
+				totalBodyLength: keyBuf.length + valBuf.length,
+			});
+			return Buffer.concat([header, keyBuf, valBuf]);
+		};
+
+		const buildTerminator = (): Buffer =>
+			serializeHeader({
+				magic: RESPONSE_MAGIC,
+				opcode: OPCODE_STAT,
+				keyLength: 0,
+				status: STATUS_SUCCESS,
+				totalBodyLength: 0,
+			});
+
+		it("should consolidate buffer when stats response spans multiple data events", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			// Suppress the real stats request — we will fake the response
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const statsPromise = node.binaryStats();
+
+			// First chunk: a complete stat record (consumed advances)
+			socket.emit("data", buildStatPacket("pid", "12345"));
+			// Second chunk: another stat + terminator. With chunks.length === 2,
+			// this exercises the buffer consolidation else-branch.
+			socket.emit(
+				"data",
+				Buffer.concat([buildStatPacket("uptime", "42"), buildTerminator()]),
+			);
+
+			const stats = await statsPromise;
+			expect(stats.pid).toBe("12345");
+			expect(stats.uptime).toBe("42");
+
+			writeSpy.mockRestore();
+		});
+
+		it("should consolidate when first chunk has partial header", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const statsPromise = node.binaryStats();
+
+			const fullPacket = Buffer.concat([
+				buildStatPacket("version", "1.6.0"),
+				buildTerminator(),
+			]);
+
+			// Split before HEADER_SIZE so first event leaves chunks=[partial]
+			// without consuming, then second event triggers else-branch.
+			socket.emit("data", fullPacket.subarray(0, 10));
+			socket.emit("data", fullPacket.subarray(10));
+
+			const stats = await statsPromise;
+			expect(stats.version).toBe("1.6.0");
+
+			writeSpy.mockRestore();
+		});
+
+		it("should ignore packets with non-OPCODE_STAT opcode", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const statsPromise = node.binaryStats();
+
+			// A NOOP-opcode packet (not OPCODE_STAT) should be skipped without
+			// failing — exercises the opcode/status guard's false branch.
+			const noopKey = Buffer.from("ignored", "utf8");
+			const noopValue = Buffer.from("data", "utf8");
+			const noopHeader = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				opcode: OPCODE_NOOP,
+				keyLength: noopKey.length,
+				status: STATUS_SUCCESS,
+				totalBodyLength: noopKey.length + noopValue.length,
+			});
+
+			socket.emit(
+				"data",
+				Buffer.concat([
+					noopHeader,
+					noopKey,
+					noopValue,
+					buildStatPacket("pid", "999"),
+					buildTerminator(),
+				]),
+			);
+
+			const stats = await statsPromise;
+			expect(stats.ignored).toBeUndefined();
+			expect(stats.pid).toBe("999");
+
+			writeSpy.mockRestore();
+		});
+	});
+
+	describe("binaryRequest multi-chunk handling", () => {
+		it("should consolidate buffer when binaryRequest response spans multiple data events", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const getPromise = node.binaryGet("multi-chunk-key");
+
+			// Build a GET response packet with a value
+			const value = Buffer.from("hello-world", "utf8");
+			const extras = Buffer.alloc(4); // 4-byte flags
+			const header = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				opcode: OPCODE_GET,
+				extrasLength: 4,
+				status: STATUS_SUCCESS,
+				totalBodyLength: 4 + value.length,
+			});
+			const fullPacket = Buffer.concat([header, extras, value]);
+
+			// Emit in two chunks so binaryRequest consolidates via Buffer.concat
+			socket.emit("data", fullPacket.subarray(0, 16));
+			socket.emit("data", fullPacket.subarray(16));
+
+			const result = await getPromise;
+			expect(result).toBe("hello-world");
+
+			writeSpy.mockRestore();
+		});
+
+		it("should return false from binaryDelete on unexpected status", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const deletePromise = node.binaryDelete("some-key");
+
+			const header = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				opcode: 0x04, // OPCODE_DELETE
+				status: STATUS_INVALID_ARGUMENTS,
+				totalBodyLength: 0,
+			});
+
+			socket.emit("data", header);
+
+			const result = await deletePromise;
+			expect(result).toBe(false);
+
+			writeSpy.mockRestore();
+		});
+	});
+
+	describe("binaryQuit edge cases", () => {
+		it("should resolve without error when binaryQuit is called on disconnected node", async () => {
+			const disconnectedNode = new MemcacheNode("localhost", 11211, {
+				timeout: 5000,
+			});
+			// Never connect — _socket is undefined
+			await expect(disconnectedNode.binaryQuit()).resolves.toBeUndefined();
+		});
+	});
+
+	describe("Unexpected line handling", () => {
+		it("should ignore unexpected line during config command", async () => {
+			await node.connect();
+
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command("config get cluster", {
+				isConfig: true,
+			});
+
+			// Unexpected line that isn't CONFIG/END/ERROR should be ignored
+			mockSocket.emit("data", "UNEXPECTED_GARBAGE\r\n");
+			// Then a CONFIG line + bytes + END to complete
+			mockSocket.emit("data", "CONFIG cluster 0 5\r\nhello\r\nEND\r\n");
+
+			const result = await commandPromise;
+			expect(result).toBeDefined();
+			expect(Array.isArray(result)).toBe(true);
+		});
+
+		it("should ignore unexpected line during multiline get command", async () => {
+			await node.connect();
+
+			const key = generateKey("unexpected");
+			const mockSocket = (node as any)._socket;
+			const commandPromise = node.command(`get ${key}`, {
+				isMultiline: true,
+				requestedKeys: [key],
+			});
+
+			// Send a line that matches none of VALUE/END/ERROR branches
+			mockSocket.emit("data", "UNEXPECTED_LINE\r\n");
+			// Then complete with END
+			mockSocket.emit("data", "END\r\n");
+
+			const result = await commandPromise;
+			// No values were returned — result should reflect the miss
+			expect(result).toBeDefined();
 		});
 	});
 });
