@@ -48,6 +48,11 @@
     "url": "https://github.com/jaredwray/memcache/issues"
   },
   "homepage": "https://github.com/jaredwray/memcache#readme",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.5.2",
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@faker-js/faker": "^10.4.0",
