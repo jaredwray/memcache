@@ -1,4 +1,4 @@
-FROM memcached:latest
+FROM memcached:1.6.44
 
 USER root
 

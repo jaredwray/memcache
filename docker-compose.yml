@@ -1,6 +1,6 @@
 services:
   memcached1:
-    image: memcached:latest
+    image: memcached:1.6.44
     container_name: memcached-server-1
     ports:
       - "11211:11211"
@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
 
   memcached2:
-    image: memcached:latest
+    image: memcached:1.6.44
     container_name: memcached-server-2
     ports:
       - "11212:11211"
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   memcached3:
-    image: memcached:latest
+    image: memcached:1.6.44
     container_name: memcached-server-3
     ports:
       - "11213:11211"
