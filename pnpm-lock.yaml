@@ -37,8 +37,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(vitest@4.1.10)
       docula:
-        specifier: ^2.1.0
-        version: 2.1.0(zod@4.3.6)
+        specifier: ^2.2.0
+        version: 2.2.0(zod@4.3.6)
       memcached:
         specifier: ^2.2.2
         version: 2.2.2
@@ -72,12 +72,6 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@3.0.125':
-    resolution: {integrity: sha512-tocl7cUDoTpmhZqeW8XVKMMznZQwwQAEunF0VyNKmf64qt8NbMIAEiet/vRMzh7Jr9WcFeb6EZjmhLTP4Qx2Og==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
   '@ai-sdk/gateway@3.0.144':
     resolution: {integrity: sha512-U0B6LI+12JNN7rCzYQ5hlaKJCMypFldnLBLzJSgioC4Z6hrCLA8K6ICl2MfRfpLfo9yz2EN30chgo/89RDe5ZQ==}
     engines: {node: '>=18'}
@@ -96,21 +90,11 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@4.0.27':
-    resolution: {integrity: sha512-ubkAJ+xODouwtmN1tYlvTPphH1hPOBfZaEQe8U7skGvFAnIRs9PPpsq57bC2+Ky/MB4yzhd6YOsxTAx9sGpazw==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
   '@ai-sdk/provider-utils@4.0.36':
     resolution: {integrity: sha512-hy0V+eyKcYyjmIxdcSh1jvy4+zNC7DbP0/V45jkRmfVnz+lI6GslT0qsd0V/bfJKo/A+P2t1tYFypTQJdOH1Sg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider@3.0.10':
-    resolution: {integrity: sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw==}
-    engines: {node: '>=18'}
 
   '@ai-sdk/provider@3.0.13':
     resolution: {integrity: sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==}
@@ -215,17 +199,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@cacheable/memory@2.0.8':
-    resolution: {integrity: sha512-FvEb29x5wVwu/Kf93IWwsOOEuhHh6dYCJF3vcKLzXc0KXIW181AOzv6ceT4ZpBHDvAfG60eqb+ekmrnLHIy+jw==}
-
   '@cacheable/memory@2.2.0':
     resolution: {integrity: sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ==}
 
   '@cacheable/net@2.1.0':
     resolution: {integrity: sha512-DlLnk6EWquHuFKd7sMQop4/mKwYRxU36ZAn1JrvvJzTed8JmOGlJ6InzOXUqyXs8duP3LhmN1fNmBUwx4ChD3g==}
-
-  '@cacheable/utils@2.4.1':
-    resolution: {integrity: sha512-eiFgzCbIneyMlLOmNG4g9xzF7Hv3Mga4LjxjcSC/ues6VYq2+gUbQI8JqNuw/ZM8tJIeIaBGpswAsqV2V7ApgA==}
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
@@ -1087,12 +1065,6 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  ai@6.0.197:
-    resolution: {integrity: sha512-U3KsjkqwQXGHC0u0VeUDqUaNaBS/uQc7v4Vj92Cjv5lPx5DIyRBQYk4Hipy5vwD9AQKIG8uRvdaN9R+pAvrtcQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
   ai@6.0.220:
     resolution: {integrity: sha512-S0zifFbegc4CjfEo3nsEtBraXP22JKchN5SkcLDvIUNCefkWavmp8pPF0ey1yipBPRdTF7oy7EchLIZM1HmtuQ==}
     engines: {node: '>=18'}
@@ -1180,9 +1152,6 @@ packages:
   cac@7.0.0:
     resolution: {integrity: sha512-tixWYgm5ZoOD+3g6UTea91eow5z6AAHaho3g0V9CNSNb45gM8SmflpAc+GRd1InC4AqN/07Unrgp56Y94N9hJQ==}
     engines: {node: '>=20.19.0'}
-
-  cacheable@2.3.5:
-    resolution: {integrity: sha512-EQfaKe09tl615iNvq/TBRWTFf1AKJNXYQSsMx0Z3EI0nA+pVsVPS8wJhnRlkbdacKPh1d0qVIhwTc2zsQNFEEg==}
 
   cacheable@2.5.0:
     resolution: {integrity: sha512-60cyAOytib/OzBw1JNSoSV/boK1AtHryDIjvVBk7XbN4ugfkM3+Sry7fEjNgPMGgOjuaZPAp8ruZ0Cxafwyq9g==}
@@ -1314,8 +1283,8 @@ packages:
   doctypes@1.1.0:
     resolution: {integrity: sha512-LLBi6pEqS6Do3EKQ3J0NqHWV5hhb78Pi8vvESYwyOy2c31ZEZVdtitdzsQsKb7878PEERhzUk0ftqGhG6Mz+pQ==}
 
-  docula@2.1.0:
-    resolution: {integrity: sha512-lNsIM9ZaLU7+r7sHpHnBgjt6pOSl2Yc2QLbBrCvjLEn8SIlvnhLiXyQ7o4rmw+36CvSB/ZkF2QXABOpcyAM8nQ==}
+  docula@2.2.0:
+    resolution: {integrity: sha512-6/lIrtLZj0vf9fSkPXHxqAsLJaqDdS+7GSHxt+UkkouHF/FqTqaQZ3os/Q3tdX+NDVVg8/TQyPp7dHQOEoRfow==}
     engines: {node: ^22.19.0 || >=24.0.0}
     hasBin: true
 
@@ -2637,13 +2606,6 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.36(zod@4.3.6)
       zod: 4.3.6
 
-  '@ai-sdk/gateway@3.0.125(zod@4.3.6)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.27(zod@4.3.6)
-      '@vercel/oidc': 3.2.0
-      zod: 4.3.6
-
   '@ai-sdk/gateway@3.0.144(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 3.0.13
@@ -2663,23 +2625,12 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.36(zod@4.3.6)
       zod: 4.3.6
 
-  '@ai-sdk/provider-utils@4.0.27(zod@4.3.6)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.1.0
-      zod: 4.3.6
-
   '@ai-sdk/provider-utils@4.0.36(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 3.0.13
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
       zod: 4.3.6
-
-  '@ai-sdk/provider@3.0.10':
-    dependencies:
-      json-schema: 0.4.0
 
   '@ai-sdk/provider@3.0.13':
     dependencies:
@@ -2757,13 +2708,6 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.2':
     optional: true
 
-  '@cacheable/memory@2.0.8':
-    dependencies:
-      '@cacheable/utils': 2.4.1
-      '@keyv/bigmap': 1.3.1(keyv@5.6.0)
-      hookified: 1.15.1
-      keyv: 5.6.0
-
   '@cacheable/memory@2.2.0':
     dependencies:
       '@cacheable/utils': 2.5.0
@@ -2778,11 +2722,6 @@ snapshots:
       hookified: 1.15.1
       http-cache-semantics: 4.2.0
       undici: 7.25.0
-
-  '@cacheable/utils@2.4.1':
-    dependencies:
-      hashery: 1.5.1
-      keyv: 5.6.0
 
   '@cacheable/utils@2.5.0':
     dependencies:
@@ -2981,7 +2920,7 @@ snapshots:
 
   '@jaredwray/fumanchu@4.7.0':
     dependencies:
-      '@cacheable/memory': 2.0.8
+      '@cacheable/memory': 2.2.0
       chrono-node: 2.9.0
       dayjs: 1.11.20
       ent: 2.2.2
@@ -3369,14 +3308,6 @@ snapshots:
 
   acorn@8.16.0: {}
 
-  ai@6.0.197(zod@4.3.6):
-    dependencies:
-      '@ai-sdk/gateway': 3.0.125(zod@4.3.6)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.27(zod@4.3.6)
-      '@opentelemetry/api': 1.9.0
-      zod: 4.3.6
-
   ai@6.0.220(zod@4.3.6):
     dependencies:
       '@ai-sdk/gateway': 3.0.144(zod@4.3.6)
@@ -3461,14 +3392,6 @@ snapshots:
   bytes@3.0.0: {}
 
   cac@7.0.0: {}
-
-  cacheable@2.3.5:
-    dependencies:
-      '@cacheable/memory': 2.0.8
-      '@cacheable/utils': 2.4.1
-      hookified: 1.15.1
-      keyv: 5.6.0
-      qified: 0.10.1
 
   cacheable@2.5.0:
     dependencies:
@@ -3576,7 +3499,7 @@ snapshots:
 
   doctypes@1.1.0: {}
 
-  docula@2.1.0(zod@4.3.6):
+  docula@2.2.0(zod@4.3.6):
     dependencies:
       '@ai-sdk/anthropic': 3.0.94(zod@4.3.6)
       '@ai-sdk/google': 3.0.89(zod@4.3.6)
@@ -3631,7 +3554,7 @@ snapshots:
   ecto@4.8.7:
     dependencies:
       '@jaredwray/fumanchu': 4.7.0
-      cacheable: 2.3.5
+      cacheable: 2.5.0
       ejs: 5.0.2
       ent: 2.2.2
       hookified: 2.2.0
@@ -5361,8 +5284,8 @@ snapshots:
 
   writr@6.1.2:
     dependencies:
-      ai: 6.0.197(zod@4.3.6)
-      cacheable: 2.3.5
+      ai: 6.0.220(zod@4.3.6)
+      cacheable: 2.5.0
       hashery: 2.0.0
       hookified: 2.2.0
       html-react-parser: 6.1.3(react@19.2.5)
