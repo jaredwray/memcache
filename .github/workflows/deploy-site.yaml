@@ -32,12 +32,8 @@ jobs:
         # without hitting the anonymous GitHub API rate limit.
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # Install Wrangler with npm rather than `cloudflare/wrangler-action`, which
-    # detects pnpm-lock.yaml and runs `pnpm add wrangler`. This repo's pnpm 11
-    # allowBuilds list only includes esbuild, so that install fails on workerd
-    # and sharp lifecycle scripts.
     - name: Publish to Cloudflare Pages
       env:
         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      run: npx --yes wrangler@4 pages deploy site/dist --project-name=memcache --branch=main --commit-dirty=true
+      run: pnpm exec wrangler pages deploy site/dist --project-name=memcache --branch=main --commit-dirty=true

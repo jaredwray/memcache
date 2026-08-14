@@ -70,7 +70,8 @@
     "tsdown": "^0.22.3",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.122.0"
   },
   "dependencies": {
     "hashery": "^3.0.0",
