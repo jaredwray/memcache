@@ -22,7 +22,7 @@ jobs:
         node-version: 24
         cache: 'pnpm'
     - name: Install Dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
     - name: Build
       run: pnpm build
 
@@ -38,7 +38,7 @@ jobs:
         node-version: 24
         cache: 'pnpm'
     - name: Install Dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
     - name: Test Services
       run: pnpm test:services:start
     - name: Build
@@ -58,7 +58,7 @@ jobs:
         node-version: 24
         cache: 'pnpm'
     - name: Install Dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
     - name: Test Services
       run: pnpm test:services:start
     - name: Build
