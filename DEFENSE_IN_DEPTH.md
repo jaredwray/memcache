@@ -46,9 +46,9 @@ Profile: npm library · public
 
 ## 6. Security tooling
 
-- [ ] Aikido runs on every build
+- [x] Aikido runs on every build — verified 2026-08-17 (GitHub app; skipped docs-only PRs)
 - [ ] Aikido release gate: the release workflow's stage-publish job `needs:` a passing `scan-release`
-- [ ] Socket reviews every PR that changes dependencies
+- [x] Socket reviews every PR that changes dependencies — verified 2026-08-17 (GitHub app on PRs)
 
 ## 7. Repository lockdown
 
