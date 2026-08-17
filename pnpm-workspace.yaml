@@ -1,3 +1,6 @@
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+# Native binaries via postinstall — reviewed exceptions from the empty allowBuilds baseline.
 allowBuilds:
   esbuild: true
   workerd: true
