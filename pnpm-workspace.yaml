@@ -1,4 +1,6 @@
 allowBuilds:
   esbuild: true
   workerd: true
-minimumReleaseAge: 2880
+minimumReleaseAge: 10080 # 7 days, in minutes
+minimumReleaseAgeStrict: true # fail instead of falling back to a too-new version
+minimumReleaseAgeIgnoreMissingTime: false # missing publish-time metadata fails closed
