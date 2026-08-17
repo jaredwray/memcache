@@ -21,6 +21,16 @@ if [[ ! -f pnpm-lock.yaml ]]; then
   exit 1
 fi
 
+# Cursor Cloud install hooks can start with a PATH that omits nvm.
+# Prefer nvm's Node (and corepack/pnpm) over /exec-daemon/node.
+export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  . "${NVM_DIR}/nvm.sh"
+  set -u
+fi
+
 if [[ -f package.json ]] && grep -q '"packageManager"' package.json && command -v corepack >/dev/null; then
   corepack enable
 fi
