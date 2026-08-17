@@ -12,12 +12,12 @@ Profile: npm library · public
 ## 2. CODEOWNERS and cloud bootstrap
 
 - [x] `.github/CODEOWNERS` covers `/.github/`, `/.cursor/`, `/.devcontainer/`, `/scripts/` with owners the maintainer names — PR #106
-- [ ] Codespaces and Cursor Cloud Agents bootstrap Aikido Safe Chain via scripts/setup-cloud-environment.sh (--ci shims, frozen lockfile) (PR #107 pending)
+- [x] Codespaces and Cursor Cloud Agents bootstrap Aikido Safe Chain via scripts/setup-cloud-environment.sh (--ci shims, frozen lockfile) — PR #107
 
 ## 3. Dependencies (pnpm)
 
 - [x] `packageManager: pnpm@11.3+` pinned in `package.json` — verified 2026-08-17 (`pnpm@11.5.2`)
-- [ ] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false`
+- [ ] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false` (PR #108 pending)
 - [ ] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline
 - [ ] `blockExoticSubdeps: true`
 - [ ] Lockfile committed; CI installs with `pnpm install --frozen-lockfile`
