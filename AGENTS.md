@@ -46,3 +46,11 @@ This is a pure Node.js library (no long-running app server); "running" it means 
   - Then `pnpm test:services:start` (docker compose) brings up memcached on ports `11211`, `11212`, `11213` and a SASL server on `11215`. `pnpm test` / `pnpm test:ci` need these running or most suites fail.
 - Docker note: the daemon is configured with the `fuse-overlayfs` storage driver and `containerd-snapshotter` disabled (required for Docker 29 in this VM). This is already set in `/etc/docker/daemon.json`.
 - Known environment-only test failures: the two `should handle connection timeout` tests (`test/index.test.ts`, `test/node.test.ts`) fail here because outbound TCP to the reserved TEST-NET-1 address `192.0.2.0` connects instantly in this sandbox instead of timing out. This is a network-environment quirk, not a code bug; these pass on GitHub CI. All other tests (610) pass.
+
+## Safe Chain
+
+Package installs in this environment go through Aikido Safe Chain shims. Never bypass them:
+
+- Keep `~/.safe-chain/shims` first on `PATH`.
+- Do not call unshimmed `npm`, `pnpm`, `npx`, or `pnpx`.
+- Do not install packages with `curl | sh` or by pointing at a package manager outside the shim directory.
