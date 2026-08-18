@@ -22,7 +22,10 @@ We will acknowledge receipt, work with you on a coordinated disclosure timeline,
 
 This repository follows the [defense-in-depth](https://github.com/jaredwray/agentic/blob/main/skills/security/defense-in-depth-nodejs/SKILL.md) hardening checklist; progress is tracked in [DEFENSE_IN_DEPTH.md](./DEFENSE_IN_DEPTH.md). Measures currently in place:
 
+- All changes land through pull requests — direct pushes to `main` are blocked, and merging requires passing status checks (`test`, `zizmor`).
+- Tags (and therefore releases) can only be created by repository admins.
+- Workflow runs from outside collaborators always require maintainer approval, and only allowlisted GitHub Actions can run.
+- CI runs with read-only permissions (no job has `contents: write`); generated output is an artifact, never committed back; every action is pinned to a full commit SHA; Socket Firewall (`sfw`) wraps `pnpm install` / `npm install`; workflows are security-linted with zizmor on every PR.
 - Codespaces and Cursor Cloud Agents install through Aikido Safe Chain; package-manager shims must not be bypassed.
-- CI runs with read-only permissions; every action is pinned to a full commit SHA; Socket Firewall (`sfw`) wraps `pnpm install` / `npm install`; workflows are security-linted with zizmor on every PR.
-- npm CI packs a tarball and stages it with `pnpm stage publish`; it does not publish live from the workflow. Staging waits on a passing Aikido `scan-release` of the commit (SAST, IaC, and secrets).
 - Dependencies install through pnpm with a 7-day cooldown on new versions, and lifecycle scripts are blocked by default. Socket reviews every dependency change; Aikido scans every build.
+- npm CI packs a tarball and stages it with `pnpm stage publish`; it does not publish live from the workflow. Staging waits on a passing Aikido `scan-release` of the commit (SAST, IaC, and secrets).
