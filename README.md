@@ -65,6 +65,10 @@ Nodejs Memcache Client
   - [Auto Discovery Events](#auto-discovery-events)
   - [Legacy Command Support](#legacy-command-support)
 - [IPv6 Support](#ipv6-support)
+- [TLS Support](#tls-support)
+  - [Connecting with TLS](#connecting-with-tls)
+  - [AWS ElastiCache Serverless](#aws-elasticache-serverless)
+  - [Custom certificate authorities](#custom-certificate-authorities)
 - [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
@@ -211,6 +215,7 @@ const client = new Memcache({
 - `maxExpiration?: number` - Maximum allowed expiration in seconds (default: 2592000, memcached's 30-day relative-time boundary). Values above this throw. `0` (no expiration) is always allowed. Raise this if you need to pass absolute Unix timestamps as expirations.
 - `hashLargeKey?: boolean | Hashery` - When `true`, keys longer than `maxKeySize` are deterministically hashed via [`hashery`](https://github.com/jaredwray/hashery) (djb2 sync by default) before being sent to the server, instead of throwing. Pass a configured `Hashery` instance (e.g. `new Hashery({ defaultAlgorithmSync: 'fnv1' })`) to choose a different sync algorithm or plug in custom providers. When `false`, oversized keys throw a validation error (default: false). Note: hashing is one-way and can collide; two distinct long keys could map to the same hashed key.
 - `autoDiscover?: AutoDiscoverOptions` - AWS ElastiCache Auto Discovery configuration (see [Auto Discovery](#auto-discovery))
+- `tls?: boolean | tls.ConnectionOptions` - Enable TLS for all node connections. `true` uses Node's default trust store (enough for publicly-trusted server certs such as AWS ElastiCache Serverless); an object is passed through to `tls.connect()` for custom CAs, client certs, or SNI overrides (see [TLS Support](#tls-support))
 
 ## Properties
 
@@ -1106,6 +1111,75 @@ const client = new Memcache({
 console.log(client.nodeIds);
 // ['[::1]:11211', '[2001:db8::1]:11212']
 ```
+
+# TLS Support
+
+The client can connect to TLS-enabled memcached servers (memcached ships TLS
+since 1.5.13 via `-Z`; the official Docker image supports it since 1.5.21).
+Connection readiness waits for the completed TLS handshake (`secureConnect`),
+so pipelined commands are never written into an unfinished handshake.
+
+## Connecting with TLS
+
+Enable TLS for every node with the client-level `tls` option:
+
+```javascript
+import { Memcache } from 'memcache';
+
+// TLS with Node's default trust store (publicly-trusted server certs)
+const client = new Memcache({
+  nodes: ['my-cache.example.com:11211'],
+  tls: true,
+});
+
+await client.set('mykey', 'Hello over TLS!');
+```
+
+Or per node with the `memcaches://` URI scheme (enables TLS for that node
+even when the client-level option is unset):
+
+```javascript
+const client = new Memcache('memcaches://my-cache.example.com:11211');
+```
+
+## AWS ElastiCache Serverless
+
+ElastiCache Serverless (Memcached) **requires** TLS and only speaks the text
+protocol — both are this client's defaults, so the only configuration needed
+is `tls: true` (the server presents a publicly-trusted ACM certificate):
+
+```javascript
+const client = new Memcache({
+  nodes: ['my-cache-xxxxxx.serverless.use1.cache.amazonaws.com:11211'],
+  tls: true,
+});
+```
+
+## Custom certificate authorities
+
+Pass any `tls.connect()` options — private CAs, client certificates, servername
+overrides — as an object:
+
+```javascript
+import { readFileSync } from 'node:fs';
+
+const client = new Memcache({
+  nodes: ['memcached-internal:11211'],
+  tls: {
+    ca: readFileSync('/etc/ssl/private-ca.pem'),
+    // cert, key, servername, ... are passed through to tls.connect()
+  },
+});
+```
+
+Notes:
+
+- `tls: true` / `tls: {}` both enable TLS with default trust; certificate
+  verification is always on (standard Node behavior). To connect to a server
+  with a self-signed cert, pass its CA — do not disable verification.
+- Auto-discovery's configuration-endpoint connection does not use TLS yet;
+  for ElastiCache node-based clusters with in-transit encryption, connect to
+  node endpoints directly.
 
 # Benchmarks
 

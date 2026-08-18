@@ -23,6 +23,19 @@ services:
     command: memcached -m 64 -vv
     restart: unless-stopped
 
+  # TLS-only target for test/tls.test.ts — mirrors ElastiCache Serverless
+  # constraints: TLS mandatory, ascii protocol only, no UDP. Certs are
+  # checked in (test-only); regenerate via test/certs/make-certs.sh.
+  memcached-tls:
+    image: memcached:1.6.44
+    container_name: memcached-server-tls
+    ports:
+      - "21211:11211"
+    command: memcached -m 64 -Z -o ssl_chain_cert=/certs/server_crt.pem -o ssl_key=/certs/server_key.pem -o ssl_session_cache -B ascii -U 0
+    volumes:
+      - ./test/certs:/certs:ro
+    restart: unless-stopped
+
   memcached-sasl:
     build:
       context: ./test/sasl

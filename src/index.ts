@@ -13,6 +13,7 @@ import {
 	MemcacheEvents,
 	type MemcacheOptions,
 	type MemcacheStats,
+	type MemcacheTlsOption,
 	type RetryBackoffFunction,
 	type SASLCredentials,
 } from "./types.js";
@@ -26,6 +27,7 @@ export {
 	MemcacheEvents,
 	type MemcacheOptions,
 	type MemcacheStats,
+	type MemcacheTlsOption,
 	type RetryBackoffFunction,
 	type SASLCredentials,
 } from "./types.js";
@@ -83,6 +85,7 @@ export class Memcache extends Hookified {
 	private _retryBackoff: RetryBackoffFunction;
 	private _retryOnlyIdempotent: boolean;
 	private _sasl: SASLCredentials | undefined;
+	private _tls: MemcacheTlsOption | undefined;
 	private _autoDiscovery: AutoDiscovery | undefined;
 	private _autoDiscoverOptions: AutoDiscoverOptions | undefined;
 	private readonly _lazyConnect: boolean;
@@ -106,6 +109,7 @@ export class Memcache extends Hookified {
 			this._retryBackoff = defaultRetryBackoff;
 			this._retryOnlyIdempotent = true;
 			this._sasl = undefined;
+			this._tls = undefined;
 			this._lazyConnect = true;
 			this._maxKeySize = 250;
 			this._maxValueSize = 1048576;
@@ -125,6 +129,7 @@ export class Memcache extends Hookified {
 			this._retryBackoff = options?.retryBackoff ?? defaultRetryBackoff;
 			this._retryOnlyIdempotent = options?.retryOnlyIdempotent ?? true;
 			this._sasl = options?.sasl;
+			this._tls = options?.tls;
 			this._lazyConnect = options?.lazyConnect ?? true;
 			this._maxKeySize = Math.max(
 				0,
@@ -504,20 +509,22 @@ export class Memcache extends Hookified {
 
 		if (typeof uri === "string") {
 			// Handle string URI
-			const { host, port } = this.parseUri(uri);
+			const { host, port, secure } = this.parseUri(uri);
 			nodeKey = port === 0 ? host : `${host}:${port}`;
 
 			if (this._nodes.some((n) => n.id === nodeKey)) {
 				throw new Error(`Node ${nodeKey} already exists`);
 			}
 
-			// Create and connect node
+			// Create and connect node. A memcaches:// URI enables TLS for the
+			// node even when the client-level `tls` option is not set.
 			node = new MemcacheNode(host, port, {
 				timeout: this._timeout,
 				keepAlive: this._keepAlive,
 				keepAliveDelay: this._keepAliveDelay,
 				weight,
 				sasl: this._sasl,
+				tls: secure ? this._tls || true : this._tls,
 			});
 		} else {
 			// Handle MemcacheNode instance
@@ -557,14 +564,19 @@ export class Memcache extends Hookified {
 	 * Supports multiple formats:
 	 * - Simple: "localhost:11211" or "localhost"
 	 * - Protocol: "memcache://localhost:11211", "memcached://localhost:11211", "tcp://localhost:11211"
+	 * - TLS: "memcaches://localhost:11211" (sets `secure: true`, enabling TLS for the node)
 	 * - IPv6: "[::1]:11211" or "memcache://[2001:db8::1]:11212"
 	 * - Unix socket: "/var/run/memcached.sock" or "unix:///var/run/memcached.sock"
 	 *
 	 * @param {string} uri - URI string
-	 * @returns {{ host: string; port: number }} Object containing host and port (port is 0 for Unix sockets)
+	 * @returns {{ host: string; port: number; secure?: boolean }} Object containing host and port (port is 0 for Unix sockets); `secure` is true for memcaches:// URIs
 	 * @throws {Error} If URI format is invalid
 	 */
-	public parseUri(uri: string): { host: string; port: number } {
+	public parseUri(uri: string): {
+		host: string;
+		port: number;
+		secure?: boolean;
+	} {
 		// Handle Unix domain sockets
 		if (uri.startsWith("unix://")) {
 			return { host: uri.slice(7), port: 0 };
@@ -575,13 +587,17 @@ export class Memcache extends Hookified {
 
 		// Remove protocol if present
 		let cleanUri = uri;
+		let secure: true | undefined;
 		if (uri.includes("://")) {
 			const protocolParts = uri.split("://");
 			const protocol = protocolParts[0];
-			if (!["memcache", "memcached", "tcp"].includes(protocol)) {
+			if (!["memcache", "memcached", "memcaches", "tcp"].includes(protocol)) {
 				throw new Error(
-					`Invalid protocol '${protocol}'. Supported protocols: memcache://, memcached://, tcp://, unix://`,
+					`Invalid protocol '${protocol}'. Supported protocols: memcache://, memcached://, memcaches://, tcp://, unix://`,
 				);
+			}
+			if (protocol === "memcaches") {
+				secure = true;
 			}
 			cleanUri = protocolParts[1];
 		}
@@ -601,7 +617,7 @@ export class Memcache extends Hookified {
 			// Check if there's a port after the bracket
 			const remainder = cleanUri.slice(bracketEnd + 1);
 			if (remainder === "") {
-				return { host, port: 11211 };
+				return { host, port: 11211, secure };
 			}
 			if (!remainder.startsWith(":")) {
 				throw new Error("Invalid IPv6 format: expected ':' after bracket");
@@ -613,7 +629,7 @@ export class Memcache extends Hookified {
 				throw new Error("Invalid port number");
 			}
 
-			return { host, port };
+			return { host, port, secure };
 		}
 
 		// Parse host and port for regular format
@@ -637,7 +653,7 @@ export class Memcache extends Hookified {
 			throw new Error("Invalid port number");
 		}
 
-		return { host, port };
+		return { host, port, secure };
 	}
 
 	/**
