@@ -142,10 +142,13 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
-	 * Get the full uri like memcache://localhost:11211
+	 * Get the full URI, e.g. `memcache://localhost:11211`.
+	 * TLS-enabled nodes use `memcaches://` so the URI round-trips through
+	 * `parseUri()` / `addNode()` without a client-level `tls` option.
 	 */
 	public get uri(): string {
-		return `memcache://${this.id}`;
+		const scheme = this._tls ? "memcaches" : "memcache";
+		return `${scheme}://${this.id}`;
 	}
 
 	/**
