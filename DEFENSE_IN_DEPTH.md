@@ -20,15 +20,15 @@ Profile: npm library · public
 - [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false` — PR #108
 - [x] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline — PR #109
 - [x] `blockExoticSubdeps: true` — PR #110
-- [ ] Lockfile committed; CI installs with `pnpm install --frozen-lockfile` (PR #111 pending)
+- [x] Lockfile committed; CI installs with `pnpm install --frozen-lockfile` — PR #111
 - [x] No `.github/dependabot.yml`; other dependency-update tools (if any) open PRs only — never auto-merge — verified 2026-08-17
-- [ ] New direct dependencies get human review; prefer `~` ranges over `^`
+- [ ] New direct dependencies get human review; prefer `~` ranges over `^` (PR pending)
 
 ## 4. GitHub Actions
 
 - [x] `permissions: contents: read` (or `{}` + per-job grants) on every workflow — verified 2026-08-17
 - [ ] Every action pinned to a full commit SHA (`npx actions-up`)
-- [ ] Every job installs Socket Firewall (`SocketDev/action` SHA-pinned, `firewall-version` pinned); `pnpm install` / `npm install` run as `sfw pnpm install` / `sfw npm install` (PR #111 pending)
+- [x] Every job installs Socket Firewall (`SocketDev/action` SHA-pinned, `firewall-version` pinned); `pnpm install` / `npm install` run as `sfw pnpm install` / `sfw npm install` — PR #111
 - [ ] `.github/workflows/check-workflows.yaml` lints workflows with zizmor on every PR
 - [ ] `persist-credentials: false` on checkouts that don't push
 - [x] No `pull_request_target` on workflows that run untrusted PR code — verified 2026-08-17
