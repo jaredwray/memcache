@@ -53,6 +53,6 @@ Profile: npm library · public
 
 ## 7. Repository lockdown
 
-- [x] `lockdown-repo.sh` applied; `--check` with `--required-checks "test,zizmor"` and `--allowed-actions "pnpm/*,codecov/*"` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable) — applied 2026-08-18 (PR pending)
+- [x] `lockdown-repo.sh` applied; `--check` with `--required-checks "test,zizmor"` and `--allowed-actions "pnpm/*,codecov/*"` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable) — applied 2026-08-18; PR #119 pending
 - [ ] Phishing-resistant 2FA (passkeys / hardware keys) on the GitHub and npm accounts (manual)
 - [ ] Recovery codes stored offline in a password manager (manual)
