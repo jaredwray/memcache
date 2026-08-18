@@ -323,10 +323,11 @@ Remove a node from the cluster.
 ### `getNodesByKey(key: string): Promise<MemcacheNode[]>`
 Get the nodes for a given key using consistent hashing. Automatically connects to nodes if not already connected.
 
-### `parseUri(uri: string): { host: string; port: number }`
+### `parseUri(uri: string): { host: string; port: number; secure?: boolean }`
 Parse a URI string into host and port. Supports formats:
 - Simple: `"localhost:11211"` or `"localhost"`
 - Protocol: `"memcache://localhost:11211"`, `"tcp://localhost:11211"`
+- TLS: `"memcaches://localhost:11211"` (`secure: true`; enables TLS for that node)
 - IPv6: `"[::1]:11211"` or `"memcache://[2001:db8::1]:11212"`
 - Unix socket: `"/var/run/memcached.sock"` or `"unix:///var/run/memcached.sock"`
 
@@ -1177,6 +1178,9 @@ Notes:
 - `tls: true` / `tls: {}` both enable TLS with default trust; certificate
   verification is always on (standard Node behavior). To connect to a server
   with a self-signed cert, pass its CA — do not disable verification.
+- `node.uri` uses `memcaches://` when TLS is enabled, so passing it back into
+  `addNode()` or the constructor keeps TLS on even without a client-level
+  `tls` option.
 - Auto-discovery's configuration-endpoint connection does not use TLS yet;
   for ElastiCache node-based clusters with in-transit encryption, connect to
   node endpoints directly.

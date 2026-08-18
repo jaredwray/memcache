@@ -262,5 +262,47 @@ describe("TLS", () => {
 
 			await client.disconnect();
 		});
+
+		it("should emit memcaches:// from node.uri when client-level TLS is set", async () => {
+			const client = createTlsClient();
+			expect(client.nodes[0].uri).toBe(`memcaches://${TLS_URI}`);
+			await client.disconnect();
+		});
+
+		it("should enable TLS when constructing from a TLS node's uri without client tls", async () => {
+			const source = createTlsClient();
+			const uri = source.nodes[0].uri;
+			await source.disconnect();
+
+			// Round-trip node.uri into a client with no tls option. The
+			// handshake must fail against the test CA — proving the scheme
+			// from uri kept TLS on.
+			const client = new Memcache({
+				nodes: [uri],
+				timeout: 2000,
+			});
+
+			await expect(
+				client.set(generateKey("tls-uri-roundtrip"), generateValue(), 60),
+			).rejects.toThrow();
+
+			await client.disconnect();
+		});
+
+		it("should connect when a TLS node's uri is passed with matching CA options", async () => {
+			const source = createTlsClient();
+			const client = new Memcache({
+				nodes: [source.nodes[0].uri],
+				tls: { ca },
+			});
+			const key = generateKey("tls-uri-connect");
+			const value = generateValue();
+
+			expect(await client.set(key, value, 60)).toBe(true);
+			expect(await client.get(key)).toBe(value);
+
+			await client.disconnect();
+			await source.disconnect();
+		});
 	});
 });

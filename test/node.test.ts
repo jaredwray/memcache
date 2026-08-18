@@ -58,6 +58,30 @@ describe("MemcacheNode", () => {
 			expect(testNode.uri).toBe("memcache:///var/run/memcached.sock");
 		});
 
+		it("should generate memcaches:// uri when TLS is enabled", () => {
+			expect(new MemcacheNode("localhost", 11211, { tls: true }).uri).toBe(
+				"memcaches://localhost:11211",
+			);
+			expect(new MemcacheNode("localhost", 11211, { tls: {} }).uri).toBe(
+				"memcaches://localhost:11211",
+			);
+		});
+
+		it("should generate memcache:// uri when TLS is explicitly disabled", () => {
+			expect(new MemcacheNode("localhost", 11211, { tls: false }).uri).toBe(
+				"memcache://localhost:11211",
+			);
+		});
+
+		it("should generate memcaches:// uri for TLS IPv6 and Unix sockets", () => {
+			expect(new MemcacheNode("::1", 21211, { tls: true }).uri).toBe(
+				"memcaches://[::1]:21211",
+			);
+			expect(
+				new MemcacheNode("/var/run/memcached.sock", 0, { tls: true }).uri,
+			).toBe("memcaches:///var/run/memcached.sock");
+		});
+
 		it("should use default options if not provided", () => {
 			const testNode = new MemcacheNode("localhost", 11211);
 			expect(testNode).toBeInstanceOf(MemcacheNode);
