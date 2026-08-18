@@ -17,16 +17,17 @@ Profile: npm library · public
 ## 3. Dependencies (pnpm)
 
 - [x] `packageManager: pnpm@11.3+` pinned in `package.json` — verified 2026-08-17 (`pnpm@11.5.2`)
-- [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false` — PR #108
+- [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false`; no first-party `minimumReleaseAgeExclude` — PR #108
+- [ ] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude`
 - [x] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline — PR #109
 - [x] `blockExoticSubdeps: true` — PR #110
 - [x] Lockfile committed; CI installs with `pnpm install --frozen-lockfile` — PR #111
 - [x] No `.github/dependabot.yml`; other dependency-update tools (if any) open PRs only — never auto-merge — verified 2026-08-17
-- [x] New direct dependencies get human review; prefer `~` ranges over `^` — skipped converting to `~`; project keeps `^` (maintainer 2026-08-18)
 
 ## 4. GitHub Actions
 
 - [x] `permissions: contents: read` (or `{}` + per-job grants) on every workflow — verified 2026-08-17
+- [x] No `contents: write` except jobs whose purpose is mutating the repo (GitHub Release, Changesets version PR); generated output is a workflow artifact, never committed back from CI — verified 2026-08-18
 - [x] Every action pinned to a full commit SHA (`npx actions-up`) — PR #113
 - [x] Every job installs Socket Firewall (`SocketDev/action` SHA-pinned, `firewall-version` pinned); `pnpm install` / `npm install` run as `sfw pnpm install` / `sfw npm install` — PR #111
 - [x] `.github/workflows/check-workflows.yaml` lints workflows with zizmor on every PR — PR #116
@@ -37,21 +38,21 @@ Profile: npm library · public
 
 ## 5. npm publishing — npm libraries only
 
-- [ ] OIDC trusted publishing configured **stage-only** on npmjs.com for the publish workflow — it can stage, never publish live (manual)
+- [x] OIDC trusted publishing configured **stage-only** on npmjs.com for the publish workflow — it can stage, never publish live (manual) — maintainer 2026-08-18
 - [x] `.github/workflows/release.yaml` packs then stages with `pnpm stage publish ./packed/*.tgz --no-git-checks` — PR #117
-- [ ] Maintainer promotes staged versions with 2FA (manual)
-- [ ] Drydock connected — staged releases reviewed before promotion (manual)
-- [ ] No direct publish rights: package requires 2FA and disallows tokens (manual)
+- [x] Maintainer promotes staged versions with 2FA (manual) — maintainer 2026-08-18
+- [x] Drydock connected — staged releases reviewed before promotion (manual) — maintainer 2026-08-18
+- [x] No direct publish rights: package requires 2FA and disallows tokens (manual) — maintainer 2026-08-18
 - [x] `package.json` `repository.url` accurate so provenance maps to this repo — verified 2026-08-17
 
 ## 6. Security tooling
 
 - [x] Aikido runs on every build — verified 2026-08-17 (GitHub app; skipped docs-only PRs)
-- [ ] Aikido release gate: the release workflow's stage-publish job `needs:` a passing `scan-release` (PR #118 pending)
+- [x] Aikido release gate: the release workflow's stage-publish job `needs:` a passing `scan-release` — PR #118
 - [x] Socket reviews every PR that changes dependencies — verified 2026-08-17 (GitHub app on PRs)
 
 ## 7. Repository lockdown
 
-- [ ] `lockdown-repo.sh` applied; `--check` with `--required-checks` and `--allowed-actions` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable)
-- [ ] Phishing-resistant 2FA (passkeys / hardware keys) on the GitHub and npm accounts (manual)
-- [ ] Recovery codes stored offline in a password manager (manual)
+- [x] `lockdown-repo.sh` applied; `--check` with `--required-checks "test,zizmor"` and `--allowed-actions "pnpm/*,codecov/*"` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable) — applied 2026-08-18; PR #119 pending
+- [x] Phishing-resistant 2FA (passkeys / hardware keys) on the GitHub and npm accounts (manual) — maintainer 2026-08-18
+- [x] Recovery codes stored offline in a password manager (manual) — maintainer 2026-08-18
