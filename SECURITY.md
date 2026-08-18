@@ -28,4 +28,4 @@ This repository follows the [defense-in-depth](https://github.com/jaredwray/agen
 - CI runs with read-only permissions (no job has `contents: write`); generated output is an artifact, never committed back; every action is pinned to a full commit SHA; Socket Firewall (`sfw`) wraps `pnpm install` / `npm install`; workflows are security-linted with zizmor on every PR.
 - Codespaces and Cursor Cloud Agents install through Aikido Safe Chain; package-manager shims must not be bypassed.
 - Dependencies install through pnpm with a 7-day cooldown on new versions, and lifecycle scripts are blocked by default. Socket reviews every dependency change; Aikido scans every build.
-- npm CI packs a tarball and stages it with `pnpm stage publish`; it does not publish live from the workflow. Staging waits on a passing Aikido `scan-release` of the commit (SAST, IaC, and secrets).
+- npm releases are staged, never published directly: CI publishes via stage-only OIDC trusted publishing, Drydock reviews the exact staged artifact, and a maintainer promotes it with 2FA. There are no npm tokens. Staging waits on a passing Aikido `scan-release` of the commit (SAST, IaC, and secrets).
