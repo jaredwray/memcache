@@ -18,7 +18,7 @@ Profile: npm library · public
 
 - [x] `packageManager: pnpm@11.3+` pinned in `package.json` — verified 2026-08-17 (`pnpm@11.5.2`)
 - [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false`; no first-party `minimumReleaseAgeExclude` — PR #108
-- [x] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude` (PR pending)
+- [x] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude` (PR #120 pending)
 - [x] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline — PR #109
 - [x] `blockExoticSubdeps: true` — PR #110
 - [x] Lockfile committed; CI installs with `pnpm install --frozen-lockfile` — PR #111
