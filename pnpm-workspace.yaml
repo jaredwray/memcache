@@ -8,3 +8,7 @@ minimumReleaseAge: 10080 # 7 days, in minutes
 minimumReleaseAgeStrict: true # fail instead of falling back to a too-new version
 minimumReleaseAgeIgnoreMissingTime: false # missing publish-time metadata fails closed
 blockExoticSubdeps: true
+trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
+# writr@6.1.2 has no provenance; 6.1.3+ do. Pin past the trust downgrade.
+overrides:
+  writr: 6.1.5

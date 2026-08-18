@@ -18,7 +18,7 @@ Profile: npm library · public
 
 - [x] `packageManager: pnpm@11.3+` pinned in `package.json` — verified 2026-08-17 (`pnpm@11.5.2`)
 - [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false`; no first-party `minimumReleaseAgeExclude` — PR #108
-- [ ] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude`
+- [x] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude` (PR pending)
 - [x] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline — PR #109
 - [x] `blockExoticSubdeps: true` — PR #110
 - [x] Lockfile committed; CI installs with `pnpm install --frozen-lockfile` — PR #111
@@ -53,6 +53,6 @@ Profile: npm library · public
 
 ## 7. Repository lockdown
 
-- [x] `lockdown-repo.sh` applied; `--check` with `--required-checks "test,zizmor"` and `--allowed-actions "pnpm/*,codecov/*"` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable) — applied 2026-08-18; PR #119 pending
+- [x] `lockdown-repo.sh` applied; `--check` with `--required-checks "test,zizmor"` and `--allowed-actions "pnpm/*,codecov/*"` passes (PRs required on the default branch, merges blocked unless required status checks pass, tag ruleset, fork-PR approval, read-only workflow tokens, Actions allowlist, secret scanning, Dependabot disabled, private vulnerability reporting as applicable) — applied 2026-08-18; PR #119
 - [x] Phishing-resistant 2FA (passkeys / hardware keys) on the GitHub and npm accounts (manual) — maintainer 2026-08-18
 - [x] Recovery codes stored offline in a password manager (manual) — maintainer 2026-08-18
