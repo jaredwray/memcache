@@ -1,5 +1,11 @@
 import type { Hashery } from "hashery";
-import type { CommandOptions, MemcacheNode } from "./node.js";
+import type {
+	CommandOptions,
+	MemcacheNode,
+	MemcacheTlsOption,
+} from "./node.js";
+
+export type { MemcacheTlsOption } from "./node.js";
 
 /**
  * SASL authentication credentials for connecting to a secured memcache server.
@@ -162,6 +168,18 @@ export interface MemcacheOptions {
 	 * @default 2592000
 	 */
 	maxExpiration?: number;
+
+	/**
+	 * Enable TLS for all node connections.
+	 * - `true`: connect using TLS with Node's default trust store. This is the
+	 *   typical setting for servers with publicly-trusted certificates
+	 *   (e.g. AWS ElastiCache Serverless, which requires TLS).
+	 * - a `tls.ConnectionOptions` object: connect using TLS with the provided
+	 *   options (e.g. `{ ca }` for a private certificate authority).
+	 * - `false` / `undefined` (default): connect using plain TCP.
+	 * @default undefined
+	 */
+	tls?: MemcacheTlsOption;
 
 	/**
 	 * AWS ElastiCache Auto Discovery configuration.

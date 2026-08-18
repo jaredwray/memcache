@@ -1,4 +1,8 @@
 import { createConnection, type Socket } from "node:net";
+import {
+	connect as createTlsConnection,
+	type ConnectionOptions as TlsConnectionOptions,
+} from "node:tls";
 import { Hookified } from "hookified";
 import {
 	buildAddRequest,
@@ -27,6 +31,15 @@ import {
 } from "./binary-protocol.js";
 import type { SASLCredentials } from "./types.js";
 
+/**
+ * TLS configuration for node connections.
+ * - `true`: connect using TLS with Node's default trust store.
+ * - a `tls.ConnectionOptions` object: connect using TLS with the provided
+ *   options (e.g. `{ ca }` for a private certificate authority).
+ * - `false` / `undefined`: connect using plain TCP.
+ */
+export type MemcacheTlsOption = boolean | TlsConnectionOptions;
+
 export interface MemcacheNodeOptions {
 	timeout?: number;
 	keepAlive?: boolean;
@@ -34,6 +47,13 @@ export interface MemcacheNodeOptions {
 	weight?: number;
 	/** SASL authentication credentials */
 	sasl?: SASLCredentials;
+	/**
+	 * Enable TLS for this node's connection.
+	 * `true` uses Node's default trust store; a `tls.ConnectionOptions`
+	 * object is passed through to `tls.connect()` (e.g. `{ ca }`).
+	 * @default undefined (plain TCP)
+	 */
+	tls?: MemcacheTlsOption;
 }
 
 export interface CommandOptions {
@@ -79,6 +99,7 @@ export class MemcacheNode extends Hookified {
 	private _multilineData: string[] = [];
 	private _pendingValueBytes: number = 0;
 	private _sasl: SASLCredentials | undefined;
+	private _tls: MemcacheTlsOption | undefined;
 	private _authenticated: boolean = false;
 	private _binaryBuffer: Buffer = Buffer.alloc(0);
 
@@ -91,6 +112,7 @@ export class MemcacheNode extends Hookified {
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._weight = options?.weight || 1;
 		this._sasl = options?.sasl;
+		this._tls = options?.tls;
 	}
 
 	/**
@@ -206,17 +228,32 @@ export class MemcacheNode extends Hookified {
 				return;
 			}
 
-			this._socket = createConnection({
-				host: this._host,
-				port: this._port,
-				keepAlive: this._keepAlive,
-				keepAliveInitialDelay: this._keepAliveDelay,
-			});
+			if (this._tls) {
+				this._socket = createTlsConnection({
+					host: this._host,
+					port: this._port,
+					keepAlive: this._keepAlive,
+					keepAliveInitialDelay: this._keepAliveDelay,
+					...(this._tls === true ? {} : this._tls),
+				});
+			} else {
+				this._socket = createConnection({
+					host: this._host,
+					port: this._port,
+					keepAlive: this._keepAlive,
+					keepAliveInitialDelay: this._keepAliveDelay,
+				});
+			}
 
 			this._socket.setTimeout(this._timeout);
 			this._socket.setNoDelay(true);
 
-			this._socket.on("connect", async () => {
+			// For TLS connections readiness is "secureConnect" (handshake
+			// complete). Resolving on "connect" would allow commands to be
+			// written into an unfinished TLS handshake.
+			const readyEvent = this._tls ? "secureConnect" : "connect";
+
+			this._socket.on(readyEvent, async () => {
 				this._connected = true;
 
 				// If SASL credentials are configured, authenticate before resolving
