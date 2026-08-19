@@ -1525,6 +1525,7 @@ describe("Memcache startAutoDiscovery", () => {
 	let server: FakeConfigServer;
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		if (server) {
 			await server.stop();
 		}
@@ -1623,16 +1624,16 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
 		client.on(MemcacheEvents.ERROR, () => {});
-		for (const node of client.nodes) {
-			vi.spyOn(node, "connect").mockResolvedValue();
-		}
+		// Config-endpoint node is created inside AutoDiscovery, so instance
+		// spies on client.nodes do not cover the TLS handshake to the fake
+		// plaintext server. Mock every MemcacheNode.connect instead.
+		vi.spyOn(MemcacheNode.prototype, "connect").mockResolvedValue();
 
 		await client.connect();
 		// @ts-expect-error - accessing private field for testing
 		expect(client._autoDiscovery?.tls).toBe(true);
 
 		await client.disconnect();
-		vi.restoreAllMocks();
 	});
 
 	it("should inherit tls from the first node when client tls is unset", async () => {
@@ -1643,7 +1644,6 @@ describe("Memcache startAutoDiscovery", () => {
 		await server.start();
 
 		const tlsNode = new MemcacheNode("10.0.0.1", 11211, { tls: true });
-		vi.spyOn(tlsNode, "connect").mockResolvedValue();
 		const client = new Memcache({
 			nodes: [tlsNode],
 			lazyConnect: true,
@@ -1655,13 +1655,13 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
 		client.on(MemcacheEvents.ERROR, () => {});
+		vi.spyOn(MemcacheNode.prototype, "connect").mockResolvedValue();
 
 		await client.connect();
 		// @ts-expect-error - accessing private field for testing
 		expect(client._autoDiscovery?.tls).toBe(true);
 
 		await client.disconnect();
-		vi.restoreAllMocks();
 	});
 
 	it("should pass tls: false through to AutoDiscovery", async () => {
@@ -1709,9 +1709,7 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
 		client.on(MemcacheEvents.ERROR, () => {});
-		for (const node of client.nodes) {
-			vi.spyOn(node, "connect").mockResolvedValue();
-		}
+		vi.spyOn(MemcacheNode.prototype, "connect").mockResolvedValue();
 
 		await client.connect();
 		// @ts-expect-error - accessing private field for testing
@@ -1735,7 +1733,6 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 
 		await client.disconnect();
-		vi.restoreAllMocks();
 	});
 });
 
