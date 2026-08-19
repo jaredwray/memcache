@@ -951,6 +951,31 @@ describe("Memcache AutoDiscovery Integration", () => {
 			expect(client.getNode("10.0.0.4:11211")?.tls).toBe(true);
 		});
 
+		it("should keep hostname as TLS target when discovered IP is empty", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{
+						hostname: "myhost.cache.amazonaws.com",
+						ip: "",
+						port: 11211,
+					},
+				],
+			});
+
+			const discovered = client.getNode("myhost.cache.amazonaws.com:11211");
+			expect(discovered?.tlsEnabled).toBe(true);
+			expect(discovered?.tls).toBe(true);
+		});
+
 		it("should not set SNI when discovered hostname is IPv6", async () => {
 			const client = new Memcache({
 				nodes: [],
@@ -1589,6 +1614,7 @@ describe("Memcache startAutoDiscovery", () => {
 		const client = new Memcache({
 			nodes: ["10.0.0.1:11211"],
 			lazyConnect: true,
+			timeout: 500,
 			tls: true,
 			autoDiscover: {
 				enabled: true,
@@ -1597,12 +1623,16 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
 		client.on(MemcacheEvents.ERROR, () => {});
+		for (const node of client.nodes) {
+			vi.spyOn(node, "connect").mockResolvedValue();
+		}
 
 		await client.connect();
 		// @ts-expect-error - accessing private field for testing
 		expect(client._autoDiscovery?.tls).toBe(true);
 
 		await client.disconnect();
+		vi.restoreAllMocks();
 	});
 
 	it("should inherit tls from the first node when client tls is unset", async () => {
@@ -1613,9 +1643,11 @@ describe("Memcache startAutoDiscovery", () => {
 		await server.start();
 
 		const tlsNode = new MemcacheNode("10.0.0.1", 11211, { tls: true });
+		vi.spyOn(tlsNode, "connect").mockResolvedValue();
 		const client = new Memcache({
 			nodes: [tlsNode],
 			lazyConnect: true,
+			timeout: 500,
 			autoDiscover: {
 				enabled: true,
 				configEndpoint: server.endpoint,
@@ -1629,6 +1661,7 @@ describe("Memcache startAutoDiscovery", () => {
 		expect(client._autoDiscovery?.tls).toBe(true);
 
 		await client.disconnect();
+		vi.restoreAllMocks();
 	});
 
 	it("should pass tls: false through to AutoDiscovery", async () => {
@@ -1668,6 +1701,7 @@ describe("Memcache startAutoDiscovery", () => {
 		const client = new Memcache({
 			nodes: ["10.0.0.1:11211"],
 			lazyConnect: true,
+			timeout: 500,
 			autoDiscover: {
 				enabled: true,
 				configEndpoint: `memcaches://${server.endpoint}`,
@@ -1675,6 +1709,9 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
 		client.on(MemcacheEvents.ERROR, () => {});
+		for (const node of client.nodes) {
+			vi.spyOn(node, "connect").mockResolvedValue();
+		}
 
 		await client.connect();
 		// @ts-expect-error - accessing private field for testing
@@ -1698,6 +1735,7 @@ describe("Memcache startAutoDiscovery", () => {
 		});
 
 		await client.disconnect();
+		vi.restoreAllMocks();
 	});
 });
 
