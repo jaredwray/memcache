@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       hashery:
-        specifier: ^3.0.0
-        version: 3.0.0
+        specifier: ^3.0.1
+        version: 3.0.1
       hookified:
         specifier: ^3.0.1
         version: 3.0.1
@@ -1852,10 +1852,6 @@ packages:
   hashery@1.5.1:
     resolution: {integrity: sha512-iZyKG96/JwPz1N55vj2Ie2vXbhu440zfUfJvSwEqEbeLluk7NnapfGqa7LH0mOsnDxTF85Mx8/dyR6HfqcbmbQ==}
     engines: {node: '>=20'}
-
-  hashery@3.0.0:
-    resolution: {integrity: sha512-0Qf1UYWmzQ7IgJbciYmxfbH3TXGR8CJQx7syxue+XptHPXYiEO1lmkYQen2PBWLikgei0kwylMZHoUmP8G96lg==}
-    engines: {node: '>=22.18'}
 
   hashery@3.0.1:
     resolution: {integrity: sha512-jfLVt3/SEkJzW/OCSK7Bxdl+FpXYDpEE84QOU4wzKRpO7rNoafNK718Z71GPQR/ozfQmKxXS++MhbrL/eKaTow==}
@@ -4139,7 +4135,7 @@ snapshots:
       ai: 6.0.220(zod@4.4.3)
       colorette: 2.0.20
       ecto: 4.8.7(supports-color@10.2.2)
-      hashery: 3.0.0
+      hashery: 3.0.1
       ipaddr.js: 2.4.0
       jiti: 2.7.0
       serve-handler: 6.1.7
@@ -4393,10 +4389,6 @@ snapshots:
   hashery@1.5.1:
     dependencies:
       hookified: 1.15.1
-
-  hashery@3.0.0:
-    dependencies:
-      hookified: 3.0.1
 
   hashery@3.0.1:
     dependencies:
