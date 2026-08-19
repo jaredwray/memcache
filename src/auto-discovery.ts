@@ -1,5 +1,5 @@
 import { Hookified } from "hookified";
-import { MemcacheNode } from "./node.js";
+import { MemcacheNode, type MemcacheTlsOption } from "./node.js";
 import type {
 	ClusterConfig,
 	DiscoveredNode,
@@ -14,6 +14,7 @@ export interface AutoDiscoveryOptions {
 	keepAlive: boolean;
 	keepAliveDelay: number;
 	sasl?: SASLCredentials;
+	tls?: MemcacheTlsOption;
 }
 
 /**
@@ -32,6 +33,7 @@ export class AutoDiscovery extends Hookified {
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _sasl: SASLCredentials | undefined;
+	private _tls: MemcacheTlsOption | undefined;
 	private _isRunning = false;
 	private _isPolling = false;
 
@@ -44,6 +46,7 @@ export class AutoDiscovery extends Hookified {
 		this._keepAlive = options.keepAlive;
 		this._keepAliveDelay = options.keepAliveDelay;
 		this._sasl = options.sasl;
+		this._tls = options.tls;
 	}
 
 	/** Current config version. -1 means no config has been fetched yet. */
@@ -59,6 +62,14 @@ export class AutoDiscovery extends Hookified {
 	/** The configuration endpoint being used. */
 	public get configEndpoint(): string {
 		return this._configEndpoint;
+	}
+
+	/**
+	 * TLS option applied to the configuration-endpoint connection.
+	 * `memcaches://` endpoints enable TLS even when this was not set.
+	 */
+	public get tls(): MemcacheTlsOption | undefined {
+		return this._tls;
 	}
 
 	/**
@@ -207,13 +218,18 @@ export class AutoDiscovery extends Hookified {
 			return this._configNode;
 		}
 
-		const { host, port } = this.parseEndpoint(this._configEndpoint);
+		const { host, port, secure } = this.parseEndpoint(this._configEndpoint);
+		const tls = secure ? this._tls || true : this._tls;
+		if (this._tls === undefined && tls) {
+			this._tls = tls;
+		}
 
 		this._configNode = new MemcacheNode(host, port, {
 			timeout: this._timeout,
 			keepAlive: this._keepAlive,
 			keepAliveDelay: this._keepAliveDelay,
 			sasl: this._sasl,
+			tls,
 		});
 
 		await this._configNode.connect();
@@ -276,7 +292,27 @@ export class AutoDiscovery extends Hookified {
 		}
 	}
 
-	private parseEndpoint(endpoint: string): { host: string; port: number } {
+	private parseEndpoint(endpoint: string): {
+		host: string;
+		port: number;
+		secure?: boolean;
+	} {
+		let rest = endpoint;
+		let secure: true | undefined;
+		const schemeEnd = endpoint.indexOf("://");
+		if (schemeEnd !== -1) {
+			const protocol = endpoint.slice(0, schemeEnd);
+			rest = endpoint.slice(schemeEnd + 3);
+			if (protocol === "memcaches") {
+				secure = true;
+			}
+		}
+
+		const parsed = this.parseHostPort(rest);
+		return secure ? { ...parsed, secure } : parsed;
+	}
+
+	private parseHostPort(endpoint: string): { host: string; port: number } {
 		// Handle IPv6 with brackets
 		if (endpoint.startsWith("[")) {
 			const bracketEnd = endpoint.indexOf("]");

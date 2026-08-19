@@ -8,6 +8,7 @@ import { type CommandOptions, createNode, MemcacheNode } from "./node.js";
 import {
 	type AutoDiscoverOptions,
 	type ClusterConfig,
+	type DiscoveredNode,
 	type ExecuteOptions,
 	type HashProvider,
 	MemcacheEvents,
@@ -600,6 +601,13 @@ export class Memcache extends Hookified {
 				secure = true;
 			}
 			cleanUri = protocolParts[1];
+		}
+
+		// Unix path after a scheme, e.g. memcaches:///var/run/memcached.sock
+		if (cleanUri.startsWith("/")) {
+			return secure
+				? { host: cleanUri, port: 0, secure }
+				: { host: cleanUri, port: 0 };
 		}
 
 		// Handle IPv6 addresses with brackets [::1]:11211
@@ -1643,6 +1651,7 @@ export class Memcache extends Hookified {
 			keepAlive: this._keepAlive,
 			keepAliveDelay: this._keepAliveDelay,
 			sasl: this._sasl,
+			tls: this._tls !== undefined ? this._tls : this._nodes[0]?.tls,
 		});
 
 		/* v8 ignore next -- @preserve */
@@ -1696,9 +1705,7 @@ export class Memcache extends Hookified {
 			const id = AutoDiscovery.nodeId(node);
 			if (!currentNodeIds.has(id)) {
 				try {
-					const host = node.ip || node.hostname;
-					const wrappedHost = host.includes(":") ? `[${host}]` : host;
-					await this.addNode(`${wrappedHost}:${node.port}`);
+					await this.addDiscoveredNode(node);
 				} catch (error) {
 					this.emit(MemcacheEvents.ERROR, id, error);
 				}
@@ -1715,6 +1722,65 @@ export class Memcache extends Hookified {
 				}
 			}
 		}
+	}
+
+	/**
+	 * TLS applied to newly discovered nodes: client-level option, else the
+	 * auto-discovery config-endpoint option (`memcaches://` infers `true`).
+	 */
+	private get effectiveTls(): MemcacheTlsOption | undefined {
+		return this._tls ?? this._autoDiscovery?.tls;
+	}
+
+	/**
+	 * Merge SNI (`servername`) into TLS options when discovery returns a DNS
+	 * hostname plus an IP. Connecting to the IP keeps node IDs stable; SNI
+	 * and certificate verification still use the hostname (required for
+	 * ElastiCache in-transit encryption).
+	 */
+	private tlsOptionsForDiscoveredNode(
+		node: DiscoveredNode,
+	): MemcacheTlsOption | undefined {
+		const tls = this.effectiveTls;
+		if (!tls) {
+			return tls;
+		}
+
+		const connectingHost = node.ip || node.hostname;
+		if (
+			!node.hostname ||
+			node.hostname === connectingHost ||
+			node.hostname.includes(":") ||
+			/^\d{1,3}(?:\.\d{1,3}){3}$/.test(node.hostname)
+		) {
+			return tls;
+		}
+
+		const base = tls === true ? {} : { ...tls };
+		if (base.servername) {
+			return tls;
+		}
+		return { ...base, servername: node.hostname };
+	}
+
+	private async addDiscoveredNode(node: DiscoveredNode): Promise<void> {
+		const host = node.ip || node.hostname;
+		const tls = this.tlsOptionsForDiscoveredNode(node);
+		if (tls) {
+			await this.addNode(
+				new MemcacheNode(host, node.port, {
+					timeout: this._timeout,
+					keepAlive: this._keepAlive,
+					keepAliveDelay: this._keepAliveDelay,
+					sasl: this._sasl,
+					tls,
+				}),
+			);
+			return;
+		}
+
+		const wrappedHost = host.includes(":") ? `[${host}]` : host;
+		await this.addNode(`${wrappedHost}:${node.port}`);
 	}
 }
 

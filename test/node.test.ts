@@ -132,6 +132,20 @@ describe("MemcacheNode", () => {
 			expect(node.port).toBe(11212);
 			expect(node.weight).toBe(1); // default weight
 		});
+
+		it("should report tlsEnabled from TLS options", () => {
+			expect(createNode("localhost", 11211).tlsEnabled).toBe(false);
+			expect(createNode("localhost", 11211, { tls: false }).tlsEnabled).toBe(
+				false,
+			);
+			expect(createNode("localhost", 11211, { tls: true }).tlsEnabled).toBe(
+				true,
+			);
+			expect(createNode("localhost", 11211, { tls: {} }).tlsEnabled).toBe(true);
+			const withCa = createNode("localhost", 11211, { tls: { ca: "x" } });
+			expect(withCa.tlsEnabled).toBe(true);
+			expect(withCa.tls).toEqual({ ca: "x" });
+		});
 	});
 
 	describe("Constructor and Properties", () => {

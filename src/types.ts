@@ -170,7 +170,8 @@ export interface MemcacheOptions {
 	maxExpiration?: number;
 
 	/**
-	 * Enable TLS for all node connections.
+	 * Enable TLS for all node connections, including Auto Discovery's
+	 * configuration-endpoint connection.
 	 * - `true`: connect using TLS with Node's default trust store. This is the
 	 *   typical setting for servers with publicly-trusted certificates
 	 *   (e.g. AWS ElastiCache Serverless, which requires TLS).

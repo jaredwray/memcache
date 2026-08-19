@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
-import Memcache from "../src/index";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer as createTlsServer } from "node:tls";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import Memcache, { createNode, MemcacheNode } from "../src/index";
 import { generateKey, generateValue } from "./test-utils.js";
 
 /**
@@ -303,6 +306,260 @@ describe("TLS", () => {
 
 			await client.disconnect();
 			await source.disconnect();
+		});
+
+		it("should parse memcaches:// Unix socket URIs as secure", () => {
+			const client = new Memcache({ nodes: [PLAIN_URI] });
+			expect(client.parseUri("memcaches:///var/run/memcached.sock")).toEqual({
+				host: "/var/run/memcached.sock",
+				port: 0,
+				secure: true,
+			});
+			expect(client.parseUri("memcache:///var/run/memcached.sock")).toEqual({
+				host: "/var/run/memcached.sock",
+				port: 0,
+			});
+		});
+	});
+
+	describe("MemcacheNode with TLS", () => {
+		let node: MemcacheNode;
+
+		afterEach(async () => {
+			if (node?.isConnected()) {
+				await node.disconnect();
+			}
+		});
+
+		it("should connect with valid CA options", async () => {
+			node = new MemcacheNode(TLS_HOST, TLS_PORT, { tls: { ca } });
+			await node.connect();
+			expect(node.isConnected()).toBe(true);
+			expect(node.tlsEnabled).toBe(true);
+			const version = await node.command("version");
+			expect(version).toContain("VERSION");
+		});
+
+		it("should fail handshake with the system trust store", async () => {
+			node = new MemcacheNode(TLS_HOST, TLS_PORT, {
+				tls: true,
+				timeout: 2000,
+			});
+			await expect(node.connect()).rejects.toThrow();
+			expect(node.isConnected()).toBe(false);
+		});
+
+		it("should emit connect after the TLS handshake completes", async () => {
+			node = new MemcacheNode(TLS_HOST, TLS_PORT, { tls: { ca } });
+			let connected = false;
+			node.on("connect", () => {
+				connected = true;
+			});
+			await node.connect();
+			expect(connected).toBe(true);
+		});
+
+		it("should reconnect over TLS", async () => {
+			node = new MemcacheNode(TLS_HOST, TLS_PORT, { tls: { ca } });
+			await node.connect();
+			await node.reconnect();
+			expect(node.isConnected()).toBe(true);
+			const version = await node.command("version");
+			expect(version).toContain("VERSION");
+		});
+
+		it("should ignore host/port overrides in tls options", async () => {
+			node = new MemcacheNode(TLS_HOST, TLS_PORT, {
+				tls: { ca, host: "example.com", port: 443 },
+			});
+			await node.connect();
+			expect(node.isConnected()).toBe(true);
+		});
+	});
+
+	describe("createNode factory with TLS", () => {
+		it("should create a node with TLS options", () => {
+			const node = createNode(TLS_HOST, TLS_PORT, { tls: { ca } });
+			expect(node.tlsEnabled).toBe(true);
+			expect(node.tls).toEqual({ ca });
+		});
+
+		it("should create a node without TLS options", () => {
+			const node = createNode(TLS_HOST, TLS_PORT);
+			expect(node.tlsEnabled).toBe(false);
+			expect(node.tls).toBeUndefined();
+		});
+	});
+
+	describe("client operations over TLS", () => {
+		it("should perform add/replace over TLS", async () => {
+			const client = createTlsClient();
+			const key = generateKey("tls-add-replace");
+			const value1 = generateValue();
+			const value2 = generateValue();
+
+			expect(await client.add(key, value1, 60)).toBe(true);
+			expect(await client.add(key, value2, 60)).toBe(false);
+			expect(await client.replace(key, value2, 60)).toBe(true);
+			expect(await client.get(key)).toBe(value2);
+
+			await client.disconnect();
+		});
+
+		it("should perform append/prepend over TLS", async () => {
+			const client = createTlsClient();
+			const key = generateKey("tls-append-prepend");
+
+			expect(await client.set(key, "middle", 60)).toBe(true);
+			expect(await client.append(key, "-suffix")).toBe(true);
+			expect(await client.prepend(key, "prefix-")).toBe(true);
+			expect(await client.get(key)).toBe("prefix-middle-suffix");
+
+			await client.disconnect();
+		});
+
+		it("should perform incr/decr over TLS", async () => {
+			const client = createTlsClient();
+			const key = generateKey("tls-counter");
+
+			expect(await client.set(key, "10", 60)).toBe(true);
+			expect(await client.incr(key, 5)).toBe(15);
+			expect(await client.decr(key, 3)).toBe(12);
+
+			await client.disconnect();
+		});
+
+		it("should perform touch over TLS", async () => {
+			const client = createTlsClient();
+			const key = generateKey("tls-touch");
+
+			expect(await client.set(key, "touchme", 60)).toBe(true);
+			expect(await client.touch(key, 3600)).toBe(true);
+			expect(await client.get(key)).toBe("touchme");
+
+			await client.disconnect();
+		});
+
+		it("should get version over TLS", async () => {
+			const client = createTlsClient();
+			const versions = await client.version();
+			expect(versions.size).toBeGreaterThan(0);
+			for (const version of versions.values()) {
+				expect(version.length).toBeGreaterThan(0);
+			}
+			await client.disconnect();
+		});
+
+		it("should get stats over TLS", async () => {
+			const client = createTlsClient();
+			const stats = await client.stats();
+			expect(stats.size).toBeGreaterThan(0);
+			for (const nodeStats of stats.values()) {
+				expect(nodeStats.pid).toBeDefined();
+			}
+			await client.disconnect();
+		});
+	});
+
+	describe("Unix socket TLS", () => {
+		it("should complete a TLS handshake on a Unix socket path", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "memcache-tls-"));
+			const socketPath = join(dir, "memcached.sock");
+			const key = readFileSync(
+				new URL("./certs/server_key.pem", import.meta.url),
+			);
+			const cert = readFileSync(
+				new URL("./certs/server_crt.pem", import.meta.url),
+			);
+
+			const server = createTlsServer({ key, cert }, (socket) => {
+				socket.end();
+			});
+			await new Promise<void>((resolve, reject) => {
+				server.once("error", reject);
+				server.listen(socketPath, () => resolve());
+			});
+
+			const node = new MemcacheNode(socketPath, 0, {
+				tls: { ca, checkServerIdentity: () => undefined },
+				timeout: 2000,
+			});
+			try {
+				await node.connect();
+				expect(node.isConnected()).toBe(true);
+				expect(node.uri).toBe(`memcaches://${socketPath}`);
+			} finally {
+				await node.disconnect();
+				await new Promise<void>((resolve) => server.close(() => resolve()));
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	describe("TLS + SASL", () => {
+		const TLS_SASL_HOST = process.env.MEMCACHE_TLS_SASL_HOST ?? "localhost";
+		const TLS_SASL_PORT = Number(process.env.MEMCACHE_TLS_SASL_PORT ?? "21215");
+		const TEST_USER = "testuser@localhost";
+		const TEST_PASS = "testpass";
+
+		let node: MemcacheNode;
+
+		afterEach(async () => {
+			if (node?.isConnected()) {
+				await node.disconnect();
+			}
+		});
+
+		it("should authenticate over TLS with valid credentials", async () => {
+			node = new MemcacheNode(TLS_SASL_HOST, TLS_SASL_PORT, {
+				tls: { ca },
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			await node.connect();
+			expect(node.isConnected()).toBe(true);
+			expect(node.isAuthenticated).toBe(true);
+			expect(node.tlsEnabled).toBe(true);
+		});
+
+		it("should fail SASL over TLS with invalid credentials", async () => {
+			node = new MemcacheNode(TLS_SASL_HOST, TLS_SASL_PORT, {
+				tls: { ca },
+				sasl: { username: "wrong", password: "wrong" },
+				timeout: 2000,
+			});
+			await expect(node.connect()).rejects.toThrow(
+				"SASL authentication failed",
+			);
+			expect(node.isConnected()).toBe(false);
+			expect(node.isAuthenticated).toBe(false);
+		});
+
+		it("should execute binary commands after TLS+SASL authentication", async () => {
+			node = new MemcacheNode(TLS_SASL_HOST, TLS_SASL_PORT, {
+				tls: { ca },
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			await node.connect();
+
+			const key = generateKey("tls-sasl");
+			const value = generateValue();
+			expect(await node.binarySet(key, value)).toBe(true);
+			expect(await node.binaryGet(key)).toBe(value);
+			await node.binaryDelete(key);
+		});
+
+		it("should authenticate over TLS via the client", async () => {
+			const client = new Memcache({
+				nodes: [`${TLS_SASL_HOST}:${TLS_SASL_PORT}`],
+				tls: { ca },
+				sasl: { username: TEST_USER, password: TEST_PASS },
+				lazyConnect: true,
+			});
+			await client.connect();
+			expect(client.isConnected()).toBe(true);
+			expect(client.nodes[0].isAuthenticated).toBe(true);
+			expect(client.nodes[0].tlsEnabled).toBe(true);
+			await client.disconnect();
 		});
 	});
 });
