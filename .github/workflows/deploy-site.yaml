@@ -47,7 +47,7 @@ jobs:
       run: |
         set -euo pipefail
         if ! pnpm exec wrangler pages project list --json \
-          | jq -e '.[] | select(."Project Name" == "memcache")' >/dev/null; then
+          | jq -e 'any(.[]; ."Project Name" == "memcache")' >/dev/null; then
           pnpm exec wrangler pages project create memcache --production-branch=main
         fi
         pnpm exec wrangler pages deploy site/dist --project-name=memcache --branch=main --commit-dirty=true
