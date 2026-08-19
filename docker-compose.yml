@@ -1,6 +1,6 @@
 services:
   memcached1:
-    image: memcached:1.6.44
+    image: memcached:1.6.45
     container_name: memcached-server-1
     ports:
       - "11211:11211"
@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
 
   memcached2:
-    image: memcached:1.6.44
+    image: memcached:1.6.45
     container_name: memcached-server-2
     ports:
       - "11212:11211"
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   memcached3:
-    image: memcached:1.6.44
+    image: memcached:1.6.45
     container_name: memcached-server-3
     ports:
       - "11213:11211"
@@ -27,7 +27,7 @@ services:
   # constraints: TLS mandatory, ascii protocol only, no UDP. Certs are
   # checked in (test-only); regenerate via test/certs/make-certs.sh.
   memcached-tls:
-    image: memcached:1.6.44
+    image: memcached:1.6.45
     container_name: memcached-server-tls
     ports:
       - "21211:11211"
