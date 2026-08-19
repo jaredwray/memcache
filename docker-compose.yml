@@ -44,3 +44,17 @@ services:
     ports:
       - "11215:11211"
     restart: unless-stopped
+
+  # TLS + SASL — ElastiCache-style in-transit encryption plus AUTH.
+  # Reuses the SASL image (PLAIN) with the TLS test certs mounted.
+  memcached-tls-sasl:
+    build:
+      context: ./test/sasl
+      dockerfile: Dockerfile
+    container_name: memcached-server-tls-sasl
+    ports:
+      - "21215:11211"
+    command: memcached -m 64 -vv -S -Z -o ssl_chain_cert=/certs/server_crt.pem -o ssl_key=/certs/server_key.pem -o ssl_session_cache -U 0 -u root
+    volumes:
+      - ./test/certs:/certs:ro
+    restart: unless-stopped

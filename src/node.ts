@@ -222,6 +222,21 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
+	 * TLS option this node was constructed with (`true`, `false`, a
+	 * `tls.ConnectionOptions` object, or `undefined` for plain TCP).
+	 */
+	public get tls(): MemcacheTlsOption | undefined {
+		return this._tls;
+	}
+
+	/**
+	 * Whether TLS is enabled for this node's connection.
+	 */
+	public get tlsEnabled(): boolean {
+		return Boolean(this._tls);
+	}
+
+	/**
 	 * Connect to the memcache server
 	 */
 	public async connect(): Promise<void> {
@@ -232,13 +247,9 @@ export class MemcacheNode extends Hookified {
 			}
 
 			if (this._tls) {
-				this._socket = createTlsConnection({
-					host: this._host,
-					port: this._port,
-					keepAlive: this._keepAlive,
-					keepAliveInitialDelay: this._keepAliveDelay,
-					...(this._tls === true ? {} : this._tls),
-				});
+				this._socket = createTlsConnection(
+					this.buildTlsConnectOptions(this._tls),
+				);
 			} else {
 				this._socket = createConnection({
 					host: this._host,
@@ -342,6 +353,29 @@ export class MemcacheNode extends Hookified {
 
 		// Now establish a fresh connection
 		await this.connect();
+	}
+
+	/**
+	 * Build `tls.connect()` options. User-supplied ConnectionOptions (CA, cert,
+	 * SNI, …) are passed through, but the node's host/port/path and keep-alive
+	 * settings always win so a `tls: { host, port }` object cannot retarget
+	 * the socket.
+	 */
+	private buildTlsConnectOptions(tls: MemcacheTlsOption): TlsConnectionOptions {
+		const options: TlsConnectionOptions = tls === true ? {} : { ...tls };
+		// Node identity always wins over any host/port/path in user options.
+		options.host = undefined;
+		options.port = undefined;
+		options.path = undefined;
+		if (this._port === 0) {
+			options.path = this._host;
+		} else {
+			options.host = this._host;
+			options.port = this._port;
+		}
+		options.keepAlive = this._keepAlive;
+		options.keepAliveInitialDelay = this._keepAliveDelay;
+		return options;
 	}
 
 	/**

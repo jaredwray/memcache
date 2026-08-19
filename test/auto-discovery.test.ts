@@ -817,6 +817,182 @@ describe("Memcache AutoDiscovery Integration", () => {
 			expect(client.nodeIds).toContain("[2001:db8::1]:11211");
 			expect(client.nodeIds).toContain("10.0.0.1:11211");
 		});
+
+		it("should apply TLS and SNI hostname to discovered nodes", async () => {
+			const client = new Memcache({
+				nodes: ["10.0.0.1:11211"],
+				lazyConnect: true,
+				tls: true,
+			});
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{ hostname: "host1", ip: "10.0.0.1", port: 11211 },
+					{
+						hostname: "host2.cache.amazonaws.com",
+						ip: "10.0.0.2",
+						port: 11211,
+					},
+				],
+			});
+
+			const existing = client.getNode("10.0.0.1:11211");
+			expect(existing?.tlsEnabled).toBe(true);
+			expect(existing?.tls).toBe(true);
+
+			const discovered = client.getNode("10.0.0.2:11211");
+			expect(discovered?.tlsEnabled).toBe(true);
+			expect(discovered?.tls).toEqual({
+				servername: "host2.cache.amazonaws.com",
+			});
+			expect(discovered?.uri).toBe("memcaches://10.0.0.2:11211");
+		});
+
+		it("should keep caller-supplied servername on discovered TLS nodes", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: { servername: "custom.example.com" },
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{
+						hostname: "host1.cache.amazonaws.com",
+						ip: "10.0.0.5",
+						port: 11211,
+					},
+				],
+			});
+
+			expect(client.getNode("10.0.0.5:11211")?.tls).toEqual({
+				servername: "custom.example.com",
+			});
+		});
+
+		it("should not set SNI when discovered hostname is the connecting IP", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [{ hostname: "10.0.0.8", ip: "10.0.0.8", port: 11211 }],
+			});
+
+			expect(client.getNode("10.0.0.8:11211")?.tls).toBe(true);
+		});
+
+		it("should apply TLS to IPv6 discovered nodes and set SNI", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{
+						hostname: "host1.example.com",
+						ip: "2001:db8::1",
+						port: 11211,
+					},
+				],
+			});
+
+			const discovered = client.getNode("[2001:db8::1]:11211");
+			expect(discovered?.tlsEnabled).toBe(true);
+			expect(discovered?.tls).toEqual({ servername: "host1.example.com" });
+		});
+
+		it("should not set SNI when discovered hostname is an IP", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [{ hostname: "10.0.0.1", ip: "10.0.0.2", port: 11211 }],
+			});
+
+			expect(client.getNode("10.0.0.2:11211")?.tls).toBe(true);
+		});
+
+		it("should not set SNI when discovered hostname is empty", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [{ hostname: "", ip: "10.0.0.4", port: 11211 }],
+			});
+
+			expect(client.getNode("10.0.0.4:11211")?.tls).toBe(true);
+		});
+
+		it("should not set SNI when discovered hostname is IPv6", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: true,
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [{ hostname: "2001:db8::1", ip: "2001:db8::2", port: 11211 }],
+			});
+
+			expect(client.getNode("[2001:db8::2]:11211")?.tls).toBe(true);
+		});
+
+		it("should merge SNI into existing tls ConnectionOptions", async () => {
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				tls: { minVersion: "TLSv1.2" },
+			});
+			await client.removeNode("localhost:11211");
+
+			// @ts-expect-error - accessing private method for testing
+			await client.applyClusterConfig({
+				version: 1,
+				nodes: [
+					{
+						hostname: "node.cache.amazonaws.com",
+						ip: "10.0.0.6",
+						port: 11211,
+					},
+				],
+			});
+
+			expect(client.getNode("10.0.0.6:11211")?.tls).toEqual({
+				minVersion: "TLSv1.2",
+				servername: "node.cache.amazonaws.com",
+			});
+		});
 	});
 });
 
@@ -955,6 +1131,112 @@ describe("AutoDiscovery parseEndpoint", () => {
 		// @ts-expect-error - accessing private method for testing
 		const result = discovery.parseEndpoint("host:abc");
 		expect(result).toEqual({ host: "host", port: 11211 });
+	});
+
+	it("should parse memcaches:// as secure", () => {
+		const discovery = new AutoDiscovery({
+			configEndpoint: "memcaches://myhost:11211",
+			pollingInterval: 60000,
+			useLegacyCommand: false,
+			timeout: 5000,
+			keepAlive: true,
+			keepAliveDelay: 1000,
+		});
+
+		// @ts-expect-error - accessing private method for testing
+		expect(discovery.parseEndpoint("memcaches://myhost:11211")).toEqual({
+			host: "myhost",
+			port: 11211,
+			secure: true,
+		});
+		// @ts-expect-error - accessing private method for testing
+		expect(discovery.parseEndpoint("memcache://myhost:11211")).toEqual({
+			host: "myhost",
+			port: 11211,
+		});
+		// @ts-expect-error - accessing private method for testing
+		expect(discovery.parseEndpoint("memcaches://[::1]:21211")).toEqual({
+			host: "::1",
+			port: 21211,
+			secure: true,
+		});
+	});
+});
+
+describe("AutoDiscovery TLS", () => {
+	let server: FakeConfigServer;
+
+	afterEach(async () => {
+		if (server) {
+			await server.stop();
+		}
+	});
+
+	it("should pass tls options to the config node", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const discovery = new AutoDiscovery({
+			configEndpoint: server.endpoint,
+			pollingInterval: 60000,
+			useLegacyCommand: false,
+			timeout: 500,
+			keepAlive: true,
+			keepAliveDelay: 1000,
+			tls: true,
+		});
+
+		await expect(discovery.start()).rejects.toThrow();
+		expect(discovery.tls).toBe(true);
+		// @ts-expect-error - accessing private field for testing
+		expect(discovery._configNode?.tlsEnabled).toBe(true);
+	});
+
+	it("should enable TLS for memcaches:// config endpoints", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const discovery = new AutoDiscovery({
+			configEndpoint: `memcaches://${server.endpoint}`,
+			pollingInterval: 60000,
+			useLegacyCommand: false,
+			timeout: 500,
+			keepAlive: true,
+			keepAliveDelay: 1000,
+		});
+
+		await expect(discovery.start()).rejects.toThrow();
+		expect(discovery.tls).toBe(true);
+		// @ts-expect-error - accessing private field for testing
+		expect(discovery._configNode?.tlsEnabled).toBe(true);
+	});
+
+	it("should keep explicit tls options when the endpoint is memcaches://", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const tls = { servername: "cfg.example.com" };
+		const discovery = new AutoDiscovery({
+			configEndpoint: `memcaches://${server.endpoint}`,
+			pollingInterval: 60000,
+			useLegacyCommand: false,
+			timeout: 500,
+			keepAlive: true,
+			keepAliveDelay: 1000,
+			tls,
+		});
+
+		await expect(discovery.start()).rejects.toThrow();
+		expect(discovery.tls).toEqual(tls);
 	});
 });
 
@@ -1295,6 +1577,127 @@ describe("Memcache startAutoDiscovery", () => {
 		await client.disconnect();
 
 		vi.restoreAllMocks();
+	});
+
+	it("should pass client-level tls to AutoDiscovery", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const client = new Memcache({
+			nodes: ["10.0.0.1:11211"],
+			lazyConnect: true,
+			tls: true,
+			autoDiscover: {
+				enabled: true,
+				configEndpoint: server.endpoint,
+			},
+		});
+		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+		client.on(MemcacheEvents.ERROR, () => {});
+
+		await client.connect();
+		// @ts-expect-error - accessing private field for testing
+		expect(client._autoDiscovery?.tls).toBe(true);
+
+		await client.disconnect();
+	});
+
+	it("should inherit tls from the first node when client tls is unset", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const tlsNode = new MemcacheNode("10.0.0.1", 11211, { tls: true });
+		const client = new Memcache({
+			nodes: [tlsNode],
+			lazyConnect: true,
+			autoDiscover: {
+				enabled: true,
+				configEndpoint: server.endpoint,
+			},
+		});
+		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+		client.on(MemcacheEvents.ERROR, () => {});
+
+		await client.connect();
+		// @ts-expect-error - accessing private field for testing
+		expect(client._autoDiscovery?.tls).toBe(true);
+
+		await client.disconnect();
+	});
+
+	it("should pass tls: false through to AutoDiscovery", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: [],
+		});
+		await server.start();
+		server.nodes = [`host1|127.0.0.1|${server.port}`];
+
+		const client = new Memcache({
+			nodes: [server.endpoint],
+			lazyConnect: true,
+			tls: false,
+			autoDiscover: {
+				enabled: true,
+				configEndpoint: server.endpoint,
+			},
+		});
+		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+		client.on(MemcacheEvents.ERROR, () => {});
+
+		await client.connect();
+		// @ts-expect-error - accessing private field for testing
+		expect(client._autoDiscovery?.tls).toBe(false);
+
+		await client.disconnect();
+	});
+
+	it("should apply inferred memcaches:// TLS to discovered nodes", async () => {
+		server = new FakeConfigServer({
+			version: 1,
+			nodes: ["host1|10.0.0.1|11211"],
+		});
+		await server.start();
+
+		const client = new Memcache({
+			nodes: ["10.0.0.1:11211"],
+			lazyConnect: true,
+			autoDiscover: {
+				enabled: true,
+				configEndpoint: `memcaches://${server.endpoint}`,
+			},
+		});
+		client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+		client.on(MemcacheEvents.ERROR, () => {});
+
+		await client.connect();
+		// @ts-expect-error - accessing private field for testing
+		expect(client._autoDiscovery?.tls).toBe(true);
+
+		// @ts-expect-error - accessing private method for testing
+		await client.applyClusterConfig({
+			version: 1,
+			nodes: [
+				{ hostname: "host1", ip: "10.0.0.1", port: 11211 },
+				{
+					hostname: "host2.example.com",
+					ip: "10.0.0.9",
+					port: 11211,
+				},
+			],
+		});
+
+		expect(client.getNode("10.0.0.9:11211")?.tls).toEqual({
+			servername: "host2.example.com",
+		});
+
+		await client.disconnect();
 	});
 });
 

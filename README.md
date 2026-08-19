@@ -67,8 +67,14 @@ Nodejs Memcache Client
 - [IPv6 Support](#ipv6-support)
 - [TLS Support](#tls-support)
   - [Connecting with TLS](#connecting-with-tls)
+  - [TLS Options](#tls-options)
+  - [Per-Node TLS Configuration](#per-node-tls-configuration)
+  - [TLS Node Properties](#tls-node-properties)
   - [AWS ElastiCache Serverless](#aws-elasticache-serverless)
   - [Custom certificate authorities](#custom-certificate-authorities)
+  - [Auto Discovery with TLS](#auto-discovery-with-tls)
+  - [TLS and SASL together](#tls-and-sasl-together)
+  - [TLS Server Configuration](#tls-server-configuration)
 - [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
@@ -209,6 +215,7 @@ const client = new Memcache({
 - `retryDelay?: number` - Base delay in milliseconds between retries (default: 100)
 - `retryBackoff?: RetryBackoffFunction` - Function to calculate backoff delay (default: fixed delay)
 - `retryOnlyIdempotent?: boolean` - Only retry commands marked as idempotent (default: true)
+- `sasl?: SASLCredentials` - SASL PLAIN credentials for all nodes (see [SASL Authentication](#sasl-authentication))
 - `lazyConnect?: boolean` - When `true`, nodes will not connect until the first command is executed. When `false`, nodes connect eagerly during construction (default: true)
 - `maxKeySize?: number` - Maximum allowed key size in characters (default: 250, memcache protocol max)
 - `maxValueSize?: number` - Maximum allowed value size in bytes (default: 1048576, memcached default)
@@ -1143,6 +1150,47 @@ even when the client-level option is unset):
 const client = new Memcache('memcaches://my-cache.example.com:11211');
 ```
 
+## TLS Options
+
+The `tls` option accepts:
+
+- `true` / `{}` — connect using TLS with Node's default trust store
+- a `tls.ConnectionOptions` object — passed through to `tls.connect()` (CA,
+  client certificates, `servername`, `minVersion`, …)
+- `false` / `undefined` (default) — plain TCP
+
+Certificate verification is always on (standard Node behavior). To connect to
+a server with a self-signed cert, pass its CA — do not disable verification.
+
+The node's host, port (or Unix socket path), and keep-alive settings always
+win over any `host` / `port` / `path` fields in a `tls` options object.
+
+## Per-Node TLS Configuration
+
+You can also enable TLS when creating individual nodes:
+
+```javascript
+import { createNode } from 'memcache';
+import { readFileSync } from 'node:fs';
+
+const node = createNode('memcached-internal', 11211, {
+  tls: { ca: readFileSync('/etc/ssl/private-ca.pem') },
+});
+
+await node.connect();
+await node.command('version');
+```
+
+## TLS Node Properties
+
+- `node.tlsEnabled` — `true` when TLS is configured for the node
+- `node.tls` — the TLS option the node was constructed with
+- `node.uri` — `memcaches://host:port` when TLS is enabled, so passing it
+  back into `addNode()` or the constructor keeps TLS on even without a
+  client-level `tls` option
+
+The client's `connect` event fires after the TLS handshake completes.
+
 ## AWS ElastiCache Serverless
 
 ElastiCache Serverless (Memcached) **requires** TLS and only speaks the text
@@ -1173,17 +1221,72 @@ const client = new Memcache({
 });
 ```
 
-Notes:
+## Auto Discovery with TLS
 
-- `tls: true` / `tls: {}` both enable TLS with default trust; certificate
-  verification is always on (standard Node behavior). To connect to a server
-  with a self-signed cert, pass its CA — do not disable verification.
-- `node.uri` uses `memcaches://` when TLS is enabled, so passing it back into
-  `addNode()` or the constructor keeps TLS on even without a client-level
-  `tls` option.
-- Auto-discovery's configuration-endpoint connection does not use TLS yet;
-  for ElastiCache node-based clusters with in-transit encryption, connect to
-  node endpoints directly.
+Auto Discovery uses the same client-level `tls` (and `sasl`) options as data
+nodes, including the configuration-endpoint connection. Set `tls: true` (or a
+CA options object) when the cluster requires in-transit encryption:
+
+```javascript
+const client = new Memcache({
+  nodes: [],
+  tls: true,
+  autoDiscover: {
+    enabled: true,
+    configEndpoint: 'my-cluster.cfg.use1.cache.amazonaws.com:11211',
+  },
+});
+```
+
+A `memcaches://` configuration endpoint also enables TLS for discovery. When
+discovery returns a DNS hostname plus an IP, the client connects to the IP
+(stable node IDs) and sets TLS SNI/`servername` to the hostname so certificate
+verification matches ElastiCache node certs.
+
+## TLS and SASL together
+
+TLS and SASL compose: the TCP handshake completes, then SASL PLAIN runs on
+the encrypted socket. Use both for ElastiCache clusters that require
+in-transit encryption **and** AUTH. SASL-enabled servers still require the
+binary protocol after authentication (see [SASL Authentication](#sasl-authentication)).
+
+```javascript
+const client = new Memcache({
+  nodes: ['my-cluster.use1.cache.amazonaws.com:11211'],
+  tls: true,
+  sasl: { username: 'user', password: 'token' },
+});
+
+await client.connect();
+const node = client.nodes[0];
+await node.binarySet('mykey', 'hello');
+```
+
+## TLS Server Configuration
+
+To run memcached with TLS:
+
+1. **Build or use an image with TLS** — memcached 1.5.13+ (`--enable-tls`);
+   the official Docker image supports it since 1.5.21
+
+2. **Provide a certificate chain and key**
+
+3. **Start memcached with `-Z`**:
+   ```bash
+   memcached -Z \
+     -o ssl_chain_cert=/path/to/server_crt.pem \
+     -o ssl_key=/path/to/server_key.pem \
+     -o ssl_session_cache
+   ```
+
+   ElastiCache Serverless is ASCII-only; a local stand-in is:
+   ```bash
+   memcached -Z -B ascii -U 0 \
+     -o ssl_chain_cert=/path/to/server_crt.pem \
+     -o ssl_key=/path/to/server_key.pem
+   ```
+
+For more details, see the [memcached TLS documentation](https://github.com/memcached/memcached/wiki/TLS).
 
 # Benchmarks
 
