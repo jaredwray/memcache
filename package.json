@@ -51,9 +51,9 @@
   "homepage": "https://memcachejs.org",
   "engines": {
     "node": ">=22.19.0",
-    "pnpm": ">=11"
+    "pnpm": ">=12"
   },
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@12.1.0",
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
     "@faker-js/faker": "^10.6.0",
