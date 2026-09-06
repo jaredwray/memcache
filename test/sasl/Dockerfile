@@ -1,4 +1,4 @@
-FROM memcached:1.6.45
+FROM memcached:1.6.45@sha256:75c93cc91e76853da7c029e74d6e8dbd44774dd3713c93be8cd1971ad26120a4
 
 USER root
 
