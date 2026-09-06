@@ -16,7 +16,7 @@ Profile: npm library · public
 
 ## 3. Dependencies (pnpm)
 
-- [x] `packageManager: pnpm@11.3+` pinned in `package.json` — verified 2026-08-17 (`pnpm@11.5.2`)
+- [x] `packageManager` pinned in `package.json` with Corepack SHA (`pnpm@12.1.0+sha512.…`) — verified 2026-09-06
 - [x] 7-day cooldown: `minimumReleaseAge: 10080`, `minimumReleaseAgeStrict: true`, `minimumReleaseAgeIgnoreMissingTime: false`; no first-party `minimumReleaseAgeExclude` — PR #108
 - [x] `trustPolicy: no-downgrade`; no first-party `trustPolicyExclude` (PR #120 pending)
 - [x] Lifecycle scripts blocked: `strictDepBuilds: true`, `dangerouslyAllowAllBuilds: false`, `allowBuilds: {}` baseline — PR #109
