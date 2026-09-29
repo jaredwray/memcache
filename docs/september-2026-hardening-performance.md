@@ -1,0 +1,294 @@
+# September 2026 Hardening & Performance Plan
+
+**Status:** Proposed · **Created:** 2026-09-29 · **Scope:** `src/node.ts`, `src/index.ts`, `src/binary-protocol.ts`, `src/ketama.ts`, tests, benchmarks, README
+
+This plan turns a full review of the client, plus an independent second audit, into a sequence of small changes that can each be merged on its own. Unless marked as code reading, every finding below was reproduced against a real memcached 1.6.45 server using the real dependencies. Where a prototype of the fix was built, the numbers compare the current code with that prototype.
+
+## Summary
+
+| ID | Issue | Measured on real memcached 1.6.45 | Size |
+|---|---|---|---|
+| H1 | Concurrent SASL/binary requests receive each other's responses | 3 concurrent `binaryGet`s for `a`, `b`, `c` all returned `a`'s value | M |
+| H2 | Concurrent connects open one socket each; stale sockets act on the live one | 50 concurrent cold requests opened 50 sockets; +49 leaked per idle→busy cycle; in 2 of 6 runs a request never settled, in 3 of 6 a request returned `undefined` for a key that exists | M |
+| H3 | `timeout` is an idle timer: it drops idle connections and never fires for a stalled server while the client keeps writing | idle connections dropped after `timeout`; with a write every 100 ms, a request to a stalled server was still pending after 3 s (`timeout: 500`) | M |
+| P1 | One `write()` syscall per command | +17% throughput at 10 in flight, +85% at 100, +115% at 500 | S |
+| P2 | O(requested × found) multi-get miss check inside the data handler | 10k-key `gets()`: 1,722 → 38 ms | XS |
+| P3 | Whole buffer re-copied on every chunk of a large value | TCP 16 MB: 517 → 48 ms; TLS 4 MB: 110 → 9.5 ms | S |
+| P4 | `Array.shift()` queue degrades to O(n) when deep | burst of 100k gets: 18.1 → 0.84 s | S |
+
+Supporting work: T1 (flaky shared-server tests), B1 (benchmarks that can see these problems), N1–N6 (next-tier optimizations), R1 (docs and release).
+
+## Ground rules for every item
+
+- One PR per item ID, in the order below unless noted. Each PR can be merged and reverted on its own.
+- `pnpm build` and `pnpm test` pass with 100% coverage (see `AGENTS.md`).
+- Each fix lands with a regression test that fails on the unfixed code.
+- Performance PRs include before/after numbers from the B1 benchmark suite in the PR description.
+- No public API is removed. Observable behavior changes are called out in the PR, the README and the release notes.
+- Each PR updates the [Tracking](#tracking) table.
+
+## Execution order
+
+| # | ID | Title | Depends on | Behavior change |
+|---|---|---|---|---|
+| 1 | T1 | Isolate tests that flush the shared server | — | No (tests only) |
+| 2 | B1 | Benchmarks for concurrency, multi-get, large values and bursts | — | No |
+| 3 | H1 | Binary/SASL request queue | — | No |
+| 4 | H2 | Single-flight connect, socket-scoped handlers | — | No (bug fix) |
+| 5 | H3 | Connect timeout plus command deadline; no idle teardown | H2 | **Yes** |
+| 6 | P1 | Coalesce socket writes per tick | B1, H1 | No |
+| 7 | P2 | Linear multi-get miss detection | B1 | No |
+| 8 | P3 | Buffer large values without re-copying | B1 | No |
+| 9 | P4 | O(1) command queue | B1, H3 | Minor (`commandQueue` returns a snapshot) |
+| 10 | N1–N6 | Next-tier optimizations | P1–P4 | No |
+| 11 | R1 | Docs and release | all | — |
+
+T1 and B1 are small and make every later PR easier to trust. H1 has no dependencies, so it can go first if the most severe issue should land first.
+
+---
+
+## Phase 0 — Foundations
+
+### T1 — Isolate tests that flush the shared server
+
+**Problem.** Vitest runs test files in parallel against the same memcached (`localhost:11211`). Some tests clear the whole server: `client.flush()` and a delayed `flush(1)` (`test/index.test.ts:1724-1753`) and `node.command("flush_all")` (`test/node.test.ts:441-442`). A test in another file that is between writing a key and reading it back can lose the key.
+
+**Evidence.** 2 of 7 full `pnpm test` runs during validation failed, each time on a different test whose key had disappeared: `should handle async append hooks` (`test/index.test.ts:2589`, `append` returned `false`) and `should execute prepend on all replica nodes` (`test/index.test.ts:3588`, `get` returned `undefined`). Both passed on re-run.
+
+**Fix.**
+- Add a dedicated compose service (for example `memcached-flush` on port 11214) and point every `flush` / `flush_all` test at it.
+- Check the tests for any other server-wide commands and route them the same way.
+
+**Done when.** The flush tests use the dedicated server and repeated `pnpm test` runs (for example 20 in a row) pass.
+
+### B1 — Benchmarks that can see these problems
+
+**Problem.** `benchmark/set-get.ts:53-58` measures one set→get at a time, so none of the issues in this plan show up in it.
+
+**Fix.**
+- Add a `benchmark:perf` script that covers these scenarios and prints a markdown table:
+  - closed-loop concurrency with 1 / 10 / 100 / 500 requests in flight (get and set)
+  - `gets()` with 100 / 1,000 / 10,000 keys
+  - `get` of 256 KB / 1 MB / 4 MB values over TCP and TLS
+  - bursts of 10k / 30k / 100k concurrent gets
+  - cold start: sockets opened by 50 concurrent first requests
+- Add a `memcached-bench` compose service without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values).
+- Accept a host override (for example `MEMCACHE_BENCH_HOST`). On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IP.
+
+**Done when.** `pnpm benchmark:perf` runs in a couple of minutes, and the baseline for `main` is recorded in the PR description.
+
+---
+
+## Phase 1 — Correctness and hardening
+
+### H1 — Binary/SASL request queue (wrong values under concurrency)
+
+**Severity: critical.** A caller can receive another key's value, which can leak data between users.
+
+**Problem.** `binaryRequest` (`src/node.ts:457-495`) adds a new `data` listener for each request (`:492`) and resolves with the first complete packet it sees. When requests overlap, every listener consumes the first response and the later responses are dropped. `binaryStats` (`:679-747`) and SASL authentication (`:448`) use the same pattern. SASL servers can only be used through these `binary*` methods (`README.md:863`).
+
+**Evidence.** On the SASL test server (`:11215`), `Promise.all([binaryGet("a"), binaryGet("b"), binaryGet("c")])` returned `["value-of-a", "value-of-a", "value-of-a"]`.
+
+**Fix.**
+- One persistent binary `data` handler per socket that frames packets (24-byte header plus `totalBodyLength`) from a chunk list, without re-copying.
+- A FIFO of pending binary requests. memcached answers binary requests in order on a connection (no quiet opcodes are used), so FIFO matching is enough. Also set `opaque` to a sequence number and reject on a mismatch, so a desync fails loudly instead of returning the wrong data.
+- `binaryStats` becomes a queue entry that collects `STAT` packets until the empty-key terminator. SASL authentication goes through the same queue as its first entry.
+- Reject pending binary requests when the socket closes, as text commands already are.
+
+**Tests.**
+- A concurrent mix of `binaryGet` / `binarySet` / `binaryIncr` on the SASL server returns each caller's own result.
+- Mock-socket tests: several packets in one chunk, one packet split across chunks, stats spanning chunks (extend `test/node.test.ts:1049`), `opaque` mismatch rejects, close rejects everything pending.
+
+**Compatibility.** No API change.
+
+### H2 — Single-flight connect and socket-scoped handlers
+
+**Severity: high.** Affects the default configuration (`lazyConnect: true`) and every idle→busy transition.
+
+**Problem.**
+- `connect()` (`src/node.ts:242-320`) only returns early once connected (`:244`). Every caller that arrives while a connection is being opened creates another socket (`:249-260`) and overwrites `this._socket`. Callers that do this under concurrency: `getNodesByKey` (`src/index.ts:1352-1372`), `gets` (`:798`), `flush` / `stats` / `version` (`:1237`, `:1262`, `:1285`) and retries (`:1594`).
+- The handlers act on instance state instead of the socket they belong to. The timeout handler destroys `this._socket` (`:316`), which can be a different, healthy socket. The close handler (`:307-312`) marks the node disconnected and rejects the shared queue.
+- A socket destroyed before it connects never settles its `connect()` promise, so the waiting request hangs forever (there is no per-request timeout; see H3).
+- Parser state (`_buffer`, `_pendingValueBytes`, `_multilineData`) is reset by `reconnect()` (`:346-351`) but not on close, so a disconnect mid-response can corrupt parsing on the next connection (code reading).
+
+**Evidence** (real memcached; `timeout` lowered to 1–1.5 s to keep the test short):
+- 50 concurrent first requests opened 50 TCP connections.
+- Each idle→burst cycle of 50 requests leaked 49 more sockets: 99 → 148 → 197 → 246 open. `disconnect()` closed one (245 stayed open), and the leaked sockets keep the process alive. memcached's default connection limit is 1024.
+- In every run, the leaked sockets' timeouts destroyed the active socket. In 2 of 6 runs a request never settled; in 3 of 6 a request returned `undefined` for a key that exists.
+- With a prototype of the fix: 1 socket, 1 open across cycles, 0 after `disconnect()`, and all 6 runs clean.
+
+**Fix.**
+1. `connect()` returns a shared in-flight promise (`this._connecting`), cleared in `finally`.
+2. Socket setup moves into a helper that captures `const socket`. Handlers only touch shared state while `socket` is still the node's socket. Treat "no socket" after `disconnect()` as current, so pending commands are still rejected. The timeout handler destroys `socket`, not `this._socket`.
+3. A `close` before the socket is ready rejects the connect promise.
+4. Move the parser reset out of `reconnect()` into a helper and also run it on close.
+
+**Tests** (an in-process fake TCP server that counts accepted connections, following `test/fake-config-server.ts`):
+- N concurrent `get()`s on a lazy client produce exactly one accepted connection.
+- Two concurrent `connect()` calls share one socket.
+- A server that accepts and immediately closes makes `connect()` reject instead of hang.
+- After `reconnect()`, the old socket's `close` does not reject commands queued on the new socket.
+- A server that sends a partial `VALUE` and then closes leaves the next connection parsing cleanly.
+
+**Compatibility.** No API change. `connect` / `close` events fire once per real connection instead of once per duplicate socket.
+
+### H3 — Timeouts: connect timeout plus command deadline, no idle teardown
+
+**Severity: high.** Behavior change (documented).
+
+**Problem.** `socket.setTimeout(this._timeout)` (`src/node.ts:262`) is a socket inactivity timer, and its handler destroys the socket (`:314-318`). The README documents `timeout` as an operation timeout (`README.md:210`, `:238-239`). As implemented:
+- Healthy idle connections are destroyed after `timeout` ms (default 5 s), so the next request pays for a reconnect: a TCP round trip plus the TLS and SASL handshakes where configured. While H2 is unfixed, that reconnect also stampedes.
+- Writes reset the timer, so a stalled server is never detected while the client keeps sending. There is no real per-operation deadline.
+- The Auto Discovery config connection is torn down between polls and rebuilt on every poll (`src/auto-discovery.ts:216-237`; code reading).
+
+**Evidence.**
+- `timeout: 1000` and 1.3 s idle: the node was disconnected, and the next request took 1.42 ms vs 1.03 ms when the connection is kept (local; production adds network round trips and handshakes).
+- A server that accepts but never replies, `timeout: 500`: with no further writes the request settled after ~500 ms; with a write every 100 ms it was still pending after 3 s.
+
+**Fix.**
+- Use the socket timeout only while connecting (including SASL authentication), then `socket.setTimeout(0)`. This keeps the existing `Connection timeout` behavior (`test/node.test.ts:336-341`).
+- Add one command-deadline timer per node (not one per request). It is armed when the first command becomes pending, refreshed whenever response bytes arrive (never by writes), cleared when nothing is pending, and `unref()`'d. On expiry: emit `timeout`, reject pending commands with a timeout error, and destroy the socket.
+- Idle connections stay open. TCP keep-alive (already enabled) detects dead peers.
+- Apply the same deadline to the binary queue from H1.
+
+**Tests.**
+- Idle longer than `timeout`: still connected, no `timeout` event.
+- Stalled server with a pending command: rejects after about `timeout` and emits `timeout`, including while other commands keep being written.
+- A slow but progressing response (for example a large value arriving in chunks) is not timed out.
+- The existing connect-timeout test still passes.
+
+**Compatibility.** Observable change: idle connections are no longer closed, and the `timeout` event now means "connect or command deadline exceeded". Update `README.md:210`, `:238-239`, `:451-452` and `:470`. Ship in a minor release.
+
+---
+
+## Phase 2 — Performance
+
+Measured against real memcached 1.6.45 with the real dependencies (environment in the [appendix](#appendix--how-the-numbers-were-measured)). Compare before and after within a row; absolute numbers depend on the machine.
+
+### P1 — Coalesce socket writes per tick
+
+**Problem.** Every `command()` makes its own `socket.write()` call (`src/node.ts:807`) with Nagle's algorithm disabled (`:263`), so each command is its own syscall and TCP segment. In a CPU profile at 100 requests in flight, `writeUtf8String` was 45.6% of client CPU.
+
+**Evidence** (get throughput, ops/s):
+
+| In flight | Current | Cork per tick | Change |
+|---|---|---|---|
+| 1 | 12.1k | 11.8k | within noise |
+| 10 | 64.2k | 75.3k | +17% |
+| 100 | 91.9k | 170.2k | +85% |
+| 500 | 89.1k | 191.4k | +115% |
+
+Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches encrypted writes. An "adaptive" variant (send the first write of a tick immediately, cork the rest) was slower than the simple version at 10–100 in flight, so it is not recommended.
+
+**Fix.** In `command()` and in the H1 binary write path: if the socket isn't corked, call `socket.cork()` and schedule `process.nextTick(() => socket.uncork())`, then `socket.write(wire)`. Track the corked flag per socket and clear it on close.
+
+**Tests.** Commands issued in one tick produce a single `cork` / `uncork` pair (mock socket); order is preserved; a socket destroyed before the tick ends does not throw; sequential behavior is unchanged.
+
+**Compatibility.** None.
+
+### P2 — Linear multi-get miss detection
+
+**Problem.** At the end of every multi-line get, misses are computed with `requestedKeys.filter((key) => !foundKeys.includes(key))` (`src/node.ts:974-976`). That is O(requested × found) and runs synchronously inside the socket `data` handler, so it blocks the whole event loop. `get` and `gets` always pass `requestedKeys` (`src/index.ts:709-712`, `:801-804`).
+
+**Evidence** (`gets()`, all hits):
+
+| Keys | Current | With a `Set` |
+|---|---|---|
+| 100 | 1.03 ms | 0.89 ms |
+| 1,000 | 20.7 ms | 4.5 ms |
+| 5,000 | 372 ms | 16.1 ms |
+| 10,000 | 1,722 ms | 38.3 ms |
+
+**Fix.** Build `new Set(foundKeys)` once and emit `miss` for each requested key that isn't in it.
+
+**Tests.** The existing hit/miss event tests, plus a 10,000-key `gets()` correctness test (no timing assertion).
+
+**Compatibility.** None.
+
+### P3 — Buffer large values without re-copying
+
+**Problem.** While a value body is arriving, `handleData` concatenates the whole accumulated buffer with each new chunk (`src/node.ts:813-814`, waiting in `:818-830`), which copies O(n² / chunk size) bytes. TLS delivers records of at most 16 KB, so it is hit harder than TCP (64 KB reads).
+
+**Evidence** (single `get`):
+
+| Value | TCP: current → fixed | TLS: current → fixed |
+|---|---|---|
+| 256 KB | 1.40 → 1.03 ms | 2.56 → 1.37 ms |
+| 1 MB | 4.37 → 2.33 ms (1.9×) | 10.15 → 3.42 ms (3.0×) |
+| 4 MB | 30.4 → 8.8 ms (3.5×) | 110.2 → 9.5 ms (11.6×) |
+| 16 MB | 517 → 48 ms (10.8×) | not measured |
+
+**Fix.** While waiting for a value body, collect chunks in a list and return until the value plus its CRLF is buffered, then concatenate once. `binaryStats` already uses this pattern (`:689-741`).
+
+**Tests.** Values delivered in 1-byte, 16 KB and 64 KB chunks; CRLF split across chunks; values containing `\r\n`; several values in one chunk; a value and `END` in the same chunk; the existing partial-delivery tests (`test/node.test.ts:699`, `:914`).
+
+**Compatibility.** None.
+
+### P4 — O(1) command queue
+
+**Problem.** Each response calls `this._commandQueue.shift()` (`src/node.ts:844`), and so does `rejectPendingCommands` (`:1029`). Past roughly 10–30k queued commands, V8 can no longer trim the array in place, so every `shift()` copies the whole backing store.
+
+**Evidence.** `shift()` costs ~90 ns with ≤10k queued, 67 µs at 50k and 140 µs at 100k. Bursts of concurrent gets:
+
+| Burst | Current | Head-index queue |
+|---|---|---|
+| 10k | 160 ms | 147 ms |
+| 30k | 1,898 ms | 254 ms |
+| 60k | 6,823 ms | 521 ms |
+| 100k | 18,121 ms | 836 ms |
+
+**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Expose a pending count for H3.
+
+**Tests.** More pipelined commands than two compaction thresholds resolve in order; the `commandQueue` getter returns the pending items (`test/node.test.ts:649` and `test/index.test.ts:1473` rely on it being an array with a `length`); close rejects everything pending.
+
+**Compatibility.** `commandQueue` returns a snapshot array instead of the live internal array. Call this out in the release notes.
+
+---
+
+## Phase 3 — Next tier
+
+Smaller wins; each needs B1 before/after numbers in its PR. The numbers here come from the second audit's microbenchmarks.
+
+- **N1 — Encode large `set` values once.** Today the value is scanned by `Buffer.byteLength` (`src/index.ts:1493`), concatenated into the command string (`:949`), concatenated again with `\r\n` (`src/node.ts:795`) and then encoded on write. Encoding once with `Buffer.from` and writing header, body and CRLF under P1's cork took a 1 MB value from 1,054 to 332 µs of CPU. Needs an internal command path that accepts Buffers.
+- **N2 — Ketama key cache.** The key→node cache (`src/ketama.ts:336`, `:448-472`) empties itself every 5,000 new keys. With many distinct keys it costs more than it saves (0.57–1.35 µs per lookup vs 0.26–0.42 µs without it). Replace it with a single-node fast path, and remove the per-call array copy in `BroadcastHash` (`src/broadcast.ts:78-80`) and the `[node]` allocation in `ModulaHash` (`src/modula.ts:207`). `test/ketama.test.ts:503-504` reads `_cache` directly.
+- **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected, and return `node.command()` directly when no retries are configured.
+- **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
+- **N5 — Binary packet building.** Allocate each packet once with `Buffer.allocUnsafe` instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`).
+- **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
+
+## Checked and not worth changing
+
+- Hit/miss event emission: 0.2% of client CPU with the real `hookified`.
+- Key hashing: FNV-1a over strings plus a binary search on the ring is already cheap.
+- Multi-get already sends one `get k1 … kN` per server and queries servers in parallel.
+- Hooks are skipped entirely when none are registered (`_hasHooks`), and disabled retries add no timers.
+
+## R1 — Docs and release
+
+- README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
+- Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
+- Keep the tracking table below up to date.
+
+## Tracking
+
+| ID | Title | PR | Status |
+|---|---|---|---|
+| T1 | Isolate flush tests | | Not started |
+| B1 | Benchmark suite | | Not started |
+| H1 | Binary/SASL request queue | | Not started |
+| H2 | Single-flight connect, socket-scoped handlers | | Not started |
+| H3 | Connect timeout plus command deadline | | Not started |
+| P1 | Coalesce writes per tick | | Not started |
+| P2 | Linear multi-get miss detection | | Not started |
+| P3 | Large-value buffering | | Not started |
+| P4 | O(1) command queue | | Not started |
+| N1–N6 | Next tier | | Not started |
+| R1 | Docs and release | | Not started |
+
+## Appendix — How the numbers were measured
+
+- Server: memcached 1.6.45 in Docker (`memcached:1.6.45@sha256:75c93cc9…`, the image pinned in `docker-compose.yml`), started without `-vv` and with `-I 32m`. The SASL checks used the compose `memcached-sasl` service.
+- Client: the repository's TypeScript sources run directly on Node 22.22.2 with the real `hookified` 3.0.3 and `hashery` 3.0.1. "Fixed" numbers come from minimal prototypes of the changes described above.
+- Connections went straight to the container IP to avoid `docker-proxy`. Linux, 4 vCPUs.
+- Throughput is closed-loop: N concurrent workers, each issuing sequential `get`s of a 100-byte value. Throughput tables report the median of 5 runs; latencies are averages over 5–30 requests; bursts are single runs.
+- Connection counts come from memcached's `total_connections` and `curr_connections` stats.
