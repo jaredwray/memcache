@@ -130,21 +130,25 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 - Each idle→burst cycle of 50 requests leaked 49 more sockets: 99 → 148 → 197 → 246 open. `disconnect()` closed one (245 stayed open), and the leaked sockets keep the process alive. memcached's default connection limit is 1024.
 - In every run, the leaked sockets' timeouts destroyed the active socket. In 2 of 6 runs a request never settled; in 3 of 6 a request returned `undefined` for a key that exists.
 - With a prototype of the fix: 1 socket, 1 open across cycles, 0 after `disconnect()`, and all 6 runs clean.
+- Re-measured before the fix on the benchmark server (`timeout: 1000`, four idle→burst cycles of 50 gets, 3 runs): 50 sockets per burst, 50 → 99 → 148 → 197 open, 200 `connect` events, 196 still open after `disconnect()`. The wrong-result and never-settled cases didn't show up in these runs; they depend on a stale socket timing out mid-burst, so the tests below cover them directly.
 
-**Fix.**
-1. `connect()` returns a shared in-flight promise (`this._connecting`), cleared in `finally`.
-2. Socket setup moves into a helper that captures `const socket`. Handlers only touch shared state while `socket` is still the node's socket. Treat "no socket" after `disconnect()` as current, so pending commands are still rejected. The timeout handler destroys `socket`, not `this._socket`.
+**Fix (done).**
+1. `connect()` returns a shared in-flight promise (`this._connecting`), cleared in `finally` unless `disconnect()` has already started another attempt. A `connect()` during SASL authentication waits for it instead of returning early.
+2. Socket setup moved into `openSocket()`, which captures `const socket`. Its handlers only change the node's state (connected flag, pending commands, parser) while `socket` is still the node's socket, and data from a replaced socket is dropped. The timeout handler destroys `socket`, not `this._socket`. `connect`, `close`, `error` and `timeout` events are still emitted for every socket.
 3. A `close` before the socket is ready rejects the connect promise.
-4. Move the parser reset out of `reconnect()` into a helper and also run it on close.
+4. `disconnect()` fails pending commands itself instead of waiting for the old socket's `close`, which may now arrive after a new socket has replaced it. `reconnect()` fails them with its own message first, as before.
+5. Rejecting pending commands also drops any partly received response, so every path that abandons a connection (close, `disconnect()`, `reconnect()`, SASL failure) resets the parser, not only `reconnect()`.
 
-**Tests** (an in-process fake TCP server that counts accepted connections, following `test/fake-config-server.ts`):
-- N concurrent `get()`s on a lazy client produce exactly one accepted connection.
-- Two concurrent `connect()` calls share one socket.
-- Destroying the socket while the connection is still pending (for example calling `disconnect()` before the `connect` event, or a TLS server that closes before `secureConnect`) makes `connect()` reject instead of hang. A plain TCP server that accepts and then closes doesn't exercise this: the client's `connect` event fires first.
-- After `reconnect()`, the old socket's `close` does not reject commands queued on the new socket.
-- A server that sends a partial `VALUE` and then closes leaves the next connection parsing cleanly.
+**Tests.**
+- An in-process server that counts connections: 50 concurrent `get()`s on a lazy client open exactly one.
+- Two concurrent `connect()` calls share one socket and emit one `connect` event; three concurrent `connect()` calls on a SASL node authenticate once.
+- `disconnect()` before the socket is ready makes `connect()` reject instead of hang, and a new `connect()` doesn't wait on the abandoned one. (A TLS server that closes before `secureConnect` already rejected on `main`, through the `error` event.)
+- After `reconnect()`, data, `timeout` and `close` from the old socket don't touch the new connection.
+- A connection that closes after a partial `VALUE` leaves the next connection parsing cleanly.
 
-**Compatibility.** No API change. `connect` / `close` events fire once per real connection instead of once per duplicate socket.
+**Result.** 50 concurrent first requests open 1 socket (`pnpm benchmark:cold-start`: 50 → 1). In the cycle test above: 1 socket per burst, at most 1 open, 4 `connect` events, 0 open after `disconnect()`. All 6 new tests fail on `main`; with the fix, the full suite passed 6 consecutive runs.
+
+**Compatibility.** No API change. `connect` events fire once per real connection instead of once per duplicate socket. Commands pending at `disconnect()` are rejected during the call instead of when the socket's `close` event arrives, with the same `Connection closed` error.
 
 ### H3 — Timeouts: connect timeout plus command deadline, no idle teardown
 
@@ -293,7 +297,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | T1 | Isolate flush tests | [#148](https://github.com/jaredwray/memcache/pull/148) | Done |
 | B1 | Benchmark suite | [#149](https://github.com/jaredwray/memcache/pull/149) | Done |
 | H1 | Binary/SASL request queue | [#150](https://github.com/jaredwray/memcache/pull/150) | Done |
-| H2 | Single-flight connect, socket-scoped handlers | | Not started |
+| H2 | Single-flight connect, socket-scoped handlers | [#151](https://github.com/jaredwray/memcache/pull/151) | Done |
 | H3 | Connect timeout plus command deadline | | Not started |
 | P1 | Coalesce writes per tick | | Not started |
 | P2 | Linear multi-get miss detection | | Not started |

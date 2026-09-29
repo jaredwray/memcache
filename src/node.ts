@@ -103,6 +103,7 @@ export class MemcacheNode extends Hookified {
 	private _host: string;
 	private _port: number;
 	private _socket: Socket | undefined = undefined;
+	private _connecting: Promise<void> | undefined = undefined;
 	private _timeout: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
@@ -255,37 +256,57 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
-	 * Connect to the memcache server
+	 * Connect to the memcache server. Callers that arrive while a connection
+	 * is being opened share it instead of opening another socket.
 	 */
 	public async connect(): Promise<void> {
+		if (this._connecting) {
+			return this._connecting;
+		}
+
+		if (this._connected) {
+			return;
+		}
+
+		const connecting = this.openSocket().finally(() => {
+			// disconnect() may have abandoned this attempt and started another
+			if (this._connecting === connecting) {
+				this._connecting = undefined;
+			}
+		});
+		this._connecting = connecting;
+		return connecting;
+	}
+
+	/**
+	 * Open a socket and wait until it is ready (and authenticated, when SASL is
+	 * configured). The socket's handlers only change the node's state while it
+	 * is still the node's socket, so a replaced socket can't close, time out or
+	 * feed data into the one in use.
+	 */
+	private openSocket(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			if (this._connected) {
-				resolve();
-				return;
-			}
+			const socket = this._tls
+				? createTlsConnection(this.buildTlsConnectOptions(this._tls))
+				: createConnection({
+						host: this._host,
+						port: this._port,
+						keepAlive: this._keepAlive,
+						keepAliveInitialDelay: this._keepAliveDelay,
+					});
+			this._socket = socket;
+			let ready = false;
 
-			if (this._tls) {
-				this._socket = createTlsConnection(
-					this.buildTlsConnectOptions(this._tls),
-				);
-			} else {
-				this._socket = createConnection({
-					host: this._host,
-					port: this._port,
-					keepAlive: this._keepAlive,
-					keepAliveInitialDelay: this._keepAliveDelay,
-				});
-			}
-
-			this._socket.setTimeout(this._timeout);
-			this._socket.setNoDelay(true);
+			socket.setTimeout(this._timeout);
+			socket.setNoDelay(true);
 
 			// For TLS connections readiness is "secureConnect" (handshake
 			// complete). Resolving on "connect" would allow commands to be
 			// written into an unfinished TLS handshake.
 			const readyEvent = this._tls ? "secureConnect" : "connect";
 
-			this._socket.on(readyEvent, async () => {
+			socket.on(readyEvent, async () => {
+				ready = true;
 				this._connected = true;
 
 				// If SASL credentials are configured, authenticate before resolving
@@ -294,21 +315,23 @@ export class MemcacheNode extends Hookified {
 						await this.performSaslAuth();
 						// Keep socket in binary mode - SASL servers require binary protocol
 						// for all commands. Use binary* methods for operations.
-						this.emit("connect");
-						resolve();
 					} catch (error) {
-						this._socket?.destroy();
-						this._connected = false;
-						this._authenticated = false;
+						this.dropSocket(socket, error as Error);
+						socket.destroy();
 						reject(error);
+						return;
 					}
-				} else {
-					this.emit("connect");
-					resolve();
 				}
+
+				this.emit("connect");
+				resolve();
 			});
 
-			this._socket.on("data", (data: Buffer) => {
+			socket.on("data", (data: Buffer) => {
+				if (socket !== this._socket) {
+					return;
+				}
+
 				// SASL connections only speak the binary protocol. Other
 				// connections are text unless binary requests are waiting.
 				if (this._sasl || this._binaryQueue.length > 0) {
@@ -318,38 +341,56 @@ export class MemcacheNode extends Hookified {
 				}
 			});
 
-			this._socket.on("error", (error: Error) => {
+			socket.on("error", (error: Error) => {
 				this.emit("error", error);
-				if (!this._connected) {
+				if (!ready) {
 					/* v8 ignore next -- @preserve */
 					reject(error);
 				}
 			});
 
-			this._socket.on("close", () => {
-				this._connected = false;
-				this._authenticated = false;
+			socket.on("close", () => {
+				this.dropSocket(socket, new Error("Connection closed"));
 				this.emit("close");
-				this.rejectPendingCommands(new Error("Connection closed"));
+				// Settles connect() if the socket closed before it was ready, for
+				// example after disconnect(). Does nothing once it has resolved.
+				reject(new Error("Connection closed"));
 			});
 
-			this._socket.on("timeout", () => {
+			socket.on("timeout", () => {
 				this.emit("timeout");
-				this._socket?.destroy();
+				socket.destroy();
 				reject(new Error("Connection timeout"));
 			});
 		});
 	}
 
 	/**
+	 * Mark the node disconnected and fail everything waiting on `socket`.
+	 * Does nothing if the node has already moved on to another socket.
+	 */
+	private dropSocket(socket: Socket, error: Error): void {
+		if (socket !== this._socket) {
+			return;
+		}
+
+		this._connected = false;
+		this._authenticated = false;
+		this.rejectPendingCommands(error);
+	}
+
+	/**
 	 * Disconnect from the memcache server
 	 */
 	public async disconnect(): Promise<void> {
+		// Abandon a connect() in progress so the next one opens a new socket
+		this._connecting = undefined;
 		/* v8 ignore next -- @preserve */
 		if (this._socket) {
-			this._socket.destroy();
+			const socket = this._socket;
+			this.dropSocket(socket, new Error("Connection closed"));
 			this._socket = undefined;
-			this._connected = false;
+			socket.destroy();
 		}
 	}
 
@@ -359,17 +400,12 @@ export class MemcacheNode extends Hookified {
 	public async reconnect(): Promise<void> {
 		// First disconnect if currently connected
 		if (this._connected || this._socket) {
-			await this.disconnect();
-			// Clear any pending commands with a reconnection error
+			// Fail pending commands with a reconnection error before
+			// disconnect() fails them as closed
 			this.rejectPendingCommands(
 				new Error("Connection reset for reconnection"),
 			);
-			// Clear the buffer and current command state
-			this._buffer = Buffer.alloc(0);
-			this._currentCommand = undefined;
-			this._multilineData = [];
-			this._pendingValueBytes = 0;
-			this._authenticated = false;
+			await this.disconnect();
 		}
 
 		// Now establish a fresh connection
@@ -1057,6 +1093,10 @@ export class MemcacheNode extends Hookified {
 				cmd.reject(error);
 			}
 		}
+		// Any partly received response belonged to a rejected command
+		this._buffer = Buffer.alloc(0);
+		this._multilineData = [];
+		this._pendingValueBytes = 0;
 		this.rejectBinaryRequests(error);
 	}
 }
