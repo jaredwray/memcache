@@ -1,4 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
+import { type AddressInfo, createServer } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache, {
 	createNode,
@@ -1314,6 +1315,40 @@ describe("Memcache", () => {
 			expect(testClient.isConnected()).toBe(true);
 
 			await testClient.disconnect();
+		});
+
+		it("should open one connection for concurrent first requests", async () => {
+			// Counts connections and answers every get with a miss
+			let accepted = 0;
+			const server = createServer((socket) => {
+				accepted++;
+				let buffer = "";
+				socket.on("data", (data) => {
+					buffer += data.toString();
+					let lineEnd = buffer.indexOf("\r\n");
+					while (lineEnd !== -1) {
+						buffer = buffer.slice(lineEnd + 2);
+						socket.write("END\r\n");
+						lineEnd = buffer.indexOf("\r\n");
+					}
+				});
+			});
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve);
+			});
+			const { port } = server.address() as AddressInfo;
+			const testClient = new Memcache({ nodes: [`127.0.0.1:${port}`] });
+
+			try {
+				const results = await Promise.all(
+					Array.from({ length: 50 }, (_, i) => testClient.get(`key-${i}`)),
+				);
+				expect(results.every((result) => result === undefined)).toBe(true);
+				expect(accepted).toBe(1);
+			} finally {
+				await testClient.disconnect();
+				server.close();
+			}
 		});
 
 		it("should handle connecting when already connected", async () => {

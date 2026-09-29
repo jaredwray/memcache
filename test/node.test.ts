@@ -1,4 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
+import type { Socket } from "node:net";
 import {
 	afterEach,
 	beforeEach,
@@ -389,6 +390,81 @@ describe("MemcacheNode", () => {
 				timeout: 1000,
 			});
 			await expect(timeoutNode.connect()).rejects.toThrow("Connection timeout");
+		});
+	});
+
+	describe("Connection sharing and replaced sockets", () => {
+		it("should share one socket between concurrent connect() calls", async () => {
+			let connectEvents = 0;
+			node.on("connect", () => {
+				connectEvents++;
+			});
+
+			const first = node.connect();
+			const socket = node.socket;
+			const second = node.connect();
+			expect(node.socket).toBe(socket);
+
+			await Promise.all([first, second]);
+			expect(node.socket).toBe(socket);
+			expect(connectEvents).toBe(1);
+		});
+
+		it("should reject connect() when disconnect() is called before the socket is ready", async () => {
+			const first = node.connect();
+			await node.disconnect();
+			// A new attempt doesn't wait on the abandoned one
+			const second = node.connect();
+
+			await expect(first).rejects.toThrow("Connection closed");
+			await second;
+			expect(node.isConnected()).toBe(true);
+		});
+
+		it("should ignore data, timeout and close from a socket that has been replaced", async () => {
+			await node.connect();
+			const oldSocket = node.socket as Socket;
+			await node.reconnect();
+			const newSocket = node.socket as Socket;
+
+			const version = node.command("version");
+			// Late events from the replaced socket
+			oldSocket.emit("data", Buffer.from("VERSION stale\r\n"));
+			oldSocket.emit("timeout");
+			oldSocket.emit("close");
+
+			expect(await version).toMatch(/^VERSION \d/);
+			expect(node.isConnected()).toBe(true);
+			expect(node.socket).toBe(newSocket);
+			expect(newSocket.destroyed).toBe(false);
+		});
+
+		it("should parse the next connection cleanly after closing mid-response", async () => {
+			const key = generateKey("partial");
+			const value = generateValue();
+			await node.connect();
+			await node.command(
+				`set ${key} 0 0 ${Buffer.byteLength(value)}\r\n${value}`,
+			);
+
+			const socket = node.socket as Socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+			const partial = node.command(`get ${key}`, {
+				isMultiline: true,
+				requestedKeys: [key],
+			});
+			// The server starts a value, then the connection drops
+			socket.emit("data", Buffer.from(`VALUE ${key} 0 10\r\nabc`));
+			socket.destroy();
+			await expect(partial).rejects.toThrow("Connection closed");
+			writeSpy.mockRestore();
+
+			await node.connect();
+			const result = await node.command(`get ${key}`, {
+				isMultiline: true,
+				requestedKeys: [key],
+			});
+			expect(result).toEqual({ values: [value], foundKeys: [key] });
 		});
 	});
 

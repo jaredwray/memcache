@@ -113,6 +113,20 @@ describe("SASL Authentication", () => {
 			expect(node.isAuthenticated).toBe(true);
 		});
 
+		it("should share one connection and authentication between concurrent connect() calls", async () => {
+			node = new MemcacheNode(SASL_HOST, SASL_PORT, {
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			let authentications = 0;
+			node.on("authenticated", () => {
+				authentications++;
+			});
+
+			await Promise.all([node.connect(), node.connect(), node.connect()]);
+			expect(authentications).toBe(1);
+			expect(node.isAuthenticated).toBe(true);
+		});
+
 		it("should give concurrent binary requests their own responses", async () => {
 			node = new MemcacheNode(SASL_HOST, SASL_PORT, {
 				sasl: { username: TEST_USER, password: TEST_PASS },
