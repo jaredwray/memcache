@@ -278,7 +278,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
 | ID | Title | PR | Status |
 |---|---|---|---|
-| T1 | Isolate flush tests | | Not started |
+| T1 | Isolate flush tests | [#148](https://github.com/jaredwray/memcache/pull/148) | Done |
 | B1 | Benchmark suite | | Not started |
 | H1 | Binary/SASL request queue | | Not started |
 | H2 | Single-flight connect, socket-scoped handlers | | Not started |
