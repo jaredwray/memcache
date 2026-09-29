@@ -896,6 +896,14 @@ const version = await node.binaryVersion();          // Get server version
 const stats = await node.binaryStats();              // Get server stats
 ```
 
+The `binary*` methods can run concurrently on the same node. Requests are pipelined on the node's connection, and each caller gets the response to its own request:
+
+```javascript
+const [a, b] = await Promise.all([node.binaryGet('key-a'), node.binaryGet('key-b')]);
+```
+
+If a response doesn't match the request it should answer, every pending binary request is rejected and the connection is closed instead of returning another request's data.
+
 ## Per-Node SASL Configuration
 
 You can also configure SASL credentials when creating individual nodes:

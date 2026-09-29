@@ -1,10 +1,22 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type MockInstance,
+	vi,
+} from "vitest";
+import {
+	OPCODE_DELETE,
 	OPCODE_GET,
+	OPCODE_INCREMENT,
 	OPCODE_NOOP,
+	OPCODE_QUIT,
 	OPCODE_STAT,
 	RESPONSE_MAGIC,
+	STATUS_AUTH_ERROR,
 	STATUS_INVALID_ARGUMENTS,
 	STATUS_SUCCESS,
 	serializeHeader,
@@ -19,6 +31,40 @@ import {
 // Dedicated server for tests that flush everything (see docker-compose.yml).
 const FLUSH_HOST = "localhost";
 const FLUSH_PORT = 11214;
+
+// memcached copies each binary request's opaque value into its responses.
+// Returns the opaque of the nth packet written through the spy.
+const writtenOpaque = (write: MockInstance, n = 0): number =>
+	(write.mock.calls[n][0] as Buffer).readUInt32BE(12);
+
+const binaryResponse = (
+	opcode: number,
+	opaque: number,
+	options: {
+		status?: number;
+		extras?: Buffer;
+		key?: string;
+		value?: string | Buffer;
+	} = {},
+): Buffer => {
+	const extras = options.extras ?? Buffer.alloc(0);
+	const key = Buffer.from(options.key ?? "", "utf8");
+	const value = Buffer.from(options.value ?? "");
+	const header = serializeHeader({
+		magic: RESPONSE_MAGIC,
+		opcode,
+		keyLength: key.length,
+		extrasLength: extras.length,
+		status: options.status ?? STATUS_SUCCESS,
+		totalBodyLength: extras.length + key.length + value.length,
+		opaque,
+	});
+	return Buffer.concat([header, extras, key, value]);
+};
+
+// A GET hit: 4 bytes of flags, then the value.
+const getResponse = (opaque: number, value: string): Buffer =>
+	binaryResponse(OPCODE_GET, opaque, { extras: Buffer.alloc(4), value });
 
 describe("MemcacheNode", () => {
 	let node: MemcacheNode;
@@ -949,29 +995,17 @@ describe("MemcacheNode", () => {
 	});
 
 	describe("binaryStats multi-chunk handling", () => {
-		const buildStatPacket = (key: string, value: string): Buffer => {
-			const keyBuf = Buffer.from(key, "utf8");
-			const valBuf = Buffer.from(value, "utf8");
-			const header = serializeHeader({
-				magic: RESPONSE_MAGIC,
-				opcode: OPCODE_STAT,
-				keyLength: keyBuf.length,
-				status: STATUS_SUCCESS,
-				totalBodyLength: keyBuf.length + valBuf.length,
-			});
-			return Buffer.concat([header, keyBuf, valBuf]);
-		};
+		const buildStatPacket = (
+			opaque: number,
+			key: string,
+			value: string,
+		): Buffer => binaryResponse(OPCODE_STAT, opaque, { key, value });
 
-		const buildTerminator = (): Buffer =>
-			serializeHeader({
-				magic: RESPONSE_MAGIC,
-				opcode: OPCODE_STAT,
-				keyLength: 0,
-				status: STATUS_SUCCESS,
-				totalBodyLength: 0,
-			});
+		// memcached ends the list with an empty STAT packet.
+		const buildTerminator = (opaque: number): Buffer =>
+			binaryResponse(OPCODE_STAT, opaque);
 
-		it("should consolidate buffer when stats response spans multiple data events", async () => {
+		it("should collect stats that span multiple data events", async () => {
 			await node.connect();
 
 			const socket = (node as any)._socket;
@@ -979,14 +1013,17 @@ describe("MemcacheNode", () => {
 			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
 
 			const statsPromise = node.binaryStats();
+			const opaque = writtenOpaque(writeSpy);
 
-			// First chunk: a complete stat record (consumed advances)
-			socket.emit("data", buildStatPacket("pid", "12345"));
-			// Second chunk: another stat + terminator. With chunks.length === 2,
-			// this exercises the buffer consolidation else-branch.
+			// First chunk: a complete stat record
+			socket.emit("data", buildStatPacket(opaque, "pid", "12345"));
+			// Second chunk: another stat + terminator
 			socket.emit(
 				"data",
-				Buffer.concat([buildStatPacket("uptime", "42"), buildTerminator()]),
+				Buffer.concat([
+					buildStatPacket(opaque, "uptime", "42"),
+					buildTerminator(opaque),
+				]),
 			);
 
 			const stats = await statsPromise;
@@ -996,21 +1033,21 @@ describe("MemcacheNode", () => {
 			writeSpy.mockRestore();
 		});
 
-		it("should consolidate when first chunk has partial header", async () => {
+		it("should read a header split across data events", async () => {
 			await node.connect();
 
 			const socket = (node as any)._socket;
 			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
 
 			const statsPromise = node.binaryStats();
+			const opaque = writtenOpaque(writeSpy);
 
 			const fullPacket = Buffer.concat([
-				buildStatPacket("version", "1.6.0"),
-				buildTerminator(),
+				buildStatPacket(opaque, "version", "1.6.0"),
+				buildTerminator(opaque),
 			]);
 
-			// Split before HEADER_SIZE so first event leaves chunks=[partial]
-			// without consuming, then second event triggers else-branch.
+			// Split inside the 24-byte header
 			socket.emit("data", fullPacket.subarray(0, 10));
 			socket.emit("data", fullPacket.subarray(10));
 
@@ -1027,27 +1064,19 @@ describe("MemcacheNode", () => {
 			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
 
 			const statsPromise = node.binaryStats();
+			const opaque = writtenOpaque(writeSpy);
 
 			// A NOOP-opcode packet (not OPCODE_STAT) should be skipped without
-			// failing — exercises the opcode/status guard's false branch.
-			const noopKey = Buffer.from("ignored", "utf8");
-			const noopValue = Buffer.from("data", "utf8");
-			const noopHeader = serializeHeader({
-				magic: RESPONSE_MAGIC,
-				opcode: OPCODE_NOOP,
-				keyLength: noopKey.length,
-				status: STATUS_SUCCESS,
-				totalBodyLength: noopKey.length + noopValue.length,
-			});
-
+			// failing — exercises the opcode guard's false branch.
 			socket.emit(
 				"data",
 				Buffer.concat([
-					noopHeader,
-					noopKey,
-					noopValue,
-					buildStatPacket("pid", "999"),
-					buildTerminator(),
+					binaryResponse(OPCODE_NOOP, opaque, {
+						key: "ignored",
+						value: "data",
+					}),
+					buildStatPacket(opaque, "pid", "999"),
+					buildTerminator(opaque),
 				]),
 			);
 
@@ -1057,35 +1086,73 @@ describe("MemcacheNode", () => {
 
 			writeSpy.mockRestore();
 		});
+
+		it("should finish on an error response so the next request gets its own response", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const statsPromise = node.binaryStats();
+			const getPromise = node.binaryGet("after-stats");
+
+			// memcached answers an error with a single packet and no terminator
+			socket.emit(
+				"data",
+				Buffer.concat([
+					binaryResponse(OPCODE_STAT, writtenOpaque(writeSpy, 0), {
+						status: STATUS_AUTH_ERROR,
+						value: "Auth failure.",
+					}),
+					getResponse(writtenOpaque(writeSpy, 1), "value-after-stats"),
+				]),
+			);
+
+			expect(await statsPromise).toEqual({});
+			expect(await getPromise).toBe("value-after-stats");
+
+			writeSpy.mockRestore();
+		});
 	});
 
 	describe("binaryRequest multi-chunk handling", () => {
-		it("should consolidate buffer when binaryRequest response spans multiple data events", async () => {
+		it("should assemble a response that spans multiple data events", async () => {
 			await node.connect();
 
 			const socket = (node as any)._socket;
 			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
 
 			const getPromise = node.binaryGet("multi-chunk-key");
+			const fullPacket = getResponse(writtenOpaque(writeSpy), "hello-world");
 
-			// Build a GET response packet with a value
-			const value = Buffer.from("hello-world", "utf8");
-			const extras = Buffer.alloc(4); // 4-byte flags
-			const header = serializeHeader({
-				magic: RESPONSE_MAGIC,
-				opcode: OPCODE_GET,
-				extrasLength: 4,
-				status: STATUS_SUCCESS,
-				totalBodyLength: 4 + value.length,
-			});
-			const fullPacket = Buffer.concat([header, extras, value]);
-
-			// Emit in two chunks so binaryRequest consolidates via Buffer.concat
-			socket.emit("data", fullPacket.subarray(0, 16));
-			socket.emit("data", fullPacket.subarray(16));
+			// Header in the first chunk, body in the second
+			socket.emit("data", fullPacket.subarray(0, 26));
+			socket.emit("data", fullPacket.subarray(26));
 
 			const result = await getPromise;
 			expect(result).toBe("hello-world");
+
+			writeSpy.mockRestore();
+		});
+
+		it("should copy a large value once instead of on every chunk", async () => {
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const value = generateLargeValue(256 * 1024);
+			const getPromise = node.binaryGet("large-key");
+			const fullPacket = getResponse(writtenOpaque(writeSpy), value);
+
+			const concatSpy = vi.spyOn(Buffer, "concat");
+			for (let i = 0; i < fullPacket.length; i += 1024) {
+				socket.emit("data", fullPacket.subarray(i, i + 1024));
+			}
+			expect(concatSpy).toHaveBeenCalledTimes(1);
+			concatSpy.mockRestore();
+
+			expect(await getPromise).toBe(value);
 
 			writeSpy.mockRestore();
 		});
@@ -1098,19 +1165,182 @@ describe("MemcacheNode", () => {
 
 			const deletePromise = node.binaryDelete("some-key");
 
-			const header = serializeHeader({
-				magic: RESPONSE_MAGIC,
-				opcode: 0x04, // OPCODE_DELETE
-				status: STATUS_INVALID_ARGUMENTS,
-				totalBodyLength: 0,
-			});
-
-			socket.emit("data", header);
+			socket.emit(
+				"data",
+				binaryResponse(OPCODE_DELETE, writtenOpaque(writeSpy), {
+					status: STATUS_INVALID_ARGUMENTS,
+				}),
+			);
 
 			const result = await deletePromise;
 			expect(result).toBe(false);
 
 			writeSpy.mockRestore();
+		});
+	});
+
+	describe("Binary request queue", () => {
+		let socket: any;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = (node as any)._socket;
+			// Requests never reach the server; each test supplies the responses
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		it("should give pipelined requests their own responses from one chunk", async () => {
+			const results = Promise.all([
+				node.binaryGet("key-a"),
+				node.binaryGet("key-b"),
+				node.binaryIncr("counter"),
+			]);
+
+			const opaques = [0, 1, 2].map((n) => writtenOpaque(writeSpy, n));
+			expect(new Set(opaques).size).toBe(3);
+
+			const counter = Buffer.alloc(8);
+			counter.writeUInt32BE(7, 4);
+			socket.emit(
+				"data",
+				Buffer.concat([
+					getResponse(opaques[0], "value-a"),
+					getResponse(opaques[1], "value-b"),
+					binaryResponse(OPCODE_INCREMENT, opaques[2], { value: counter }),
+				]),
+			);
+
+			expect(await results).toEqual(["value-a", "value-b", 7]);
+		});
+
+		it("should split responses when a header and the next packet share chunks", async () => {
+			const first = node.binaryGet("key-a");
+			const second = node.binaryGet("key-b");
+
+			const packets = Buffer.concat([
+				getResponse(writtenOpaque(writeSpy, 0), "value-a"),
+				getResponse(writtenOpaque(writeSpy, 1), "value-b"),
+			]);
+			socket.emit("data", packets.subarray(0, 10));
+			socket.emit("data", packets.subarray(10));
+
+			expect(await first).toBe("value-a");
+			expect(await second).toBe("value-b");
+		});
+
+		it("should reject pending requests and close the connection when a response is out of order", async () => {
+			const first = node.binaryGet("key-a");
+			const second = node.binaryGet("key-b");
+
+			// The second request's response arrives first
+			socket.emit("data", getResponse(writtenOpaque(writeSpy, 1), "value-b"));
+
+			await expect(first).rejects.toThrow("Binary response out of order");
+			await expect(second).rejects.toThrow("Binary response out of order");
+			expect(socket.destroyed).toBe(true);
+		});
+
+		it("should reject pending requests when a response is not a binary packet", async () => {
+			const pending = node.binaryGet("key-a");
+
+			socket.emit("data", Buffer.from("SERVER_ERROR out of memory\r\n"));
+
+			await expect(pending).rejects.toThrow("expected magic byte 0x81");
+			expect(socket.destroyed).toBe(true);
+		});
+
+		it("should reject pending requests when the connection closes", async () => {
+			const get = node.binaryGet("key-a");
+			const stats = node.binaryStats();
+
+			// Part of a response is buffered when the connection closes
+			socket.emit(
+				"data",
+				getResponse(writtenOpaque(writeSpy, 0), "value-a").subarray(0, 10),
+			);
+			socket.destroy();
+
+			await expect(get).rejects.toThrow("Connection closed");
+			await expect(stats).rejects.toThrow("Connection closed");
+			expect((node as any)._binaryChunks).toEqual([]);
+			expect((node as any)._binaryLength).toBe(0);
+		});
+
+		it("should ignore a response that no request is waiting for", async () => {
+			const first = node.binaryGet("key-a");
+			socket.emit(
+				"data",
+				Buffer.concat([
+					getResponse(writtenOpaque(writeSpy, 0), "value-a"),
+					getResponse(12345, "unexpected"),
+				]),
+			);
+			expect(await first).toBe("value-a");
+
+			const second = node.binaryGet("key-b");
+			socket.emit("data", getResponse(writtenOpaque(writeSpy, 1), "value-b"));
+			expect(await second).toBe("value-b");
+			expect(socket.destroyed).toBe(false);
+		});
+
+		it("should parse text again once no binary requests are waiting", async () => {
+			const get = node.binaryGet("key-a");
+			socket.emit("data", getResponse(writtenOpaque(writeSpy, 0), "value-a"));
+			expect(await get).toBe("value-a");
+
+			const version = node.command("version");
+			socket.emit("data", "VERSION 1.6.45\r\n");
+			expect(await version).toBe("VERSION 1.6.45");
+		});
+
+		it("should match the reply to binaryQuit so it is not taken for the next response", async () => {
+			await node.binaryQuit();
+			const get = node.binaryGet("key-a");
+
+			socket.emit(
+				"data",
+				Buffer.concat([
+					binaryResponse(OPCODE_QUIT, writtenOpaque(writeSpy, 0)),
+					getResponse(writtenOpaque(writeSpy, 1), "value-a"),
+				]),
+			);
+
+			expect(await get).toBe("value-a");
+		});
+
+		it("should wrap the opaque value after 2^32 - 1", async () => {
+			(node as any)._binaryOpaque = 0xffffffff;
+			const get = node.binaryGet("key-a");
+			expect(writtenOpaque(writeSpy)).toBe(0);
+
+			socket.emit("data", getResponse(0, "value-a"));
+			expect(await get).toBe("value-a");
+		});
+
+		it("should reject binary requests after the connection closes", async () => {
+			const closed = new Promise((resolve) => socket.once("close", resolve));
+			socket.destroy();
+			await closed;
+
+			await expect(node.binaryGet("key-a")).rejects.toThrow(
+				"Not connected to memcache server localhost:11211",
+			);
+			expect(writeSpy).not.toHaveBeenCalled();
+		});
+
+		it("should reject binary requests on a node that is not connected", async () => {
+			const disconnectedNode = new MemcacheNode("localhost", 11211);
+			await expect(disconnectedNode.binaryGet("key")).rejects.toThrow(
+				"Not connected to memcache server localhost:11211",
+			);
+			await expect(disconnectedNode.binaryStats()).rejects.toThrow(
+				"Not connected to memcache server localhost:11211",
+			);
 		});
 	});
 
