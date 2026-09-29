@@ -12,6 +12,10 @@ import Memcache, {
 import { KetamaHash } from "../src/ketama";
 import { generateKey, generateValue } from "./test-utils.js";
 
+// Dedicated server for tests that flush everything (see docker-compose.yml).
+const FLUSH_HOST = "localhost";
+const FLUSH_PORT = 11214;
+
 describe("Memcache", () => {
 	let client: Memcache;
 
@@ -1722,6 +1726,12 @@ describe("Memcache", () => {
 		});
 
 		it("should handle flush commands", async () => {
+			// flush_all clears the whole server, so use the dedicated flush
+			// server rather than the one other test files share.
+			client = new Memcache({
+				nodes: [`${FLUSH_HOST}:${FLUSH_PORT}`],
+				timeout: 5000,
+			});
 			await client.connect();
 
 			const key1 = generateKey("flush1");
@@ -1742,6 +1752,12 @@ describe("Memcache", () => {
 		});
 
 		it("should handle flushAll with delay", async () => {
+			// flush_all clears the whole server, so use the dedicated flush
+			// server rather than the one other test files share.
+			client = new Memcache({
+				nodes: [`${FLUSH_HOST}:${FLUSH_PORT}`],
+				timeout: 5000,
+			});
 			await client.connect();
 
 			// Test flushAll with delay parameter (just test the command works)
@@ -2266,18 +2282,20 @@ describe("Memcache", () => {
 
 			await client.connect();
 
+			const key = generateKey("add-hook");
+
 			// First add should succeed
-			const result = await client.add("add-hook-test", "add-value", 3600, 10);
+			const result = await client.add(key, "add-value", 3600, 10);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "add-hook-test",
+				key,
 				value: "add-value",
 				exptime: 3600,
 				flags: 10,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "add-hook-test",
+				key,
 				value: "add-value",
 				exptime: 3600,
 				flags: 10,
@@ -2290,22 +2308,17 @@ describe("Memcache", () => {
 			beforeHookMock.mockClear();
 			afterHookMock.mockClear();
 
-			const result2 = await client.add(
-				"add-hook-test",
-				"another-value",
-				1800,
-				5,
-			);
+			const result2 = await client.add(key, "another-value", 1800, 5);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "add-hook-test",
+				key,
 				value: "another-value",
 				exptime: 1800,
 				flags: 5,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "add-hook-test",
+				key,
 				value: "another-value",
 				exptime: 1800,
 				flags: 5,
@@ -2383,23 +2396,20 @@ describe("Memcache", () => {
 
 			await client.connect();
 
+			const key = generateKey("replace-hook");
+
 			// First replace should fail (key doesn't exist)
-			const result1 = await client.replace(
-				"replace-hook-test",
-				"replace-value",
-				3600,
-				15,
-			);
+			const result1 = await client.replace(key, "replace-value", 3600, 15);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "replace-hook-test",
+				key,
 				value: "replace-value",
 				exptime: 3600,
 				flags: 15,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "replace-hook-test",
+				key,
 				value: "replace-value",
 				exptime: 3600,
 				flags: 15,
@@ -2409,29 +2419,24 @@ describe("Memcache", () => {
 			expect(result1).toBe(false);
 
 			// Set the key first
-			await client.set("replace-hook-test", "initial-value");
+			await client.set(key, "initial-value");
 
 			// Clear mocks
 			beforeHookMock.mockClear();
 			afterHookMock.mockClear();
 
 			// Now replace should succeed
-			const result2 = await client.replace(
-				"replace-hook-test",
-				"new-value",
-				1800,
-				20,
-			);
+			const result2 = await client.replace(key, "new-value", 1800, 20);
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "replace-hook-test",
+				key,
 				value: "new-value",
 				exptime: 1800,
 				flags: 20,
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "replace-hook-test",
+				key,
 				value: "new-value",
 				exptime: 1800,
 				flags: 20,
@@ -2441,7 +2446,7 @@ describe("Memcache", () => {
 			expect(result2).toBe(true);
 
 			// Verify the value was replaced
-			const getValue = await client.get("replace-hook-test");
+			const getValue = await client.get(key);
 			expect(getValue).toBe("new-value");
 		});
 
@@ -2519,16 +2524,18 @@ describe("Memcache", () => {
 
 			await client.connect();
 
+			const key = generateKey("append-hook");
+
 			// First append should fail (key doesn't exist)
-			const result1 = await client.append("append-hook-test", "-appended");
+			const result1 = await client.append(key, "-appended");
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "append-hook-test",
+				key,
 				value: "-appended",
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "append-hook-test",
+				key,
 				value: "-appended",
 				success: false,
 			});
@@ -2536,22 +2543,22 @@ describe("Memcache", () => {
 			expect(result1).toBe(false);
 
 			// Set the key first
-			await client.set("append-hook-test", "initial");
+			await client.set(key, "initial");
 
 			// Clear mocks
 			beforeHookMock.mockClear();
 			afterHookMock.mockClear();
 
 			// Now append should succeed
-			const result2 = await client.append("append-hook-test", "-appended");
+			const result2 = await client.append(key, "-appended");
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "append-hook-test",
+				key,
 				value: "-appended",
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "append-hook-test",
+				key,
 				value: "-appended",
 				success: true,
 			});
@@ -2559,7 +2566,7 @@ describe("Memcache", () => {
 			expect(result2).toBe(true);
 
 			// Verify the value was appended
-			const getValue = await client.get("append-hook-test");
+			const getValue = await client.get(key);
 			expect(getValue).toBe("initial-appended");
 		});
 
@@ -2626,16 +2633,18 @@ describe("Memcache", () => {
 
 			await client.connect();
 
+			const key = generateKey("prepend-hook");
+
 			// First prepend should fail (key doesn't exist)
-			const result1 = await client.prepend("prepend-hook-test", "prefix-");
+			const result1 = await client.prepend(key, "prefix-");
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "prepend-hook-test",
+				key,
 				value: "prefix-",
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "prepend-hook-test",
+				key,
 				value: "prefix-",
 				success: false,
 			});
@@ -2643,22 +2652,22 @@ describe("Memcache", () => {
 			expect(result1).toBe(false);
 
 			// Set the key first
-			await client.set("prepend-hook-test", "initial");
+			await client.set(key, "initial");
 
 			// Clear mocks
 			beforeHookMock.mockClear();
 			afterHookMock.mockClear();
 
 			// Now prepend should succeed
-			const result2 = await client.prepend("prepend-hook-test", "prefix-");
+			const result2 = await client.prepend(key, "prefix-");
 
 			expect(beforeHookMock).toHaveBeenCalledWith({
-				key: "prepend-hook-test",
+				key,
 				value: "prefix-",
 			});
 
 			expect(afterHookMock).toHaveBeenCalledWith({
-				key: "prepend-hook-test",
+				key,
 				value: "prefix-",
 				success: true,
 			});
@@ -2666,7 +2675,7 @@ describe("Memcache", () => {
 			expect(result2).toBe(true);
 
 			// Verify the value was prepended
-			const getValue = await client.get("prepend-hook-test");
+			const getValue = await client.get(key);
 			expect(getValue).toBe("prefix-initial");
 		});
 
