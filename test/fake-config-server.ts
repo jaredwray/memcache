@@ -18,6 +18,11 @@ export class FakeConfigServer {
 	private _port = 0;
 	private _connections: net.Socket[] = [];
 
+	/** Connections accepted since start(), including closed ones. */
+	public connectionCount = 0;
+	/** Commands received since start(). */
+	public requestCount = 0;
+
 	public version: number;
 	public nodes: string[];
 	public respondEmpty: boolean;
@@ -43,6 +48,7 @@ export class FakeConfigServer {
 	async start(): Promise<void> {
 		return new Promise((resolve) => {
 			this._server = net.createServer((socket) => {
+				this.connectionCount++;
 				this._connections.push(socket);
 				socket.on("close", () => {
 					this._connections = this._connections.filter((s) => s !== socket);
@@ -97,6 +103,7 @@ export class FakeConfigServer {
 	}
 
 	private handleCommand(socket: net.Socket, command: string): void {
+		this.requestCount++;
 		const respond = (data: string) => {
 			if (this.responseDelay > 0) {
 				setTimeout(() => {

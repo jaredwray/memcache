@@ -64,6 +64,19 @@ export class AutoDiscovery extends Hookified {
 		return this._configEndpoint;
 	}
 
+	/** Timeout in milliseconds for the configuration-endpoint connection. */
+	public get timeout(): number {
+		return this._timeout;
+	}
+
+	/** Set the timeout for the configuration-endpoint connection. */
+	public set timeout(value: number) {
+		this._timeout = value;
+		if (this._configNode) {
+			this._configNode.timeout = value;
+		}
+	}
+
 	/**
 	 * TLS option applied to the configuration-endpoint connection.
 	 * `memcaches://` endpoints enable TLS even when this was not set.

@@ -227,7 +227,8 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Get the timeout for Memcache operations.
+	 * Get the timeout in milliseconds for opening a connection and for
+	 * receiving a response while commands are pending.
 	 * @returns {number}
 	 * @default 5000
 	 */
@@ -236,12 +237,21 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Set the timeout for Memcache operations.
+	 * Set the timeout in milliseconds for opening a connection and for
+	 * receiving a response while commands are pending. Applies to existing
+	 * nodes and the Auto Discovery connection.
 	 * @param {number} value
 	 * @default 5000
 	 */
 	public set timeout(value: number) {
 		this._timeout = value;
+		// Existing nodes and the Auto Discovery connection use it right away
+		for (const node of this._nodes) {
+			node.timeout = value;
+		}
+		if (this._autoDiscovery) {
+			this._autoDiscovery.timeout = value;
+		}
 	}
 
 	/**

@@ -163,22 +163,27 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 **Evidence.**
 - `timeout: 1000` and 1.3 s idle: the node was disconnected, and the next request took 1.42 ms vs 1.03 ms when the connection is kept (local; production adds network round trips and handshakes).
 - A server that accepts but never replies, `timeout: 500`: with no further writes the request settled after ~500 ms; with a write every 100 ms it was still pending after 3 s.
+- Re-measured on `main` before the fix, with the same results, plus: `client.timeout = 200` left the node at 5000, and Auto Discovery with `timeout: 200` and a 400 ms poll opened 6 config connections in 2.1 s (one per poll).
 
-**Fix.**
-- Use the socket timeout only while connecting (including SASL authentication), then `socket.setTimeout(0)`. This keeps the existing `Connection timeout` behavior (`test/node.test.ts:336-341`).
-- Add one command-deadline timer per node (not one per request). It is armed when the first command becomes pending, refreshed whenever response bytes arrive (never by writes), cleared when nothing is pending, and `unref()`'d. On expiry: emit `timeout`, reject pending commands with a timeout error, and destroy the socket.
-- Idle connections stay open. TCP keep-alive (already enabled) detects dead peers.
-- Apply the same deadline to the binary queue from H1.
-- Add a `timeout` setter on `MemcacheNode`, and have `client.timeout` update existing nodes and the Auto Discovery config node (as `keepAlive` already does through `updateNodes()`). The deadline reads the current value.
+**Fix (done).**
+- The socket timeout only covers opening the TCP/TLS connection, then `socket.setTimeout(0)`. The existing `Connection timeout` behavior is unchanged.
+- One command-deadline timer per node (not one per request), `unref()`'d. The wait starts when a command is queued on an idle node and restarts whenever response bytes arrive, never on writes. The timer isn't moved on every response: when it fires early it is scheduled again for the time left, and when nothing is pending it stops. So the hot path costs one `performance.now()` per queued command on an idle node and one per `data` event. On expiry the node emits `timeout`, rejects everything pending with `Command timeout` and destroys the socket, so a late response can't be taken for a later command's.
+- SASL authentication is a pending binary request, so the same deadline covers it; a timeout there rejects `connect()` with `Connection timeout`, as before.
+- Idle connections stay open. TCP keep-alive (already enabled) detects dead peers. As a result the Auto Discovery config connection is reused across polls.
+- The binary queue from H1 uses the same deadline.
+- `MemcacheNode` and `AutoDiscovery` have a `timeout` getter and setter, and `client.timeout` updates existing nodes and the Auto Discovery config connection. The deadline reads the current value, including for commands already waiting. (It isn't part of `updateNodes()`, which the `keepAlive` setters also call, so changing `keepAlive` doesn't overwrite a node's own timeout.)
 
 **Tests.**
 - Idle longer than `timeout`: still connected, no `timeout` event.
-- Stalled server with a pending command: rejects after about `timeout` and emits `timeout`, including while other commands keep being written.
-- A slow but progressing response (for example a large value arriving in chunks) is not timed out.
-- Setting `client.timeout` on an existing client applies to the next stalled command.
-- The existing connect-timeout test still passes.
+- Stalled server with a pending command: rejects with `Command timeout` after `timeout` (300 ms, measured ≥ 300 and < 1500 ms) and emits `timeout` once, while another command is written every 50 ms. The client resolves `get` as a miss and emits `timeout` with the node ID.
+- A response arriving in 100-byte chunks every 50 ms (about 1 s in total) with `timeout: 300` is not timed out.
+- Lowering the timeout applies to a command already waiting; `client.timeout` updates existing nodes and Auto Discovery.
+- A binary request, SASL authentication and a TLS handshake that get no response time out (the last two as `Connection timeout`).
+- Auto Discovery with a poll interval longer than `timeout` keeps one config connection.
 
-**Compatibility.** Observable change: idle connections are no longer closed, and the `timeout` event now means "connect or command deadline exceeded". Update `README.md:210`, `:238-239`, `:451-452` and `:470`. Ship in a minor release.
+**Result.** All four problems are fixed (1 config connection instead of one per poll). 12 of the 15 new tests fail on `main`; the other 3 (slow but progressing response, stalled TLS handshake, client `get` against a stalled server) passed on `main` too and guard the new code paths. Throughput is unchanged: in three alternating runs per build, gets and sets at 1 and 100 in flight overlapped between `main` and the fix (for example gets at 100 in flight: 61–65k ops/s on `main`, 65–71k with the fix).
+
+**Compatibility.** Observable change: idle connections are no longer closed, the `timeout` event now means "connect or command deadline exceeded", and commands that time out reject with `Command timeout` (before, the socket was destroyed and they rejected with `Connection closed`). README updated. Ship in a minor release.
 
 ---
 
@@ -258,7 +263,7 @@ Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches
 | 60k | 6,823 ms | 521 ms |
 | 100k | 18,121 ms | 836 ms |
 
-**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Expose a pending count for H3. The binary queue from H1 (`_binaryQueue`) also uses `shift()`; give it the same structure.
+**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Keep `hasPendingCommands()` (the H3 deadline's check) O(1). The binary queue from H1 (`_binaryQueue`) also uses `shift()`; give it the same structure.
 
 **Tests.** More pipelined commands than two compaction thresholds resolve in order; the `commandQueue` getter returns the pending items (`test/node.test.ts:649` and `test/index.test.ts:1473` rely on it being an array with a `length`); close rejects everything pending.
 
@@ -298,7 +303,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | B1 | Benchmark suite | [#149](https://github.com/jaredwray/memcache/pull/149) | Done |
 | H1 | Binary/SASL request queue | [#150](https://github.com/jaredwray/memcache/pull/150) | Done |
 | H2 | Single-flight connect, socket-scoped handlers | [#151](https://github.com/jaredwray/memcache/pull/151) | Done |
-| H3 | Connect timeout plus command deadline | | Not started |
+| H3 | Connect timeout plus command deadline | | Done |
 | P1 | Coalesce writes per tick | | Not started |
 | P2 | Linear multi-get miss detection | | Not started |
 | P3 | Large-value buffering | | Not started |
