@@ -25,9 +25,12 @@
     "test": "pnpm lint && vitest run --coverage",
     "test:ci": "biome check --error-on-warnings && vitest run --coverage",
     "test:services:start": "docker compose up -d",
-    "test:services:stop": "docker compose down",
+    "test:services:stop": "docker compose --profile bench down",
     "clean": "rimraf ./node_modules ./coverage ./dist ./site/dist ./site/.cache",
     "benchmark": "pnpm tsx benchmark/set-get.ts",
+    "benchmark:perf": "pnpm tsx benchmark/perf.ts",
+    "benchmark:services:start": "docker compose up -d memcached-bench memcached-bench-tls",
+    "benchmark:services:stop": "docker compose rm --stop --force memcached-bench memcached-bench-tls",
     "website:build": "docula build",
     "website:serve": "docula serve",
     "website:dev": "docula dev"

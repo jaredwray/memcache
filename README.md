@@ -76,6 +76,7 @@ Nodejs Memcache Client
   - [TLS and SASL together](#tls-and-sasl-together)
   - [TLS Server Configuration](#tls-server-configuration)
 - [Benchmarks](#benchmarks)
+  - [Performance suite](#performance-suite)
 - [Contributing](#contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -1297,6 +1298,23 @@ These are provided to show a simple benchmark against current libraries. This is
 |  memcache set/get (v1.4.0)   |    🥇     |       3K  |    350µs  |  ±0.19%  |      10K  |
 |  memcached set/get (v2.2.2)  |   -2.9%   |       3K  |    361µs  |  ±0.16%  |      10K  |
 |  memjs set/get (v1.3.2)      |   -12%    |       3K  |    398µs  |  ±0.17%  |      10K  |
+
+## Performance suite
+
+`pnpm benchmark:perf` measures how the client behaves under load: throughput with 1 to 500 requests in flight, `gets()` with up to 10,000 keys, large values over TCP and TLS, bursts of up to 100,000 concurrent requests, and how many sockets a cold client opens. It runs against dedicated memcached containers that the test services don't start:
+
+```bash
+pnpm benchmark:services:start
+pnpm benchmark:perf
+pnpm benchmark:services:stop
+```
+
+To target other servers, set `MEMCACHE_BENCH_HOST` and `MEMCACHE_BENCH_PORT` (and `MEMCACHE_BENCH_TLS_HOST` and `MEMCACHE_BENCH_TLS_PORT` for the TLS section). On Linux, published Docker ports go through `docker-proxy`, which adds per-packet overhead. For numbers closer to a real network, use the containers' IPs with port `11211`:
+
+```bash
+MEMCACHE_BENCH_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' memcached-server-bench) \
+MEMCACHE_BENCH_PORT=11211 pnpm benchmark:perf
+```
 
 # Contributing
 
