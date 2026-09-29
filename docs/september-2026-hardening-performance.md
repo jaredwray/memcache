@@ -4,6 +4,8 @@
 
 This plan turns a full review of the client, plus an independent second audit, into a sequence of small changes that can each be merged on its own. Unless marked as code reading, every finding below was reproduced against a real memcached 1.6.45 server using the real dependencies. Where a prototype of the fix was built, the numbers compare the current code with that prototype.
 
+Line numbers refer to `main` when the plan was written (commit `2a55872`); they drift as items land.
+
 ## Summary
 
 | ID | Issue | Measured on real memcached 1.6.45 | Size |
@@ -53,13 +55,13 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 
 **Problem.** Vitest runs test files in parallel against the same memcached (`localhost:11211`). Some tests clear the whole server: `client.flush()` and a delayed `flush(1)` (`test/index.test.ts:1724-1753`) and `node.command("flush_all")` (`test/node.test.ts:441-442`). A test in another file that is between writing a key and reading it back can lose the key.
 
-**Evidence.** 2 of 7 full `pnpm test` runs during validation failed, each time on a different test whose key had disappeared: `should handle async append hooks` (`test/index.test.ts:2589`, `append` returned `false`) and `should execute prepend on all replica nodes` (`test/index.test.ts:3588`, `get` returned `undefined`). Both passed on re-run.
+**Evidence.** Rare but real. 2 of 7 early full runs failed, each on a test whose key had disappeared: `should handle async append hooks` (`test/index.test.ts:2589`, `append` returned `false`) and `should execute prepend on all replica nodes` (`test/index.test.ts:3588`, `get` returned `undefined`). The next 52 runs passed, with warm and cold caches and with and without coverage. Sending `flush_all` to the shared server while the suite runs reproduces the first failure on demand, with the same assertion.
 
-**Fix.**
-- Add a dedicated compose service (for example `memcached-flush` on port 11214) and point every `flush` / `flush_all` test at it.
-- Check the tests for any other server-wide commands and route them the same way.
+**Fix (done).**
+- A `memcached-flush` compose service on port 11214. The three flush tests use it; no other test sends server-wide commands.
+- Four hook tests (`add`, `replace`, `append`, `prepend`) used fixed key names and only passed because a flush test had cleared the shared server earlier in the same run. Once flushes moved, they failed on every run after the first. They now use `generateKey()`, like the rest of the suite.
 
-**Done when.** The flush tests use the dedicated server and repeated `pnpm test` runs (for example 20 in a row) pass.
+**Result.** The shared server receives 0 `flush_all` commands per run (was 4), and 20 consecutive `vitest run --coverage` runs pass.
 
 ### B1 — Benchmarks that can see these problems
 
@@ -90,7 +92,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 **Evidence.** On the SASL test server (`:11215`), `Promise.all([binaryGet("a"), binaryGet("b"), binaryGet("c")])` returned `["value-of-a", "value-of-a", "value-of-a"]`.
 
 **Fix.**
-- One persistent binary `data` handler per socket that frames packets (24-byte header plus `totalBodyLength`) from a chunk list, without re-copying.
+- One persistent binary `data` handler per socket that frames packets (24-byte header plus `totalBodyLength`). Keep incoming chunks in a list with a running byte count and flatten only once a complete packet is buffered. Today `binaryRequest` (`:478-479`), `binaryStats` (`:697-708`) and SASL authentication (`:413-414`) re-concatenate everything received so far on every chunk, which is quadratic for large values.
 - A FIFO of pending binary requests. memcached answers binary requests in order on a connection (no quiet opcodes are used), so FIFO matching is enough. Also set `opaque` to a sequence number and reject on a mismatch, so a desync fails loudly instead of returning the wrong data.
 - `binaryStats` becomes a queue entry that collects `STAT` packets until the empty-key terminator. SASL authentication goes through the same queue as its first entry.
 - Reject pending binary requests when the socket closes, as text commands already are.
@@ -126,7 +128,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 **Tests** (an in-process fake TCP server that counts accepted connections, following `test/fake-config-server.ts`):
 - N concurrent `get()`s on a lazy client produce exactly one accepted connection.
 - Two concurrent `connect()` calls share one socket.
-- A server that accepts and immediately closes makes `connect()` reject instead of hang.
+- Destroying the socket while the connection is still pending (for example calling `disconnect()` before the `connect` event, or a TLS server that closes before `secureConnect`) makes `connect()` reject instead of hang. A plain TCP server that accepts and then closes doesn't exercise this: the client's `connect` event fires first.
 - After `reconnect()`, the old socket's `close` does not reject commands queued on the new socket.
 - A server that sends a partial `VALUE` and then closes leaves the next connection parsing cleanly.
 
@@ -140,6 +142,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 - Healthy idle connections are destroyed after `timeout` ms (default 5 s), so the next request pays for a reconnect: a TCP round trip plus the TLS and SASL handshakes where configured. While H2 is unfixed, that reconnect also stampedes.
 - Writes reset the timer, so a stalled server is never detected while the client keeps sending. There is no real per-operation deadline.
 - The Auto Discovery config connection is torn down between polls and rebuilt on every poll (`src/auto-discovery.ts:216-237`; code reading).
+- Changing `client.timeout` has no effect on existing nodes. The setter only updates the client's own field (`src/index.ts:243-245`), each node keeps the value it was constructed with (`src/node.ts:110`), and Auto Discovery keeps its own copy.
 
 **Evidence.**
 - `timeout: 1000` and 1.3 s idle: the node was disconnected, and the next request took 1.42 ms vs 1.03 ms when the connection is kept (local; production adds network round trips and handshakes).
@@ -150,11 +153,13 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 - Add one command-deadline timer per node (not one per request). It is armed when the first command becomes pending, refreshed whenever response bytes arrive (never by writes), cleared when nothing is pending, and `unref()`'d. On expiry: emit `timeout`, reject pending commands with a timeout error, and destroy the socket.
 - Idle connections stay open. TCP keep-alive (already enabled) detects dead peers.
 - Apply the same deadline to the binary queue from H1.
+- Add a `timeout` setter on `MemcacheNode`, and have `client.timeout` update existing nodes and the Auto Discovery config node (as `keepAlive` already does through `updateNodes()`). The deadline reads the current value.
 
 **Tests.**
 - Idle longer than `timeout`: still connected, no `timeout` event.
 - Stalled server with a pending command: rejects after about `timeout` and emits `timeout`, including while other commands keep being written.
 - A slow but progressing response (for example a large value arriving in chunks) is not timed out.
+- Setting `client.timeout` on an existing client applies to the next stalled command.
 - The existing connect-timeout test still passes.
 
 **Compatibility.** Observable change: idle connections are no longer closed, and the `timeout` event now means "connect or command deadline exceeded". Update `README.md:210`, `:238-239`, `:451-452` and `:470`. Ship in a minor release.
@@ -218,7 +223,7 @@ Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches
 | 4 MB | 30.4 → 8.8 ms (3.5×) | 110.2 → 9.5 ms (11.6×) |
 | 16 MB | 517 → 48 ms (10.8×) | not measured |
 
-**Fix.** While waiting for a value body, collect chunks in a list and return until the value plus its CRLF is buffered, then concatenate once. `binaryStats` already uses this pattern (`:689-741`).
+**Fix.** While waiting for a value body, keep incoming chunks in a list with a running byte count and return until the value plus its CRLF is buffered, then concatenate once. Don't copy the `binaryStats` handler: it re-concatenates everything received so far on every chunk (see H1).
 
 **Tests.** Values delivered in 1-byte, 16 KB and 64 KB chunks; CRLF split across chunks; values containing `\r\n`; several values in one chunk; a value and `END` in the same chunk; the existing partial-delivery tests (`test/node.test.ts:699`, `:914`).
 
@@ -250,10 +255,10 @@ Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches
 Smaller wins; each needs B1 before/after numbers in its PR. The numbers here come from the second audit's microbenchmarks.
 
 - **N1 — Encode large `set` values once.** Today the value is scanned by `Buffer.byteLength` (`src/index.ts:1493`), concatenated into the command string (`:949`), concatenated again with `\r\n` (`src/node.ts:795`) and then encoded on write. Encoding once with `Buffer.from` and writing header, body and CRLF under P1's cork took a 1 MB value from 1,054 to 332 µs of CPU. Needs an internal command path that accepts Buffers.
-- **N2 — Ketama key cache.** The key→node cache (`src/ketama.ts:336`, `:448-472`) empties itself every 5,000 new keys. With many distinct keys it costs more than it saves (0.57–1.35 µs per lookup vs 0.26–0.42 µs without it). Replace it with a single-node fast path, and remove the per-call array copy in `BroadcastHash` (`src/broadcast.ts:78-80`) and the `[node]` allocation in `ModulaHash` (`src/modula.ts:207`). `test/ketama.test.ts:503-504` reads `_cache` directly.
-- **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected, and return `node.command()` directly when no retries are configured.
-- **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
-- **N5 — Binary packet building.** Allocate each packet once with `Buffer.allocUnsafe` instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`).
+- **N2 — Ketama key cache.** The key→node cache (`src/ketama.ts:336`, `:448-472`) empties itself every 5,000 new keys. With many distinct keys it costs more than it saves (0.57–1.35 µs per lookup vs 0.26–0.42 µs without it). Replace it with a single-node fast path. `ModulaHash` can return a cached, frozen `[node]` per node instead of allocating one per call (`src/modula.ts:207`); `KetamaHash` results are already frozen. Keep `BroadcastHash`'s per-call copy (`src/broadcast.ts:78-80`) unless benchmarks show it matters: `getNodesByKey()` returns a mutable array, so handing out the internal cache would let a caller's `.pop()` remove a node from every later broadcast. If it becomes a frozen array instead, call out that mutating the result now throws. `test/ketama.test.ts:503-504` reads `_cache` directly.
+- **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected. When no retries are configured, replace the extra async frame with a single `.catch(() => undefined)` on `node.command()`. Failures must still resolve to `undefined` (so `set()` resolves `false`) as they do today (`src/index.ts:1569-1575`); a bare `return node.command()` would let them reject instead.
+- **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), and accept it only when the next byte is LF. If the CR is the last byte buffered, keep it and wait for more data rather than assuming a complete delimiter. Also avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
+- **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
 
 ## Checked and not worth changing
