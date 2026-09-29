@@ -75,7 +75,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
   - bursts of 10k / 30k / 100k concurrent gets
   - cold start: sockets opened by 50 concurrent first requests
 - `memcached-bench` (port 11216) and `memcached-bench-tls` (port 21216) compose services, without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values). They sit in a `bench` profile, so `test:services:start` and CI don't start them; use `pnpm benchmark:services:start` / `stop`. `test:services:stop` enables the profile so it tears everything down.
-- `MEMCACHE_BENCH_HOST` / `MEMCACHE_BENCH_PORT` and `MEMCACHE_BENCH_TLS_HOST` / `MEMCACHE_BENCH_TLS_PORT` override the targets. On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IPs.
+- `MEMCACHE_BENCH_*` variables override the targets and TLS settings (see the README). Every timed operation checks its result, so a change that returns misses can't pass as a speedup. On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IPs.
 - Multi-get keys share a long prefix (`bench:user:profile:<id>`), the common real-world shape. Comparing such keys takes longer, so the quadratic miss check shows at 1,000 keys, not only at 10,000.
 
 **Result.** The suite runs in under a minute, and the baseline for `main` is in the B1 PR description.

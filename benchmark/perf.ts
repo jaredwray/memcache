@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import pkg from "../package.json" with { type: "json" };
 import { Memcache } from "../src/index.js";
 
@@ -16,20 +17,35 @@ const HOST = process.env.MEMCACHE_BENCH_HOST ?? "localhost";
 const PORT = Number(process.env.MEMCACHE_BENCH_PORT ?? "11216");
 const TLS_HOST = process.env.MEMCACHE_BENCH_TLS_HOST ?? "localhost";
 const TLS_PORT = Number(process.env.MEMCACHE_BENCH_TLS_PORT ?? "21216");
-// The TLS server uses the test certificate, which is issued for "localhost".
-const TLS_OPTIONS = {
-	ca: readFileSync(new URL("../test/certs/cacert.pem", import.meta.url)),
-	servername: "localhost",
-};
+// Set to "1" to leave out the TLS measurements (for servers without TLS).
+const SKIP_TLS = process.env.MEMCACHE_BENCH_SKIP_TLS === "1";
 
 const RUNS = 3;
 const MB = 1024 * 1024;
+
+/**
+ * The defaults fit the bench TLS container, which uses the test certificate
+ * (issued for "localhost"), so IP targets are verified against that name. For
+ * a server with its own certificate, set MEMCACHE_BENCH_TLS_CA to its CA
+ * bundle, and MEMCACHE_BENCH_TLS_SERVERNAME if the name differs from the host.
+ */
+function tlsOptions() {
+	return {
+		ca: readFileSync(
+			process.env.MEMCACHE_BENCH_TLS_CA ??
+				new URL("../test/certs/cacert.pem", import.meta.url),
+		),
+		servername:
+			process.env.MEMCACHE_BENCH_TLS_SERVERNAME ??
+			(isIP(TLS_HOST) ? "localhost" : TLS_HOST),
+	};
+}
 
 function createClient(secure = false): Memcache {
 	return new Memcache({
 		nodes: [secure ? `${TLS_HOST}:${TLS_PORT}` : `${HOST}:${PORT}`],
 		maxValueSize: 32 * MB,
-		tls: secure ? TLS_OPTIONS : undefined,
+		tls: secure ? tlsOptions() : undefined,
 	});
 }
 
@@ -104,9 +120,19 @@ async function throughput(): Promise<string> {
 	const keys = Array.from({ length: 1000 }, (_, i) => `bench:tp:${i}`);
 	await setAll(client, keys, value);
 
+	// Check every result so a change that returns misses or failed stores
+	// can't look like a speedup.
 	const operations = [
-		(i: number) => client.get(keys[i % keys.length]),
-		(i: number) => client.set(keys[i % keys.length], value),
+		async (i: number) => {
+			if ((await client.get(keys[i % keys.length])) !== value) {
+				throw new Error("get() returned the wrong value");
+			}
+		},
+		async (i: number) => {
+			if (!(await client.set(keys[i % keys.length], value))) {
+				throw new Error("set() failed");
+			}
+		},
 	];
 	const rows: string[][] = [];
 	for (const concurrency of [1, 10, 100, 500]) {
@@ -173,13 +199,9 @@ async function largeValueGets(secure: boolean, sizes: number[]) {
 async function largeValues(): Promise<string> {
 	const sizes = [256 * 1024, MB, 4 * MB];
 	const tcp = await largeValueGets(false, sizes);
-	let tls: string[];
-	try {
-		tls = (await largeValueGets(true, sizes)).map((ms) => format(ms, 2));
-	} catch (error) {
-		console.error(`TLS large values skipped: ${(error as Error).message}`);
-		tls = sizes.map(() => "n/a");
-	}
+	const tls = SKIP_TLS
+		? sizes.map(() => "skipped")
+		: (await largeValueGets(true, sizes)).map((ms) => format(ms, 2));
 	const rows = sizes.map((size, i) => [
 		`${size / 1024} KB`,
 		format(tcp[i], 2),
@@ -197,10 +219,13 @@ async function bursts(): Promise<string> {
 	const rows: string[][] = [];
 	for (const count of [10_000, 30_000, 100_000]) {
 		const start = performance.now();
-		await Promise.all(
+		const values = await Promise.all(
 			Array.from({ length: count }, (_, i) => client.get(keys[i % 1000])),
 		);
 		const ms = performance.now() - start;
+		if (values.some((value) => value !== "0123456789")) {
+			throw new Error("get() returned the wrong value during a burst");
+		}
 		rows.push([format(count), format(ms), format((ms * 1000) / count, 1)]);
 	}
 	await client.disconnect();

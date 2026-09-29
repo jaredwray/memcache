@@ -1309,11 +1309,16 @@ pnpm benchmark:perf
 pnpm benchmark:services:stop
 ```
 
-To target other servers, set `MEMCACHE_BENCH_HOST` and `MEMCACHE_BENCH_PORT` (and `MEMCACHE_BENCH_TLS_HOST` and `MEMCACHE_BENCH_TLS_PORT` for the TLS section). On Linux, published Docker ports go through `docker-proxy`, which adds per-packet overhead. For numbers closer to a real network, use the containers' IPs with port `11211`:
+To target other servers, set `MEMCACHE_BENCH_HOST` and `MEMCACHE_BENCH_PORT`, plus `MEMCACHE_BENCH_TLS_HOST` and `MEMCACHE_BENCH_TLS_PORT` for the TLS measurements. TLS trusts the test CA by default. For a server with its own certificate, set `MEMCACHE_BENCH_TLS_CA` to its CA bundle, and `MEMCACHE_BENCH_TLS_SERVERNAME` if the certificate's name differs from the host. Set `MEMCACHE_BENCH_SKIP_TLS=1` to leave TLS out.
+
+On Linux, published Docker ports go through `docker-proxy`, which adds per-packet overhead. For numbers closer to a real network, use the containers' IPs with port `11211`:
 
 ```bash
 MEMCACHE_BENCH_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' memcached-server-bench) \
-MEMCACHE_BENCH_PORT=11211 pnpm benchmark:perf
+MEMCACHE_BENCH_PORT=11211 \
+MEMCACHE_BENCH_TLS_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' memcached-server-bench-tls) \
+MEMCACHE_BENCH_TLS_PORT=11211 \
+pnpm benchmark:perf
 ```
 
 # Contributing
