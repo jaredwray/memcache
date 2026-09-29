@@ -297,7 +297,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | T1 | Isolate flush tests | [#148](https://github.com/jaredwray/memcache/pull/148) | Done |
 | B1 | Benchmark suite | [#149](https://github.com/jaredwray/memcache/pull/149) | Done |
 | H1 | Binary/SASL request queue | [#150](https://github.com/jaredwray/memcache/pull/150) | Done |
-| H2 | Single-flight connect, socket-scoped handlers | | Done |
+| H2 | Single-flight connect, socket-scoped handlers | [#151](https://github.com/jaredwray/memcache/pull/151) | Done |
 | H3 | Connect timeout plus command deadline | | Not started |
 | P1 | Coalesce writes per tick | | Not started |
 | P2 | Linear multi-get miss detection | | Not started |
