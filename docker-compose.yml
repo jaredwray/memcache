@@ -47,7 +47,7 @@ services:
       - ./test/certs:/certs:ro
     restart: unless-stopped
 
-  # Targets for benchmark/perf.ts. The bench profile keeps them out of
+  # Targets for the benchmarks in benchmark/. The bench profile keeps them out of
   # test:services:start; use `pnpm benchmark:services:start`. They run without
   # -vv (per-command logging caps throughput) and with -I 32m for large values.
   memcached-bench:
