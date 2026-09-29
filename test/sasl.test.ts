@@ -1,4 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+// biome-ignore-all lint/suspicious/noExplicitAny: test file
+import { type AddressInfo, createServer } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	OPCODE_SASL_AUTH,
+	RESPONSE_MAGIC,
+	STATUS_AUTH_ERROR,
+	serializeHeader,
+} from "../src/binary-protocol.js";
 import { createNode, Memcache, MemcacheNode } from "../src/index.js";
 import { generateKey, generateValue } from "./test-utils.js";
 
@@ -103,6 +111,107 @@ describe("SASL Authentication", () => {
 			await node.reconnect();
 			expect(node.isConnected()).toBe(true);
 			expect(node.isAuthenticated).toBe(true);
+		});
+
+		it("should give concurrent binary requests their own responses", async () => {
+			node = new MemcacheNode(SASL_HOST, SASL_PORT, {
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			await node.connect();
+
+			const keys = Array.from({ length: 20 }, () =>
+				generateKey("sasl-concurrent"),
+			);
+			const values = keys.map((key) => `value-of-${key}`);
+			const counter = generateKey("sasl-concurrent-counter");
+
+			const stored = await Promise.all([
+				...keys.map((key, i) => node.binarySet(key, values[i])),
+				node.binarySet(counter, "10"),
+			]);
+			expect(stored.every(Boolean)).toBe(true);
+
+			// memcached answers in order, so the counter goes 10 → 15 → 12
+			const [gets, incremented, stats, version, missing, decremented] =
+				await Promise.all([
+					Promise.all(keys.map((key) => node.binaryGet(key))),
+					node.binaryIncr(counter, 5),
+					node.binaryStats(),
+					node.binaryVersion(),
+					node.binaryGet(generateKey("sasl-concurrent-missing")),
+					node.binaryDecr(counter, 3),
+				]);
+
+			expect(gets).toEqual(values);
+			expect(incremented).toBe(15);
+			expect(stats.pid).toBeDefined();
+			expect(version).toMatch(/^\d+\.\d+\.\d+/);
+			expect(missing).toBeUndefined();
+			expect(decremented).toBe(12);
+
+			await Promise.all(
+				[...keys, counter].map((key) => node.binaryDelete(key)),
+			);
+		});
+
+		it("should report the status when the server does not support SASL", async () => {
+			// memcached without -S answers SASL_AUTH with "unknown command"
+			node = new MemcacheNode("localhost", 11211, {
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+
+			await expect(node.connect()).rejects.toThrow(
+				"SASL authentication failed with status: 0x81",
+			);
+			expect(node.isAuthenticated).toBe(false);
+		});
+
+		it("should reject connect when the server closes the connection during authentication", async () => {
+			// Accepts the connection, reads the auth request and hangs up
+			const server = createServer((socket) => {
+				socket.once("data", () => socket.destroy());
+			});
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve);
+			});
+			const { port } = server.address() as AddressInfo;
+
+			try {
+				node = new MemcacheNode("127.0.0.1", port, {
+					sasl: { username: TEST_USER, password: TEST_PASS },
+				});
+				await expect(node.connect()).rejects.toThrow("Connection closed");
+				expect(node.isConnected()).toBe(false);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("should fall back to a generic message when an auth error has no body", async () => {
+			node = new MemcacheNode(SASL_HOST, SASL_PORT, {
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			await node.connect();
+
+			const socket = (node as any)._socket;
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const auth = (node as any).performSaslAuth();
+			const opaque = (writeSpy.mock.calls[0][0] as Buffer).readUInt32BE(12);
+			socket.emit(
+				"data",
+				serializeHeader({
+					magic: RESPONSE_MAGIC,
+					opcode: OPCODE_SASL_AUTH,
+					status: STATUS_AUTH_ERROR,
+					opaque,
+				}),
+			);
+
+			await expect(auth).rejects.toThrow(
+				"SASL authentication failed: Invalid credentials",
+			);
+			writeSpy.mockRestore();
 		});
 	});
 

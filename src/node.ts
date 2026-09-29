@@ -5,6 +5,7 @@ import {
 } from "node:tls";
 import { Hookified } from "hookified";
 import {
+	type BinaryHeader,
 	buildAddRequest,
 	buildAppendRequest,
 	buildDecrementRequest,
@@ -25,6 +26,7 @@ import {
 	OPCODE_STAT,
 	parseGetResponse,
 	parseIncrDecrResponse,
+	RESPONSE_MAGIC,
 	STATUS_AUTH_ERROR,
 	STATUS_KEY_NOT_FOUND,
 	STATUS_SUCCESS,
@@ -81,6 +83,19 @@ export type CommandQueueItem = {
 };
 
 /**
+ * A binary protocol request waiting for its response. memcached answers
+ * binary requests on a connection in the order they were sent, and copies
+ * each request's `opaque` value into its response packets.
+ */
+type BinaryQueueItem = {
+	opaque: number;
+	/** Handles one response packet and returns `true` once the request is complete. */
+	onPacket: (packet: Buffer, header: BinaryHeader) => boolean;
+	// biome-ignore lint/suspicious/noExplicitAny: expected
+	reject: (reason?: any) => void;
+};
+
+/**
  * MemcacheNode represents a single memcache server connection.
  * It handles the socket connection, command queue, and protocol parsing for one node.
  */
@@ -101,7 +116,10 @@ export class MemcacheNode extends Hookified {
 	private _sasl: SASLCredentials | undefined;
 	private _tls: MemcacheTlsOption | undefined;
 	private _authenticated: boolean = false;
-	private _binaryBuffer: Buffer = Buffer.alloc(0);
+	private _binaryQueue: BinaryQueueItem[] = [];
+	private _binaryChunks: Buffer[] = [];
+	private _binaryLength: number = 0;
+	private _binaryOpaque: number = 0;
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -291,7 +309,11 @@ export class MemcacheNode extends Hookified {
 			});
 
 			this._socket.on("data", (data: Buffer) => {
-				if (!this._sasl) {
+				// SASL connections only speak the binary protocol. Other
+				// connections are text unless binary requests are waiting.
+				if (this._sasl || this._binaryQueue.length > 0) {
+					this.handleBinaryData(data);
+				} else {
 					this.handleData(data);
 				}
 			});
@@ -348,7 +370,6 @@ export class MemcacheNode extends Hookified {
 			this._multilineData = [];
 			this._pendingValueBytes = 0;
 			this._authenticated = false;
-			this._binaryBuffer = Buffer.alloc(0);
 		}
 
 		// Now establish a fresh connection
@@ -383,115 +404,155 @@ export class MemcacheNode extends Hookified {
 	 */
 	private async performSaslAuth(): Promise<void> {
 		/* v8 ignore next 3 -- @preserve */
-		if (!this._sasl || !this._socket) {
+		if (!this._sasl) {
 			throw new Error("SASL credentials not configured");
 		}
 
-		// Capture references before entering the Promise to satisfy TypeScript
-		const socket = this._socket;
-		const sasl = this._sasl;
+		// Goes through the binary queue like any other request, so a request
+		// sent while authentication is in flight can't take its response.
+		const response = await this.binaryRequest(
+			buildSaslPlainRequest(this._sasl.username, this._sasl.password),
+		);
+		const header = deserializeHeader(response);
 
+		if (header.status === STATUS_SUCCESS) {
+			this._authenticated = true;
+			this.emit("authenticated");
+			return;
+		}
+
+		if (header.status === STATUS_AUTH_ERROR) {
+			const body = response.subarray(HEADER_SIZE);
+			throw new Error(
+				`SASL authentication failed: ${body.toString() || "Invalid credentials"}`,
+			);
+		}
+
+		throw new Error(
+			`SASL authentication failed with status: 0x${header.status.toString(16)}`,
+		);
+	}
+
+	/**
+	 * Send a binary protocol request and wait for its response packet.
+	 * Used internally for SASL-authenticated connections.
+	 */
+	private binaryRequest(packet: Buffer): Promise<Buffer> {
 		return new Promise((resolve, reject) => {
-			this._binaryBuffer = Buffer.alloc(0);
-
-			const authPacket = buildSaslPlainRequest(sasl.username, sasl.password);
-
-			// Temporary binary data handler for SASL authentication
-			const chunks: Buffer[] = [];
-			let chunksLen = 0;
-			const binaryHandler = (data: Buffer) => {
-				chunks.push(data);
-				chunksLen += data.length;
-
-				// Need at least header size to parse response
-				/* v8 ignore next 3 -- @preserve */
-				if (chunksLen < HEADER_SIZE) {
-					return;
-				}
-
-				/* v8 ignore next 2 -- @preserve */
-				this._binaryBuffer =
-					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
-				const header = deserializeHeader(this._binaryBuffer);
-				const totalLength = HEADER_SIZE + header.totalBodyLength;
-
-				// Wait for complete packet
-				/* v8 ignore next 3 -- @preserve */
-				if (chunksLen < totalLength) {
-					return;
-				}
-
-				// Remove this temporary handler
-				socket.removeListener("data", binaryHandler);
-
-				/* v8 ignore next -- @preserve */
-				if (header.status === STATUS_SUCCESS) {
-					this._authenticated = true;
-					this.emit("authenticated");
-					resolve();
-				} else if (header.status === STATUS_AUTH_ERROR) {
-					const body = this._binaryBuffer.subarray(HEADER_SIZE, totalLength);
-					reject(
-						new Error(
-							`SASL authentication failed: ${body.toString() || "Invalid credentials"}`,
-						),
-					);
-				} else {
-					reject(
-						new Error(
-							`SASL authentication failed with status: 0x${header.status.toString(16)}`,
-						),
-					);
-				}
-			};
-
-			socket.on("data", binaryHandler);
-			socket.write(authPacket);
+			this.queueBinaryRequest(
+				packet,
+				(response) => {
+					resolve(response);
+					return true;
+				},
+				reject,
+			);
 		});
 	}
 
 	/**
-	 * Send a binary protocol request and wait for response.
-	 * Used internally for SASL-authenticated connections.
+	 * Tag a binary request with the next `opaque` value, add it to the queue
+	 * and write it to the socket.
 	 */
-	private async binaryRequest(packet: Buffer): Promise<Buffer> {
-		/* v8 ignore next 3 -- @preserve */
-		if (!this._socket) {
-			throw new Error("Not connected");
+	private queueBinaryRequest(
+		packet: Buffer,
+		onPacket: BinaryQueueItem["onPacket"],
+		reject: BinaryQueueItem["reject"],
+	): void {
+		if (!this._connected || !this._socket) {
+			reject(new Error(`Not connected to memcache server ${this.id}`));
+			return;
 		}
 
-		const socket = this._socket;
+		this._binaryOpaque = (this._binaryOpaque + 1) >>> 0;
+		packet.writeUInt32BE(this._binaryOpaque, 12);
+		this._binaryQueue.push({ opaque: this._binaryOpaque, onPacket, reject });
+		this._socket.write(packet);
+	}
 
-		return new Promise((resolve) => {
-			const chunks: Buffer[] = [];
-			let chunksLen = 0;
+	/**
+	 * Split incoming binary data into response packets. Chunks are only
+	 * joined once a whole packet has arrived, so a large value is copied once
+	 * instead of on every chunk.
+	 */
+	private handleBinaryData(data: Buffer): void {
+		this._binaryChunks.push(data);
+		this._binaryLength += data.length;
 
-			const dataHandler = (data: Buffer) => {
-				chunks.push(data);
-				chunksLen += data.length;
+		while (this._binaryLength >= HEADER_SIZE) {
+			// The header itself is split across chunks.
+			if (this._binaryChunks[0].length < HEADER_SIZE) {
+				this._binaryChunks = [
+					Buffer.concat(this._binaryChunks, this._binaryLength),
+				];
+			}
 
-				/* v8 ignore next 3 -- @preserve */
-				if (chunksLen < HEADER_SIZE) {
-					return;
-				}
+			const first = this._binaryChunks[0];
+			if (first[0] !== RESPONSE_MAGIC) {
+				this.failBinaryRequests(
+					new Error(
+						`Invalid binary response from ${this.id}: expected magic byte 0x81, received 0x${first[0].toString(16)}`,
+					),
+				);
+				return;
+			}
 
-				const buffer =
-					chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, chunksLen);
-				const header = deserializeHeader(buffer);
-				const totalLength = HEADER_SIZE + header.totalBodyLength;
+			const packetLength = HEADER_SIZE + first.readUInt32BE(8);
+			if (this._binaryLength < packetLength) {
+				return;
+			}
 
-				/* v8 ignore next 3 -- @preserve */
-				if (chunksLen < totalLength) {
-					return;
-				}
+			const buffer =
+				this._binaryChunks.length === 1
+					? first
+					: Buffer.concat(this._binaryChunks, this._binaryLength);
+			const rest = buffer.subarray(packetLength);
+			this._binaryChunks = rest.length > 0 ? [rest] : [];
+			this._binaryLength = rest.length;
+			this.handleBinaryPacket(buffer.subarray(0, packetLength));
+		}
+	}
 
-				socket.removeListener("data", dataHandler);
-				resolve(buffer.subarray(0, totalLength));
-			};
+	private handleBinaryPacket(packet: Buffer): void {
+		const request = this._binaryQueue[0];
+		// No request is waiting for this packet.
+		if (!request) {
+			return;
+		}
 
-			socket.on("data", dataHandler);
-			socket.write(packet);
-		});
+		const header = deserializeHeader(packet);
+		if (header.opaque !== request.opaque) {
+			this.failBinaryRequests(
+				new Error(
+					`Binary response out of order from ${this.id}: expected opaque ${request.opaque}, received ${header.opaque}`,
+				),
+			);
+			return;
+		}
+
+		if (request.onPacket(packet, header)) {
+			this._binaryQueue.shift();
+		}
+	}
+
+	/**
+	 * The responses no longer line up with the pending requests. Fail them
+	 * all and close the connection rather than give a caller another
+	 * request's response.
+	 */
+	private failBinaryRequests(error: Error): void {
+		this.rejectBinaryRequests(error);
+		this._socket?.destroy();
+	}
+
+	private rejectBinaryRequests(error: Error): void {
+		const pending = this._binaryQueue;
+		this._binaryQueue = [];
+		this._binaryChunks = [];
+		this._binaryLength = 0;
+		for (const request of pending) {
+			request.reject(error);
+		}
 	}
 
 	/**
@@ -677,72 +738,32 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol STATS operation
 	 */
 	public async binaryStats(): Promise<Record<string, string>> {
-		/* v8 ignore next -- @preserve */
-		if (!this._socket) {
-			throw new Error("Not connected");
-		}
-
-		const socket = this._socket;
 		const stats: Record<string, string> = {};
 
-		return new Promise((resolve) => {
-			const chunks: Buffer[] = [];
-			let chunksLen = 0;
-			let consumed = 0;
-
-			const dataHandler = (data: Buffer) => {
-				chunks.push(data);
-				chunksLen += data.length;
-
-				// Flatten only when we have unconsumed data to parse
-				let buffer: Buffer;
-				if (chunks.length === 1) {
-					buffer = chunks[0];
-				} else {
-					buffer = Buffer.concat(chunks, chunksLen).subarray(consumed);
-					// Replace queue with single consolidated buffer
-					chunks.length = 0;
-					chunks.push(buffer);
-					chunksLen = buffer.length;
-					consumed = 0;
-				}
-
-				while (buffer.length >= HEADER_SIZE) {
-					const header = deserializeHeader(buffer);
-					const totalLength = HEADER_SIZE + header.totalBodyLength;
-
-					/* v8 ignore next -- @preserve */
-					if (buffer.length < totalLength) {
-						return;
-					}
-
-					// Empty key means end of stats
-					if (header.keyLength === 0 && header.totalBodyLength === 0) {
-						socket.removeListener("data", dataHandler);
-						resolve(stats);
-						return;
-					}
-
+		return new Promise((resolve, reject) => {
+			this.queueBinaryRequest(
+				buildStatRequest(),
+				(packet, header) => {
+					// An empty packet ends the list. An error is a single packet,
+					// so it ends the request too.
 					if (
-						header.opcode === OPCODE_STAT &&
-						header.status === STATUS_SUCCESS
+						header.status !== STATUS_SUCCESS ||
+						(header.keyLength === 0 && header.totalBodyLength === 0)
 					) {
-						const keyStart = HEADER_SIZE;
-						const keyEnd = keyStart + header.keyLength;
-						const valueEnd = HEADER_SIZE + header.totalBodyLength;
-
-						const key = buffer.subarray(keyStart, keyEnd).toString("utf8");
-						const value = buffer.subarray(keyEnd, valueEnd).toString("utf8");
-						stats[key] = value;
+						resolve(stats);
+						return true;
 					}
 
-					consumed += totalLength;
-					buffer = buffer.subarray(totalLength);
-				}
-			};
+					if (header.opcode === OPCODE_STAT) {
+						const keyEnd = HEADER_SIZE + header.keyLength;
+						const key = packet.subarray(HEADER_SIZE, keyEnd).toString("utf8");
+						stats[key] = packet.subarray(keyEnd).toString("utf8");
+					}
 
-			socket.on("data", dataHandler);
-			socket.write(buildStatRequest());
+					return false;
+				},
+				reject,
+			);
 		});
 	}
 
@@ -750,9 +771,13 @@ export class MemcacheNode extends Hookified {
 	 * Binary protocol QUIT operation
 	 */
 	public async binaryQuit(): Promise<void> {
-		if (this._socket) {
-			this._socket.write(buildQuitRequest());
-		}
+		// memcached replies to QUIT before it closes the connection. Queue the
+		// request so that reply can't be taken for a later request's response.
+		this.queueBinaryRequest(
+			buildQuitRequest(),
+			() => true,
+			() => undefined,
+		);
 	}
 
 	/**
@@ -1032,6 +1057,7 @@ export class MemcacheNode extends Hookified {
 				cmd.reject(error);
 			}
 		}
+		this.rejectBinaryRequests(error);
 	}
 }
 

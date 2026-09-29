@@ -548,6 +548,36 @@ describe("TLS", () => {
 			await node.binaryDelete(key);
 		});
 
+		it("should give concurrent binary requests their own responses over TLS", async () => {
+			node = new MemcacheNode(TLS_SASL_HOST, TLS_SASL_PORT, {
+				tls: { ca },
+				sasl: { username: TEST_USER, password: TEST_PASS },
+			});
+			await node.connect();
+
+			const keys = Array.from({ length: 10 }, () =>
+				generateKey("tls-sasl-concurrent"),
+			);
+			// One value spans several 16 KB TLS records
+			const values = keys.map((key, i) =>
+				i === 0 ? "x".repeat(200 * 1024) : `value-of-${key}`,
+			);
+
+			const stored = await Promise.all(
+				keys.map((key, i) => node.binarySet(key, values[i])),
+			);
+			expect(stored.every(Boolean)).toBe(true);
+
+			const [gets, stats] = await Promise.all([
+				Promise.all(keys.map((key) => node.binaryGet(key))),
+				node.binaryStats(),
+			]);
+			expect(gets).toEqual(values);
+			expect(stats.pid).toBeDefined();
+
+			await Promise.all(keys.map((key) => node.binaryDelete(key)));
+		});
+
 		it("should authenticate over TLS via the client", async () => {
 			const client = new Memcache({
 				nodes: [`${TLS_SASL_HOST}:${TLS_SASL_PORT}`],

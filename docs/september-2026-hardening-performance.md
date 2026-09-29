@@ -92,19 +92,28 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 
 **Problem.** `binaryRequest` (`src/node.ts:457-495`) adds a new `data` listener for each request (`:492`) and resolves with the first complete packet it sees. When requests overlap, every listener consumes the first response and the later responses are dropped. `binaryStats` (`:679-747`) and SASL authentication (`:448`) use the same pattern. SASL servers can only be used through these `binary*` methods (`README.md:863`).
 
-**Evidence.** On the SASL test server (`:11215`), `Promise.all([binaryGet("a"), binaryGet("b"), binaryGet("c")])` returned `["value-of-a", "value-of-a", "value-of-a"]`.
+**Evidence.** On the SASL test server (`:11215`):
+- `Promise.all([binaryGet("a"), binaryGet("b"), binaryGet("c")])` returned `["value-of-a", "value-of-a", "value-of-a"]`.
+- In a mixed batch, `binaryIncr` returned 1986096245 (the GET response read as a counter) and `binaryVersion` returned the GET body, flags included.
+- A `binaryGet` sent alongside `binaryStats` returned the first stat's value.
 
-**Fix.**
-- One persistent binary `data` handler per socket that frames packets (24-byte header plus `totalBodyLength`). Keep incoming chunks in a list with a running byte count and flatten only once a complete packet is buffered. Today `binaryRequest` (`:478-479`), `binaryStats` (`:697-708`) and SASL authentication (`:413-414`) re-concatenate everything received so far on every chunk, which is quadratic for large values.
-- A FIFO of pending binary requests. memcached answers binary requests in order on a connection (no quiet opcodes are used), so FIFO matching is enough. Also set `opaque` to a sequence number and reject on a mismatch, so a desync fails loudly instead of returning the wrong data.
-- `binaryStats` becomes a queue entry that collects `STAT` packets until the empty-key terminator. SASL authentication goes through the same queue as its first entry.
-- Reject pending binary requests when the socket closes, as text commands already are.
+**Fix (done).**
+- One `data` handler per socket frames binary packets (24-byte header plus `totalBodyLength`). Chunks are kept in a list with a running byte count and joined once a whole packet has arrived, so a large value is copied once instead of on every chunk.
+- Pending binary requests wait in a FIFO. memcached answers binary requests in order on a connection (no quiet opcodes are used), so FIFO matching is enough. Each request also carries a sequence number in `opaque`. A response with the wrong `opaque`, or one that doesn't start with the response magic byte, rejects every pending binary request and closes the connection instead of returning the wrong data.
+- `binaryStats` is a queue entry that collects `STAT` packets until the empty terminator or an error packet. Before, an error (for example, on an unauthenticated connection) left it waiting forever.
+- SASL authentication goes through the same queue. Before, a server that closed the connection during authentication left `connect()` pending forever.
+- `binaryQuit` queues its request too, so memcached's reply to `QUIT` can't be taken for a later request's response.
+- Pending binary requests are rejected when the socket closes, as text commands already are. Binary requests on a closed node reject instead of waiting forever.
+- SASL connections parse everything as binary. Other connections parse binary only while binary requests are waiting. Before, binary responses on a non-SASL connection also went to the text parser and stayed in its buffer, so a later text command on that connection read them as part of its response.
 
 **Tests.**
-- A concurrent mix of `binaryGet` / `binarySet` / `binaryIncr` on the SASL server returns each caller's own result.
-- Mock-socket tests: several packets in one chunk, one packet split across chunks, stats spanning chunks (extend `test/node.test.ts:1049`), `opaque` mismatch rejects, close rejects everything pending.
+- A concurrent mix of `binaryGet` / `binarySet` / `binaryIncr` / `binaryDecr` / `binaryStats` / `binaryVersion` on the SASL server returns each caller's own result, and so does a concurrent batch over TLS + SASL that includes a 200 KB value.
+- Mock-socket tests: several packets in one chunk, a header split across chunks, stats spanning chunks, a stats error followed by another response, `opaque` mismatch and bad magic byte reject and close, close rejects everything pending, the `QUIT` reply is consumed, and a 256 KB value in 1 KB chunks is joined with one `Buffer.concat`.
+- A server that closes during SASL authentication makes `connect()` reject, and a binary request after the connection closes rejects.
 
-**Compatibility.** No API change.
+**Result.** 14 of the 18 new tests fail on `main` (the other 4 cover error branches that already behaved correctly). With the fix, the full suite passed 5 consecutive runs.
+
+**Compatibility.** No API change. Binary methods on a node that isn't connected now reject with the same message as text commands (`Not connected to memcache server <host:port>`), and `binaryStats()` resolves with the stats received so far (normally `{}`) when the server answers with an error.
 
 ### H2 — Single-flight connect and socket-scoped handlers
 
@@ -188,7 +197,7 @@ Measured against real memcached 1.6.45 with the real dependencies (environment i
 
 Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches encrypted writes. An "adaptive" variant (send the first write of a tick immediately, cork the rest) was slower than the simple version at 10–100 in flight, so it is not recommended.
 
-**Fix.** In `command()` and in the H1 binary write path: if the socket isn't corked, call `socket.cork()` and schedule `process.nextTick(() => socket.uncork())`, then `socket.write(wire)`. Track the corked flag per socket and clear it on close.
+**Fix.** In `command()` and in `queueBinaryRequest()` (the binary write path from H1): if the socket isn't corked, call `socket.cork()` and schedule `process.nextTick(() => socket.uncork())`, then `socket.write(wire)`. Track the corked flag per socket and clear it on close.
 
 **Tests.** Commands issued in one tick produce a single `cork` / `uncork` pair (mock socket); order is preserved; a socket destroyed before the tick ends does not throw; sequential behavior is unchanged.
 
@@ -226,7 +235,7 @@ Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches
 | 4 MB | 30.4 → 8.8 ms (3.5×) | 110.2 → 9.5 ms (11.6×) |
 | 16 MB | 517 → 48 ms (10.8×) | not measured |
 
-**Fix.** While waiting for a value body, keep incoming chunks in a list with a running byte count and return until the value plus its CRLF is buffered, then concatenate once. Don't copy the `binaryStats` handler: it re-concatenates everything received so far on every chunk (see H1).
+**Fix.** While waiting for a value body, keep incoming chunks in a list with a running byte count and return until the value plus its CRLF is buffered, then concatenate once. The binary path has worked this way since H1 (`handleBinaryData`).
 
 **Tests.** Values delivered in 1-byte, 16 KB and 64 KB chunks; CRLF split across chunks; values containing `\r\n`; several values in one chunk; a value and `END` in the same chunk; the existing partial-delivery tests (`test/node.test.ts:699`, `:914`).
 
@@ -245,7 +254,7 @@ Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches
 | 60k | 6,823 ms | 521 ms |
 | 100k | 18,121 ms | 836 ms |
 
-**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Expose a pending count for H3.
+**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Expose a pending count for H3. The binary queue from H1 (`_binaryQueue`) also uses `shift()`; give it the same structure.
 
 **Tests.** More pipelined commands than two compaction thresholds resolve in order; the `commandQueue` getter returns the pending items (`test/node.test.ts:649` and `test/index.test.ts:1473` rely on it being an array with a `length`); close rejects everything pending.
 
@@ -283,7 +292,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 |---|---|---|---|
 | T1 | Isolate flush tests | [#148](https://github.com/jaredwray/memcache/pull/148) | Done |
 | B1 | Benchmark suite | [#149](https://github.com/jaredwray/memcache/pull/149) | Done |
-| H1 | Binary/SASL request queue | | Not started |
+| H1 | Binary/SASL request queue | [#150](https://github.com/jaredwray/memcache/pull/150) | Done |
 | H2 | Single-flight connect, socket-scoped handlers | | Not started |
 | H3 | Connect timeout plus command deadline | | Not started |
 | P1 | Coalesce writes per tick | | Not started |
