@@ -23,6 +23,17 @@ services:
     command: memcached -m 64 -vv
     restart: unless-stopped
 
+  # Reserved for tests that clear the whole server (flush_all). Test files run
+  # in parallel against memcached1, so flushing it can wipe keys that other
+  # tests are in the middle of using.
+  memcached-flush:
+    image: memcached:1.6.45@sha256:75c93cc91e76853da7c029e74d6e8dbd44774dd3713c93be8cd1971ad26120a4
+    container_name: memcached-server-flush
+    ports:
+      - "11214:11211"
+    command: memcached -m 64 -vv
+    restart: unless-stopped
+
   # TLS-only target for test/tls.test.ts — mirrors ElastiCache Serverless
   # constraints: TLS mandatory, ascii protocol only, no UDP. Certs are
   # checked in (test-only); regenerate via test/certs/make-certs.sh.

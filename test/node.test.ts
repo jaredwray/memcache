@@ -16,6 +16,10 @@ import {
 	generateValue,
 } from "./test-utils.js";
 
+// Dedicated server for tests that flush everything (see docker-compose.yml).
+const FLUSH_HOST = "localhost";
+const FLUSH_PORT = 11214;
+
 describe("MemcacheNode", () => {
 	let node: MemcacheNode;
 
@@ -439,8 +443,18 @@ describe("MemcacheNode", () => {
 		});
 
 		it("should execute flush_all command", async () => {
-			const result = await node.command("flush_all");
-			expect(result).toBe("OK");
+			// flush_all clears the whole server, so use the dedicated flush
+			// server rather than the one other test files share.
+			const flushNode = new MemcacheNode(FLUSH_HOST, FLUSH_PORT, {
+				timeout: 5000,
+			});
+			await flushNode.connect();
+			try {
+				const result = await flushNode.command("flush_all");
+				expect(result).toBe("OK");
+			} finally {
+				await flushNode.disconnect();
+			}
 		});
 
 		it("should handle NOT_STORED response for add command", async () => {
