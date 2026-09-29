@@ -15,7 +15,10 @@ Guidelines for AI coding agents (Claude, Gemini, Codex).
 - `pnpm test` - Run linter and Vitest with coverage
 - `pnpm test:ci` - CI-specific testing (strict linting + coverage)
 - `pnpm test:services:start` - Start Docker memcached (required for integration tests)
-- `pnpm test:services:stop` - Stop test services
+- `pnpm test:services:stop` - Stop test services (and the benchmark services, if running)
+- `pnpm benchmark:services:start` / `pnpm benchmark:services:stop` - Start or stop the memcached containers used by the benchmarks
+- `pnpm benchmark` - Run all benchmarks (each also runs alone, e.g. `pnpm benchmark:multi-get`)
+- `pnpm benchmark:readme` - Run the benchmarks and update the README tables
 - `pnpm clean` - Remove node_modules, coverage, and dist directories
 
 **Use pnpm, not npm.**

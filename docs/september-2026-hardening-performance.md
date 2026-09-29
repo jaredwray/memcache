@@ -67,17 +67,20 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 
 **Problem.** `benchmark/set-get.ts:53-58` measures one set→get at a time, so none of the issues in this plan show up in it.
 
-**Fix.**
-- Add a `benchmark:perf` script that covers these scenarios and prints a markdown table:
-  - closed-loop concurrency with 1 / 10 / 100 / 500 requests in flight (get and set)
-  - `gets()` with 100 / 1,000 / 10,000 keys
-  - `get` of 256 KB / 1 MB / 4 MB values over TCP and TLS
-  - bursts of 10k / 30k / 100k concurrent gets
-  - cold start: sockets opened by 50 concurrent first requests
-- Add a `memcached-bench` compose service without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values).
-- Accept a host override (for example `MEMCACHE_BENCH_HOST`). On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IP.
+**Fix (done).**
+- The benchmarks use the same tooling as [qrbit](https://github.com/jaredwray/qrbit): one tinybench script per scenario in `benchmark/`, each printing a `tinybench-pretty-printer` table. `pnpm benchmark` runs them all (each also has its own `benchmark:<name>` script), and `pnpm benchmark:readme` regenerates the README tables between `<!-- BENCHMARK:* -->` markers.
+- In each table, every row does the same total work in a different shape, so tinybench's summary column compares like with like:
+  - `concurrency`: 500 gets or sets with 1 / 10 / 100 / 500 in flight
+  - `multi-get`: 10,000 keys as `gets()` batches of 100 / 1,000 / 10,000
+  - `large-values`: 4 MB read as 256 KB / 1 MB / 4 MB values, over TCP and TLS
+  - `bursts`: 60,000 gets as bursts of 10,000 / 30,000 / 60,000
+  - `cold-start`: sockets opened by 50 concurrent first requests (a count, not a timing)
+  - `set-get` still compares this client with memjs and memcached.
+- `memcached-bench` (port 11216) and `memcached-bench-tls` (port 21216) compose services, without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values). They sit in a `bench` profile, so `test:services:start` and CI don't start them; use `pnpm benchmark:services:start` / `stop`. `test:services:stop` enables the profile so it tears everything down.
+- `MEMCACHE_BENCH_*` variables override the targets and TLS settings (see the README). Every timed operation checks its result, so a change that returns misses can't pass as a speedup. On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IPs.
+- Multi-get keys share a long prefix (`bench:user:profile:<id>`), the common real-world shape. Comparing such keys takes longer, so the quadratic miss check shows at 1,000 keys, not only at 10,000.
 
-**Done when.** `pnpm benchmark:perf` runs in a couple of minutes, and the baseline for `main` is recorded in the PR description.
+**Result.** The suite runs in about two minutes, and the baseline for `main` is in the README tables and the B1 PR description.
 
 ---
 
@@ -279,7 +282,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | ID | Title | PR | Status |
 |---|---|---|---|
 | T1 | Isolate flush tests | [#148](https://github.com/jaredwray/memcache/pull/148) | Done |
-| B1 | Benchmark suite | | Not started |
+| B1 | Benchmark suite | [#149](https://github.com/jaredwray/memcache/pull/149) | Done |
 | H1 | Binary/SASL request queue | | Not started |
 | H2 | Single-flight connect, socket-scoped handlers | | Not started |
 | H3 | Connect timeout plus command deadline | | Not started |

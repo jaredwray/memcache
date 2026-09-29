@@ -47,6 +47,29 @@ services:
       - ./test/certs:/certs:ro
     restart: unless-stopped
 
+  # Targets for the benchmarks in benchmark/. The bench profile keeps them out of
+  # test:services:start; use `pnpm benchmark:services:start`. They run without
+  # -vv (per-command logging caps throughput) and with -I 32m for large values.
+  memcached-bench:
+    image: memcached:1.6.45@sha256:75c93cc91e76853da7c029e74d6e8dbd44774dd3713c93be8cd1971ad26120a4
+    container_name: memcached-server-bench
+    profiles: ["bench"]
+    ports:
+      - "11216:11211"
+    command: memcached -m 256 -I 32m
+    restart: unless-stopped
+
+  memcached-bench-tls:
+    image: memcached:1.6.45@sha256:75c93cc91e76853da7c029e74d6e8dbd44774dd3713c93be8cd1971ad26120a4
+    container_name: memcached-server-bench-tls
+    profiles: ["bench"]
+    ports:
+      - "21216:11211"
+    command: memcached -m 256 -I 32m -Z -o ssl_chain_cert=/certs/server_crt.pem -o ssl_key=/certs/server_key.pem -o ssl_session_cache -B ascii -U 0
+    volumes:
+      - ./test/certs:/certs:ro
+    restart: unless-stopped
+
   memcached-sasl:
     build:
       context: ./test/sasl
