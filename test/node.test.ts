@@ -991,6 +991,114 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Write coalescing", () => {
+		const nextTick = () =>
+			new Promise<void>((resolve) => {
+				process.nextTick(resolve);
+			});
+
+		it("should write a command on an idle node at once, without corking", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const write = vi.spyOn(socket, "write");
+
+			expect(await node.command("version")).toMatch(/^VERSION /);
+			expect(await node.command("version")).toMatch(/^VERSION /);
+
+			expect(write).toHaveBeenCalledTimes(2);
+			expect(cork).not.toHaveBeenCalled();
+		});
+
+		it("should send the commands that follow in the same tick together, in order", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const uncork = vi.spyOn(socket, "uncork");
+			const write = vi.spyOn(socket, "write");
+
+			const keys = ["a", "b", "c"].map((name) => generateKey(`tick-${name}`));
+			const results = Promise.all(
+				keys.map((key) => node.command(`get ${key}`, { isMultiline: true })),
+			);
+
+			// The first command goes out at once; the other two wait for the tick to end
+			expect(cork).toHaveBeenCalledTimes(1);
+			expect(write.mock.invocationCallOrder[0]).toBeLessThan(
+				cork.mock.invocationCallOrder[0],
+			);
+			expect(uncork).not.toHaveBeenCalled();
+			expect(write.mock.calls.map((call) => call[0])).toEqual(
+				keys.map((key) => `get ${key}\r\n`),
+			);
+
+			await nextTick();
+			expect(uncork).toHaveBeenCalledTimes(1);
+			expect(await results).toEqual([undefined, undefined, undefined]);
+		});
+
+		it("should cork again for commands written on a later tick", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const uncork = vi.spyOn(socket, "uncork");
+
+			const first = [node.command("version"), node.command("version")];
+			await nextTick();
+			// The first two are still waiting for their responses
+			const second = [node.command("version"), node.command("version")];
+			const results = await Promise.all([...first, ...second]);
+
+			expect(results).toHaveLength(4);
+			for (const result of results) {
+				expect(result).toMatch(/^VERSION /);
+			}
+
+			expect(cork).toHaveBeenCalledTimes(2);
+			expect(uncork).toHaveBeenCalledTimes(2);
+		});
+
+		it("should not throw when the socket is destroyed before the tick ends", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const uncork = vi.spyOn(socket, "uncork");
+
+			const pending = [node.command("version"), node.command("version")];
+			socket.destroy();
+
+			await Promise.all(
+				pending.map((command) =>
+					expect(command).rejects.toThrow("Connection closed"),
+				),
+			);
+			expect(uncork).toHaveBeenCalledTimes(1);
+		});
+
+		it("should send binary requests that follow in the same tick together", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+
+			const results = Promise.all([
+				node.binaryGet("key-a"),
+				node.binaryGet("key-b"),
+			]);
+			expect(cork).toHaveBeenCalledTimes(1);
+			expect(writeSpy).toHaveBeenCalledTimes(2);
+
+			socket.emit(
+				"data",
+				Buffer.concat([
+					getResponse(writtenOpaque(writeSpy, 0), "value-a"),
+					getResponse(writtenOpaque(writeSpy, 1), "value-b"),
+				]),
+			);
+			expect(await results).toEqual(["value-a", "value-b"]);
+			writeSpy.mockRestore();
+		});
+	});
+
 	describe("Multiline Response Handling", () => {
 		beforeEach(async () => {
 			await node.connect();

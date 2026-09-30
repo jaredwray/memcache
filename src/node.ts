@@ -595,7 +595,32 @@ export class MemcacheNode extends Hookified {
 		packet.writeUInt32BE(this._binaryOpaque, 12);
 		this._binaryQueue.push({ opaque: this._binaryOpaque, onPacket, reject });
 		this.startDeadline(idle);
-		this._socket.write(packet);
+		this.writeToSocket(this._socket, packet, idle);
+	}
+
+	/**
+	 * Write to the socket. On an idle node the write goes out at once, so a
+	 * lone request isn't delayed. Writes made while other requests are
+	 * pending are sent together at the end of the tick: the first corks the
+	 * socket and the next tick uncorks it. Without this, each pipelined
+	 * command is its own syscall and TCP segment (Nagle's algorithm is off).
+	 */
+	private writeToSocket(
+		socket: Socket,
+		data: string | Buffer,
+		idle: boolean,
+	): void {
+		if (idle) {
+			socket.write(data);
+			return;
+		}
+
+		if (socket.writableCorked === 0) {
+			socket.cork();
+			process.nextTick(() => socket.uncork());
+		}
+
+		socket.write(data);
 	}
 
 	/**
@@ -959,7 +984,7 @@ export class MemcacheNode extends Hookified {
 			});
 			this.startDeadline(idle);
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			this._socket!.write(wire);
+			this.writeToSocket(this._socket!, wire, idle);
 		});
 	}
 

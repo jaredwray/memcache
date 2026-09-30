@@ -206,11 +206,43 @@ Measured against real memcached 1.6.45 with the real dependencies (environment i
 
 Over TLS the gain is smaller (+5–24%) because Node's TLS layer already batches encrypted writes. An "adaptive" variant (send the first write of a tick immediately, cork the rest) was slower than the simple version at 10–100 in flight, so it is not recommended.
 
-**Fix.** In `command()` and in `queueBinaryRequest()` (the binary write path from H1): if the socket isn't corked, call `socket.cork()` and schedule `process.nextTick(() => socket.uncork())`, then `socket.write(wire)`. Track the corked flag per socket and clear it on close.
+**Fix (done).**
+- `writeToSocket()` is used by `command()` and by `queueBinaryRequest()` (the binary and SASL path from H1). On an idle node it writes at once. A write made while other requests are pending corks the socket, unless it is already corked, and schedules `process.nextTick(() => socket.uncork())`. So the writes of that tick go out in one `writev` instead of one `write` each.
+- The idle case is a change from the fix first planned here, which corked every write. That version delayed a lone command to the end of its tick and added a `process.nextTick` per command. It cost 2–4% at 1 in flight (medians over 6 alternating rounds per build: gets 11.97k → 11.44k, sets 12.08k → 11.81k). Writing at once on an idle node recovers that, and was as fast or faster at every level. Medians over 6 rounds each against corking every write, at 1 / 10 / 100 / 500 in flight: gets +1% / +8% / +4% / +0%, sets +3% / +9% / +13% / +5%. This is not the "adaptive" variant above, which skipped the cork for the first write of every tick even while requests were pending.
+- The corked state is `socket.writableCorked`, so there is no flag to track or clear on close. The uncork callback holds the socket it corked. A socket replaced in the same tick is still uncorked, and uncorking a destroyed socket does nothing.
 
-**Tests.** Commands issued in one tick produce a single `cork` / `uncork` pair (mock socket); order is preserved; a socket destroyed before the tick ends does not throw; sequential behavior is unchanged.
+**Tests.**
+- A lone command on an idle node is written at once, without a `cork`.
+- Three `get`s issued in one tick: the first is written at once, the other two share one `cork`, all three writes are in order, `uncork` runs on the next tick, and each caller gets its own result.
+- A batch issued on a later tick, while the first batch is still pending, corks and uncorks again.
+- A socket destroyed before the tick ends: both commands reject with `Connection closed` and the pending `uncork` doesn't throw.
+- Two `binaryGet`s issued in one tick share one `cork` and each get their own value.
 
-**Compatibility.** None.
+**Result.** 4 of the 5 new tests fail on `main`. The fifth (a lone command is written at once) passes there too and guards the idle path.
+
+The B1 `concurrency` benchmark against the container IP (batches of 500 commands per second, `main` → P1):
+
+| In flight | gets | sets |
+|---|---|---|
+| 1 | 24 → 23 | 22 → 23 |
+| 10 | 132 → 151 | 116 → 162 |
+| 100 | 176 → 375 | 190 → 421 |
+| 500 | 157 → 393 | 174 → 401 |
+
+Longer closed-loop runs over TCP (ops/s, median of 6 runs per build in `main`, P1, P1, `main` order; 60,000 operations at 1 in flight, 200,000 otherwise):
+
+| In flight | gets | sets |
+|---|---|---|
+| 1 | 11.5k → 11.9k | 11.7k → 12.1k |
+| 10 | 61.8k → 80.5k (+30%) | 65.7k → 89.9k (+37%) |
+| 100 | 86.7k → 207.4k (+139%) | 91.8k → 254.9k (+178%) |
+| 500 | 87.0k → 252.5k (+190%) | 89.9k → 276.5k (+208%) |
+
+At 1 in flight the ranges overlap (gets 11.1–12.1k vs 11.5–12.3k), as expected: a lone command is written exactly as on `main`. From 10 in flight up they don't overlap.
+
+Over TLS (4 runs per build) the gain shrinks as concurrency grows. At 10 in flight, the medians went from 45.0k to 66.5k (gets) and from 49.4k to 72.7k (sets), +47–48%. At 100 they rose 12% for gets and 2% for sets, with overlapping ranges. At 1 and 500 in flight there is no change.
+
+**Compatibility.** No API change. A command issued while others are pending goes out at the end of the current tick instead of immediately. One visible difference: if such a command is issued with `MemcacheNode.command()` in the same tick as `disconnect()` or `reconnect()`, it still rejects, but is no longer sent. Before, the server ran it even though the caller was told it failed. In 20 runs of two `set`s followed by `disconnect()` in the same tick, `main` stored all 40 and P1 stores the first 20, which are written at once as on `main`. Commands issued through `Memcache` reach the node after an `await`, so they behave as before, including an unawaited `set()` followed by `disconnect()` or `quit()`.
 
 ### P2 — Linear multi-get miss detection
 
@@ -292,6 +324,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 ## R1 — Docs and release
 
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
+- Regenerate the README benchmark tables with `pnpm benchmark:readme` once P1–P4 have landed. They still show the `main` baseline from B1.
 - Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
 - Keep the tracking table below up to date.
 
@@ -304,7 +337,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | H1 | Binary/SASL request queue | [#150](https://github.com/jaredwray/memcache/pull/150) | Done |
 | H2 | Single-flight connect, socket-scoped handlers | [#151](https://github.com/jaredwray/memcache/pull/151) | Done |
 | H3 | Connect timeout plus command deadline | [#152](https://github.com/jaredwray/memcache/pull/152) | Done |
-| P1 | Coalesce writes per tick | | Not started |
+| P1 | Coalesce writes per tick | | Done |
 | P2 | Linear multi-get miss detection | | Not started |
 | P3 | Large-value buffering | | Not started |
 | P4 | O(1) command queue | | Not started |
