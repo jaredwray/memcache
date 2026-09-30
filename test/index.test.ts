@@ -1351,6 +1351,44 @@ describe("Memcache", () => {
 			}
 		});
 
+		it("should apply a new timeout to existing nodes", () => {
+			const testClient = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+				timeout: 5000,
+			});
+
+			testClient.timeout = 250;
+			expect(testClient.timeout).toBe(250);
+			expect(testClient.nodes.map((node) => node.timeout)).toEqual([250, 250]);
+		});
+
+		it("should resolve a command the server never answers and emit timeout", async () => {
+			// Accepts connections and reads requests, but never replies
+			const server = createServer((socket) => {
+				socket.on("data", () => undefined);
+			});
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve);
+			});
+			const { port } = server.address() as AddressInfo;
+			const testClient = new Memcache({
+				nodes: [`127.0.0.1:${port}`],
+				timeout: 200,
+			});
+			const timeouts: string[] = [];
+			testClient.on(MemcacheEvents.TIMEOUT, (nodeId: string) => {
+				timeouts.push(nodeId);
+			});
+
+			try {
+				expect(await testClient.get("stalled")).toBeUndefined();
+				expect(timeouts).toEqual([`127.0.0.1:${port}`]);
+			} finally {
+				await testClient.disconnect();
+				server.close();
+			}
+		});
+
 		it("should handle connecting when already connected", async () => {
 			const client12 = new Memcache();
 			await client12.connect();

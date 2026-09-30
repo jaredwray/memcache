@@ -206,6 +206,21 @@ describe("AutoDiscovery", () => {
 			expect(discovery.isRunning).toBe(false);
 			expect(discovery.configEndpoint).toBe("myhost:11211");
 		});
+
+		it("should get and set the timeout", () => {
+			const discovery = new AutoDiscovery({
+				configEndpoint: "myhost:11211",
+				pollingInterval: 30000,
+				useLegacyCommand: false,
+				timeout: 5000,
+				keepAlive: true,
+				keepAliveDelay: 1000,
+			});
+
+			expect(discovery.timeout).toBe(5000);
+			discovery.timeout = 250;
+			expect(discovery.timeout).toBe(250);
+		});
 	});
 
 	describe("start and stop", () => {
@@ -494,6 +509,51 @@ describe("AutoDiscovery", () => {
 			await waitFor(() => errors.length >= 1);
 			expect(errors.length).toBeGreaterThanOrEqual(1);
 		});
+
+		it("should keep one config connection across polls", async () => {
+			server = new FakeConfigServer({
+				version: 1,
+				nodes: ["host1|10.0.0.1|11211"],
+			});
+			await server.start();
+
+			// The connection sits idle between polls for longer than the timeout
+			discovery = new AutoDiscovery({
+				configEndpoint: server.endpoint,
+				pollingInterval: 150,
+				useLegacyCommand: false,
+				timeout: 50,
+				keepAlive: true,
+				keepAliveDelay: 1000,
+			});
+
+			await discovery.start();
+			await waitFor(() => server.requestCount >= 4);
+			expect(server.connectionCount).toBe(1);
+		});
+
+		it("should apply a new timeout to the config connection", async () => {
+			server = new FakeConfigServer({
+				version: 1,
+				nodes: ["host1|10.0.0.1|11211"],
+			});
+			await server.start();
+
+			discovery = new AutoDiscovery({
+				configEndpoint: server.endpoint,
+				pollingInterval: 60000,
+				useLegacyCommand: false,
+				timeout: 5000,
+				keepAlive: true,
+				keepAliveDelay: 1000,
+			});
+
+			await discovery.start();
+			discovery.timeout = 250;
+			const configNode = (discovery as unknown as { _configNode: MemcacheNode })
+				._configNode;
+			expect(configNode.timeout).toBe(250);
+		});
 	});
 
 	describe("legacy command", () => {
@@ -631,6 +691,36 @@ describe("Memcache AutoDiscovery Integration", () => {
 			expect(configs).toHaveLength(1);
 			expect(configs[0].version).toBe(1);
 			expect(client.nodeIds).toContain("10.0.0.1:11211");
+
+			await client.disconnect();
+			await server.stop();
+		});
+
+		it("should apply client.timeout to the auto discovery connection", async () => {
+			const server = new FakeConfigServer({
+				version: 1,
+				nodes: ["host1|10.0.0.1|11211"],
+			});
+			await server.start();
+
+			const client = new Memcache({
+				nodes: [],
+				lazyConnect: true,
+				autoDiscover: {
+					enabled: true,
+					configEndpoint: server.endpoint,
+				},
+			});
+			client.on(MemcacheEvents.AUTO_DISCOVER_ERROR, () => {});
+			client.on(MemcacheEvents.ERROR, () => {});
+
+			await client.connect();
+			client.timeout = 300;
+
+			const discovery = (client as unknown as { _autoDiscovery: AutoDiscovery })
+				._autoDiscovery;
+			expect(discovery.timeout).toBe(300);
+			expect(client.nodes.map((node) => node.timeout)).toEqual([300]);
 
 			await client.disconnect();
 			await server.stop();

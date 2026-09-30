@@ -208,7 +208,7 @@ const client = new Memcache({
 
 - `nodes?: (string | MemcacheNode)[]` - Array of node URIs or MemcacheNode instances
   - Examples: `["localhost:11211", "memcache://192.168.1.100:11212"]`
-- `timeout?: number` - Operation timeout in milliseconds (default: 5000)
+- `timeout?: number` - Milliseconds to wait for a connection to open, and for the server to respond while commands are pending (default: 5000). If pending commands get no response in time, the node emits `timeout`, the pending commands fail and the connection is closed; the next command reconnects. Idle connections stay open.
 - `keepAlive?: boolean` - Keep connection alive (default: true)
 - `keepAliveDelay?: number` - Keep alive delay in milliseconds (default: 1000)
 - `hash?: HashProvider` - Hash provider for consistent hashing (default: KetamaHash)
@@ -237,7 +237,7 @@ Returns the list of node IDs (e.g., `["localhost:11211", "127.0.0.1:11212"]`).
 Get or set the hash provider used for consistent hashing distribution.
 
 ### `timeout: number`
-Get or set the timeout for operations in milliseconds (default: 5000).
+Get or set the timeout in milliseconds (default: 5000). Setting it updates existing nodes and the Auto Discovery connection, and applies to commands that are already waiting.
 
 ### `keepAlive: boolean`
 Get or set the keepAlive setting. Updates all existing nodes. Requires `reconnect()` to apply changes.
@@ -449,8 +449,8 @@ client.on('error', (error) => {
   console.error('Error:', error);
 });
 
-client.on('timeout', () => {
-  console.log('Connection timeout');
+client.on('timeout', (nodeId) => {
+  console.log(`No response from ${nodeId} in time`);
 });
 
 // Cache hit/miss events
@@ -468,7 +468,7 @@ client.on('miss', (key) => {
 - `connect` - Emitted when connection to Memcache server is established
 - `close` - Emitted when connection is closed
 - `error` - Emitted when an error occurs
-- `timeout` - Emitted when a connection timeout occurs
+- `timeout` - Emitted when a connection can't be opened within `timeout`, or pending commands get no response within `timeout` (the connection is then closed)
 - `hit` - Emitted when a key is found in cache (includes key and value)
 - `miss` - Emitted when a key is not found in cache
 - `quit` - Emitted when quit command is sent

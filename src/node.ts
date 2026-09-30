@@ -121,6 +121,8 @@ export class MemcacheNode extends Hookified {
 	private _binaryChunks: Buffer[] = [];
 	private _binaryLength: number = 0;
 	private _binaryOpaque: number = 0;
+	private _deadline: ReturnType<typeof setTimeout> | undefined = undefined;
+	private _waitingSince: number = 0;
 
 	constructor(host: string, port: number, options?: MemcacheNodeOptions) {
 		super({ throwOnEmptyListeners: false });
@@ -220,6 +222,26 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
+	 * Get the timeout in milliseconds for opening a connection and for
+	 * receiving a response while commands are pending
+	 */
+	public get timeout(): number {
+		return this._timeout;
+	}
+
+	/**
+	 * Set the timeout in milliseconds. Applies to the next connection attempt
+	 * and to commands that are already waiting for a response.
+	 */
+	public set timeout(value: number) {
+		this._timeout = value;
+		if (this._deadline) {
+			clearTimeout(this._deadline);
+			this.scheduleDeadline(value - (performance.now() - this._waitingSince));
+		}
+	}
+
+	/**
 	 * Get the command queue
 	 */
 	public get commandQueue(): CommandQueueItem[] {
@@ -297,6 +319,7 @@ export class MemcacheNode extends Hookified {
 			this._socket = socket;
 			let ready = false;
 
+			// The socket timeout only covers opening the connection
 			socket.setTimeout(this._timeout);
 			socket.setNoDelay(true);
 
@@ -308,6 +331,9 @@ export class MemcacheNode extends Hookified {
 			socket.on(readyEvent, async () => {
 				ready = true;
 				this._connected = true;
+				// From here the command deadline covers waiting for responses,
+				// including SASL authentication, and an idle connection stays open
+				socket.setTimeout(0);
 
 				// If SASL credentials are configured, authenticate before resolving
 				if (this._sasl) {
@@ -331,6 +357,9 @@ export class MemcacheNode extends Hookified {
 				if (socket !== this._socket) {
 					return;
 				}
+
+				// Response bytes are progress; restart the command deadline
+				this._waitingSince = performance.now();
 
 				// SASL connections only speak the binary protocol. Other
 				// connections are text unless binary requests are waiting.
@@ -363,6 +392,67 @@ export class MemcacheNode extends Hookified {
 				reject(new Error("Connection timeout"));
 			});
 		});
+	}
+
+	/**
+	 * Whether any text command or binary request is waiting for a response.
+	 */
+	private hasPendingCommands(): boolean {
+		return (
+			this._currentCommand !== undefined ||
+			this._commandQueue.length > 0 ||
+			this._binaryQueue.length > 0
+		);
+	}
+
+	/**
+	 * Start the command deadline after queueing a command. `idle` says nothing
+	 * was pending before it, so the wait starts now. Only response bytes
+	 * restart the wait, never writes, so a server that stops responding is
+	 * detected even while more commands are being sent.
+	 */
+	private startDeadline(idle: boolean): void {
+		if (idle) {
+			this._waitingSince = performance.now();
+		}
+
+		if (!this._deadline) {
+			this.scheduleDeadline(this._timeout);
+		}
+	}
+
+	private scheduleDeadline(delay: number): void {
+		this._deadline = setTimeout(() => this.checkDeadline(), Math.max(delay, 0));
+		// Don't keep the process alive just to time out a command
+		this._deadline.unref();
+	}
+
+	/**
+	 * One timer per node checks the deadline instead of a timer per command.
+	 * It isn't moved on every response: when it fires before the deadline, it
+	 * is scheduled again for the time left.
+	 */
+	private checkDeadline(): void {
+		this._deadline = undefined;
+		if (!this.hasPendingCommands()) {
+			return;
+		}
+
+		const waited = performance.now() - this._waitingSince;
+		if (waited < this._timeout) {
+			this.scheduleDeadline(this._timeout - waited);
+			return;
+		}
+
+		// No response in time: fail everything pending and drop the connection,
+		// so a late response can't be taken for a later command's
+		const socket = this._socket as Socket;
+		this.emit("timeout");
+		this.dropSocket(
+			socket,
+			new Error(this._connecting ? "Connection timeout" : "Command timeout"),
+		);
+		socket.destroy();
 	}
 
 	/**
@@ -500,9 +590,11 @@ export class MemcacheNode extends Hookified {
 			return;
 		}
 
+		const idle = !this.hasPendingCommands();
 		this._binaryOpaque = (this._binaryOpaque + 1) >>> 0;
 		packet.writeUInt32BE(this._binaryOpaque, 12);
 		this._binaryQueue.push({ opaque: this._binaryOpaque, onPacket, reject });
+		this.startDeadline(idle);
 		this._socket.write(packet);
 	}
 
@@ -855,6 +947,7 @@ export class MemcacheNode extends Hookified {
 
 		const wire = `${cmd}\r\n`;
 		return new Promise((resolve, reject) => {
+			const idle = !this.hasPendingCommands();
 			this._commandQueue.push({
 				command: cmd,
 				resolve,
@@ -864,6 +957,7 @@ export class MemcacheNode extends Hookified {
 				isConfig: options?.isConfig,
 				requestedKeys: options?.requestedKeys,
 			});
+			this.startDeadline(idle);
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
 			this._socket!.write(wire);
 		});
@@ -1098,6 +1192,9 @@ export class MemcacheNode extends Hookified {
 		this._multilineData = [];
 		this._pendingValueBytes = 0;
 		this.rejectBinaryRequests(error);
+		// Nothing is waiting for a response any more
+		clearTimeout(this._deadline);
+		this._deadline = undefined;
 	}
 }
 

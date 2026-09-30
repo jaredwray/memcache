@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import type { Socket } from "node:net";
+import { type AddressInfo, createServer, type Socket } from "node:net";
 import {
 	afterEach,
 	beforeEach,
@@ -66,6 +66,39 @@ const binaryResponse = (
 // A GET hit: 4 bytes of flags, then the value.
 const getResponse = (opaque: number, value: string): Buffer =>
 	binaryResponse(OPCODE_GET, opaque, { extras: Buffer.alloc(4), value });
+
+const sleep = (ms: number) =>
+	new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+
+// An in-process server; `onConnection` decides how (or whether) to reply.
+const startServer = async (onConnection: (socket: Socket) => void) => {
+	const sockets = new Set<Socket>();
+	const server = createServer((socket) => {
+		sockets.add(socket);
+		socket.on("close", () => sockets.delete(socket));
+		onConnection(socket);
+	});
+	await new Promise<void>((resolve) => {
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	return {
+		port: (server.address() as AddressInfo).port,
+		close: () => {
+			for (const socket of sockets) {
+				socket.destroy();
+			}
+			server.close();
+		},
+	};
+};
+
+// Accepts connections and reads requests, but never replies.
+const startStalledServer = () =>
+	startServer((socket) => {
+		socket.on("data", () => undefined);
+	});
 
 describe("MemcacheNode", () => {
 	let node: MemcacheNode;
@@ -390,6 +423,178 @@ describe("MemcacheNode", () => {
 				timeout: 1000,
 			});
 			await expect(timeoutNode.connect()).rejects.toThrow("Connection timeout");
+		});
+	});
+
+	describe("Timeouts", () => {
+		it("should keep an idle connection open longer than the timeout", async () => {
+			const idleNode = new MemcacheNode("localhost", 11211, { timeout: 200 });
+			let timeouts = 0;
+			idleNode.on("timeout", () => {
+				timeouts++;
+			});
+
+			await idleNode.connect();
+			await sleep(400);
+
+			expect(idleNode.isConnected()).toBe(true);
+			expect(timeouts).toBe(0);
+			expect(await idleNode.command("version")).toMatch(/^VERSION /);
+			await idleNode.disconnect();
+		});
+
+		it("should time out a command when the server stops responding, even while more commands are written", async () => {
+			const server = await startStalledServer();
+			const stalledNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 300,
+			});
+			let timeouts = 0;
+			stalledNode.on("timeout", () => {
+				timeouts++;
+			});
+
+			try {
+				await stalledNode.connect();
+				const started = performance.now();
+				const first = stalledNode.command("version");
+				// Writes don't count as progress
+				const writer = setInterval(() => {
+					stalledNode.command("version").catch(() => undefined);
+				}, 50);
+
+				await expect(first).rejects.toThrow("Command timeout");
+				clearInterval(writer);
+
+				const elapsed = performance.now() - started;
+				expect(elapsed).toBeGreaterThanOrEqual(300);
+				expect(elapsed).toBeLessThan(1500);
+				expect(timeouts).toBe(1);
+				expect(stalledNode.isConnected()).toBe(false);
+			} finally {
+				await stalledNode.disconnect();
+				server.close();
+			}
+		});
+
+		it("should not time out a response that keeps arriving", async () => {
+			const value = "x".repeat(2000);
+			const server = await startServer((socket) => {
+				socket.once("data", async () => {
+					// About 1 second in total, 50 ms between chunks
+					const response = Buffer.from(
+						`VALUE slow 0 ${value.length}\r\n${value}\r\nEND\r\n`,
+					);
+					for (let i = 0; i < response.length; i += 100) {
+						socket.write(response.subarray(i, i + 100));
+						await sleep(50);
+					}
+				});
+			});
+			const slowNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 300,
+			});
+
+			try {
+				await slowNode.connect();
+				const result = await slowNode.command("get slow", {
+					isMultiline: true,
+					requestedKeys: ["slow"],
+				});
+				expect(result).toEqual({ values: [value], foundKeys: ["slow"] });
+			} finally {
+				await slowNode.disconnect();
+				server.close();
+			}
+		});
+
+		it("should apply a new timeout to a command that is already waiting", async () => {
+			const server = await startStalledServer();
+			const stalledNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 5000,
+			});
+
+			try {
+				await stalledNode.connect();
+				const started = performance.now();
+				const pending = stalledNode.command("version");
+				stalledNode.timeout = 200;
+
+				await expect(pending).rejects.toThrow("Command timeout");
+				expect(performance.now() - started).toBeLessThan(1500);
+			} finally {
+				await stalledNode.disconnect();
+				server.close();
+			}
+		});
+
+		it("should time out a binary request that gets no response", async () => {
+			const server = await startStalledServer();
+			const stalledNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 200,
+			});
+
+			try {
+				await stalledNode.connect();
+				await expect(stalledNode.binaryGet("key")).rejects.toThrow(
+					"Command timeout",
+				);
+			} finally {
+				await stalledNode.disconnect();
+				server.close();
+			}
+		});
+
+		it("should report a connection timeout when SASL authentication gets no response", async () => {
+			const server = await startStalledServer();
+			const saslNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 200,
+				sasl: { username: "user", password: "pass" },
+			});
+			let timeouts = 0;
+			saslNode.on("timeout", () => {
+				timeouts++;
+			});
+
+			try {
+				await expect(saslNode.connect()).rejects.toThrow("Connection timeout");
+				expect(timeouts).toBe(1);
+				expect(saslNode.isConnected()).toBe(false);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("should report a connection timeout when the TLS handshake gets no response", async () => {
+			const server = await startStalledServer();
+			const tlsNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 200,
+				tls: { rejectUnauthorized: false },
+			});
+
+			try {
+				await expect(tlsNode.connect()).rejects.toThrow("Connection timeout");
+			} finally {
+				server.close();
+			}
+		});
+
+		it("should stop the deadline timer once nothing is pending", async () => {
+			const quickNode = new MemcacheNode("localhost", 11211, { timeout: 100 });
+			await quickNode.connect();
+			expect(await quickNode.command("version")).toMatch(/^VERSION /);
+
+			// The timer fires once, finds nothing pending and isn't scheduled again
+			await vi.waitFor(() => {
+				expect((quickNode as any)._deadline).toBeUndefined();
+			});
+			expect(quickNode.isConnected()).toBe(true);
+			await quickNode.disconnect();
+		});
+
+		it("should get and set the timeout", () => {
+			expect(node.timeout).toBe(5000);
+			node.timeout = 1234;
+			expect(node.timeout).toBe(1234);
 		});
 	});
 
