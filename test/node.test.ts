@@ -910,6 +910,27 @@ describe("MemcacheNode", () => {
 			expect(missEmitted).toBe(true);
 			expect(missKey).toBe(key);
 		});
+
+		it("should emit one hit or miss per requested key, repeats included", async () => {
+			const found = generateKey("repeat-hit");
+			const missing = generateKey("repeat-miss");
+			await node.command(`set ${found} 0 0 1\r\nx`);
+
+			const hits: string[] = [];
+			const misses: string[] = [];
+			node.on("hit", (k: string) => hits.push(k));
+			node.on("miss", (k: string) => misses.push(k));
+
+			// memcached returns a found key once per time it is requested
+			const requestedKeys = [missing, found, missing, found];
+			await node.command(`get ${requestedKeys.join(" ")}`, {
+				isMultiline: true,
+				requestedKeys,
+			});
+
+			expect(hits).toEqual([found, found]);
+			expect(misses).toEqual([missing, missing]);
+		});
 	});
 
 	describe("Error Handling", () => {
