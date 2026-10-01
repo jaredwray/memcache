@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ModulaHash } from "../src/modula.js";
 import { MemcacheNode } from "../src/node.js";
 import { generateKey } from "./test-utils.js";
@@ -239,6 +239,62 @@ describe("ModulaHash", () => {
 				expect(nodes.length).toBe(1);
 				expect(nodes[0]).toBe(node);
 			}
+		});
+
+		it("should return one frozen array per node, shared by its keys", () => {
+			const distribution = new ModulaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			const node2 = new MemcacheNode("server2", 11211);
+			distribution.addNode(node1);
+			distribution.addNode(node2);
+
+			const results = new Map<MemcacheNode, MemcacheNode[]>();
+			for (let i = 0; i < 100; i++) {
+				const nodes = distribution.getNodesByKey(`shared-${i}`);
+				expect(Object.isFrozen(nodes)).toBe(true);
+				const earlier = results.get(nodes[0]);
+				if (earlier) {
+					expect(nodes).toBe(earlier);
+				} else {
+					results.set(nodes[0], nodes);
+				}
+			}
+			expect([...results.keys()]).toEqual(
+				expect.arrayContaining([node1, node2]),
+			);
+			expect(() => results.get(node1)?.push(node2)).toThrow(TypeError);
+		});
+
+		it("should not hash keys while it has one node", () => {
+			const distribution = new ModulaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			const node2 = new MemcacheNode("server2", 11211);
+			const hash = vi.spyOn(
+				distribution as unknown as { hashStr: (key: string) => number },
+				"hashStr",
+			);
+
+			distribution.addNode(node1);
+			expect(distribution.getNodesByKey("a")).toEqual([node1]);
+			expect(hash).not.toHaveBeenCalled();
+
+			distribution.addNode(node2);
+			distribution.getNodesByKey("a");
+			expect(hash).toHaveBeenCalledTimes(1);
+
+			distribution.removeNode(node2.id);
+			hash.mockClear();
+			expect(distribution.getNodesByKey("b")).toEqual([node1]);
+			expect(hash).not.toHaveBeenCalled();
+		});
+
+		it("should not treat a node with no place in the list as the only node", () => {
+			const distribution = new ModulaHash();
+			const node = new MemcacheNode("server1", 11211);
+			// A negative weight gives the node no entries in the weighted list
+			node.weight = -1;
+			distribution.addNode(node);
+			expect(distribution.getNodesByKey("a")).toEqual([]);
 		});
 	});
 

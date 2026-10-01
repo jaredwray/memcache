@@ -421,6 +421,24 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     Large sets are about twice as fast over TCP and 1.2–1.6× as fast over TLS. The get rows are unchanged within noise.
 - **N2 — Ketama key cache.** The key→node cache (`src/ketama.ts:336`, `:448-472`) empties itself every 5,000 new keys. With many distinct keys it costs more than it saves (0.57–1.35 µs per lookup vs 0.26–0.42 µs without it). Replace it with a single-node fast path. `ModulaHash` can return a cached, frozen `[node]` per node instead of allocating one per call (`src/modula.ts:207`); `KetamaHash` results are already frozen. Keep `BroadcastHash`'s per-call copy (`src/broadcast.ts:78-80`) unless benchmarks show it matters: `getNodesByKey()` returns a mutable array, so handing out the internal cache would let a caller's `.pop()` remove a node from every later broadcast. If it becomes a frozen array instead, call out that mutating the result now throws. `test/ketama.test.ts:503-504` reads `_cache` directly.
+  - **Done, differently from the plan.** Removing the memo made lookups about 10× slower wherever keys repeat across several servers: with three servers and 100 or 4,000 repeated keys, a lookup went from 12–31 ns to 239–282 ns. Hashing a key (FNV-1a, with a float multiply per character) and searching the ring costs about 250 ns, and the memo had been hiding it. So the memo stays, and the rest of the plan applies:
+    - Each node gets one frozen `[node]` array when it is added. The memo and every lookup share it, so a miss no longer allocates and freezes a new array, which makes it about 20% cheaper.
+    - While the ring has exactly one node with points on it, `getNodesByKey()` returns that node's array without hashing or touching the memo. A node with weight 0, or too light to get a point on the ring, doesn't count, so it still gets no keys.
+    - `ModulaHash` also keeps one frozen array per node, where it allocated one per lookup, and has the same single-node fast path. A node with a negative weight gets no place in its list and doesn't count.
+    - `BroadcastHash` and the hash functions are unchanged. Making FNV-1a a true 32-bit multiply (`Math.imul`) would move most keys to other servers.
+  - **Tests.** For each provider, keys on the same node get the same frozen array (and changing a Modula result throws), and a single node is returned without hashing until a second node is added and again after it is removed. The four fail on `main`. A node with no points on the ring, or no place in Modula's list, still gets no keys; removing a node forgets the keys remembered for it; the memo-eviction test now uses two nodes, since one node never reaches the memo.
+  - **Result.** Nanoseconds per `getNodesByKey()` (1M lookups, median of 5; 2 runs per build in `main`, N2, N2, `main` order):
+
+    | Provider | 100 hot keys | 4,000 keys | 200,000 keys |
+    |---|---|---|---|
+    | Ketama, 1 server | 27–28 → 12 | 31 → 7–8 | 496–546 → 5–6 |
+    | Ketama, 3 servers | 12–15 → 15–32 | 28–31 → 30–33 | 411–565 → 381–390 |
+    | Modula, 1 server | 137–151 → 31–40 | 212–224 → 5 | 241–250 → 5–9 |
+    | Modula, 3 servers | 227–231 → 138–150 | 238–257 → 156–160 | 258–286 → 173–182 |
+
+    Ketama with three servers and repeated keys is unchanged: five more alternating runs gave 13–30 ns on `main` and 15–25 ns here for 100 keys, 28.6–41.9 and 28.6–30.6 ns for 4,000.
+
+    B1 `multi-get`, whose 10,000 distinct keys churned the 5,000-key memo on `main` (operations per second; 2 runs per build): 10 × 1,000 keys 33–35 → 43–45, 1 × 10,000 keys 30 → 38–40, 100 × 100 keys 23–24 → 32–34. B1 `concurrency`, whose 1,000 keys already hit the memo, is unchanged within noise.
 - **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected. When no retries are configured, replace the extra async frame with a single `.catch(() => undefined)` on `node.command()`. Failures must still resolve to `undefined` (so `set()` resolves `false`) as they do today (`src/index.ts:1569-1575`); a bare `return node.command()` would let them reject instead.
 - **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), and accept it only when the next byte is LF. If the CR is the last byte buffered, keep it and wait for more data rather than assuming a complete delimiter. Also avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
 - **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
@@ -454,7 +472,8 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
-| N2–N6 | Next tier | | Not started |
+| N2 | Cheaper key lookups (Ketama memo kept) | | Done |
+| N3–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured

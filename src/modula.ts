@@ -77,6 +77,12 @@ export class ModulaHash implements HashProvider {
 	 */
 	private nodeList: string[];
 
+	/** One frozen [node] array per node ID, so a lookup doesn't allocate */
+	private _results = new Map<string, Array<MemcacheNode>>();
+
+	/** The result while every key maps to the same node, so keys aren't hashed */
+	private _onlyResult: Array<MemcacheNode> | undefined;
+
 	/**
 	 * Creates a new ModulaHash instance.
 	 *
@@ -128,12 +134,14 @@ export class ModulaHash implements HashProvider {
 	public addNode(node: MemcacheNode): void {
 		// Add to internal map for lookups
 		this.nodeMap.set(node.id, node);
+		this._results.set(node.id, Object.freeze([node]) as Array<MemcacheNode>);
 
 		// Add to weighted list based on node weight
 		const weight = node.weight || 1;
 		for (let i = 0; i < weight; i++) {
 			this.nodeList.push(node.id);
 		}
+		this.updateOnlyResult();
 	}
 
 	/**
@@ -149,9 +157,11 @@ export class ModulaHash implements HashProvider {
 	public removeNode(id: string): void {
 		// Remove from internal map
 		this.nodeMap.delete(id);
+		this._results.delete(id);
 
 		// Remove all occurrences from weighted list
 		this.nodeList = this.nodeList.filter((nodeId) => nodeId !== id);
+		this.updateOnlyResult();
 	}
 
 	/**
@@ -188,6 +198,11 @@ export class ModulaHash implements HashProvider {
 	 * ```
 	 */
 	public getNodesByKey(key: string): Array<MemcacheNode> {
+		// With one node in the list, every key maps to it
+		if (this._onlyResult) {
+			return this._onlyResult;
+		}
+
 		if (this.nodeList.length === 0) {
 			return [];
 		}
@@ -201,9 +216,19 @@ export class ModulaHash implements HashProvider {
 		// Get the node ID from the weighted list
 		const nodeId = this.nodeList[index];
 
-		// Map back to MemcacheNode
-		const node = this.nodeMap.get(nodeId);
 		/* v8 ignore next -- @preserve */
-		return node ? [node] : [];
+		return this._results.get(nodeId) ?? [];
+	}
+
+	/**
+	 * Keeps the result to return without hashing while the list holds
+	 * exactly one node. A node with a negative weight gets no place in the
+	 * list, so it doesn't count.
+	 */
+	private updateOnlyResult(): void {
+		this._onlyResult =
+			this.nodeMap.size === 1 && this.nodeList.length > 0
+				? this._results.get(this.nodeList[0])
+				: undefined;
 	}
 }

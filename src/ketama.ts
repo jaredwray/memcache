@@ -322,6 +322,11 @@ export class HashRing<TNode extends string | { key: string } = string> {
 }
 
 /**
+ * The most keys whose node is remembered. Past this, the memo starts over.
+ */
+const CACHE_MAX = 5000;
+
+/**
  * A distribution hash implementation using the Ketama consistent hashing algorithm.
  * This class wraps the HashRing to implement the DistributionHash interface for use with Memcache.
  *
@@ -333,8 +338,6 @@ export class HashRing<TNode extends string | { key: string } = string> {
  * const targetNode = distribution.getNodesByKey('my-key')[0];
  * ```
  */
-const CACHE_MAX = 5000;
-
 export class KetamaHash implements HashProvider {
 	/** The name of this distribution strategy */
 	public readonly name = "ketama";
@@ -345,8 +348,17 @@ export class KetamaHash implements HashProvider {
 	/** Map of node IDs to MemcacheNode instances */
 	private nodeMap: Map<string, MemcacheNode>;
 
-	/** Bounded cache: key → [node] array to avoid re-hashing and array allocation */
+	/** One frozen [node] array per node ID, so a lookup doesn't allocate */
+	private _results = new Map<string, Array<MemcacheNode>>();
+
+	/**
+	 * Recently looked-up keys and their node's result. Hashing a key and
+	 * searching the ring costs several times more than a hit.
+	 */
 	private _cache = new Map<string, Array<MemcacheNode>>();
+
+	/** The result while every key maps to the same node, so keys aren't hashed */
+	private _onlyResult: Array<MemcacheNode> | undefined;
 
 	/**
 	 * Creates a new KetamaDistributionHash instance.
@@ -391,7 +403,9 @@ export class KetamaHash implements HashProvider {
 		this.nodeMap.set(node.id, node);
 		// Add to hash ring with weight
 		this.hashRing.addNode(node.id, node.weight);
+		this._results.set(node.id, Object.freeze([node]) as Array<MemcacheNode>);
 		this._cache.clear();
+		this.updateOnlyResult();
 	}
 
 	/**
@@ -409,7 +423,9 @@ export class KetamaHash implements HashProvider {
 		this.nodeMap.delete(id);
 		// Remove from hash ring
 		this.hashRing.removeNode(id);
+		this._results.delete(id);
 		this._cache.clear();
+		this.updateOnlyResult();
 	}
 
 	/**
@@ -446,8 +462,15 @@ export class KetamaHash implements HashProvider {
 	 * ```
 	 */
 	public getNodesByKey(key: string): Array<MemcacheNode> {
+		// With one node on the ring, every key maps to it
+		if (this._onlyResult) {
+			return this._onlyResult;
+		}
+
 		const cached = this._cache.get(key);
-		if (cached) return cached;
+		if (cached) {
+			return cached;
+		}
 
 		// Get the node from hash ring
 		const nodeId = this.hashRing.getNode(key);
@@ -455,20 +478,32 @@ export class KetamaHash implements HashProvider {
 			return [];
 		}
 
-		// Map back to MemcacheNode
-		const node = this.nodeMap.get(nodeId);
+		const result = this._results.get(nodeId);
 		/* v8 ignore next -- @preserve */
-		if (!node) return [];
+		if (!result) {
+			return [];
+		}
 
-		const result = Object.freeze([node]) as Array<MemcacheNode>;
-
-		// Bounded cache — clear all when full (simple eviction)
+		// Bounded memo: start over when full
 		if (this._cache.size >= CACHE_MAX) {
 			this._cache.clear();
 		}
 
 		this._cache.set(key, result);
 		return result;
+	}
+
+	/**
+	 * Keeps the result to return without hashing while the ring has exactly
+	 * one node. A node added with weight 0, or too light to get a point on
+	 * the ring, doesn't count.
+	 */
+	private updateOnlyResult(): void {
+		const ids = this.hashRing.nodes;
+		this._onlyResult =
+			ids.size === 1 && this.hashRing.clock.length > 0
+				? this._results.get(ids.keys().next().value as string)
+				: undefined;
 	}
 }
 
