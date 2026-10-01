@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import { type AddressInfo, createServer } from "node:net";
+import { type AddressInfo, createConnection, createServer } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache, {
 	createNode,
@@ -11,6 +11,7 @@ import Memcache, {
 	type RetryBackoffFunction,
 } from "../src/index";
 import { KetamaHash } from "../src/ketama";
+import { MemcacheNode } from "../src/node";
 import { generateKey, generateValue } from "./test-utils.js";
 
 // Dedicated server for tests that flush everything (see docker-compose.yml).
@@ -1140,6 +1141,74 @@ describe("Memcache", () => {
 			await expect(customClient.set("k", "€")).rejects.toThrow(
 				"Value size cannot exceed 2 bytes",
 			);
+		});
+	});
+
+	describe("Large values", () => {
+		// Storage commands write a value of at least 64 KB as its own part
+		const LARGE = 64 * 1024;
+
+		/** The CAS token of a key, read with a raw `gets`. */
+		const casToken = async (key: string): Promise<string> => {
+			const socket = createConnection(11211, "localhost");
+			socket.write(`gets ${key}\r\n`);
+			let response = "";
+			for await (const chunk of socket) {
+				response += chunk;
+				if (response.endsWith("END\r\n")) {
+					break;
+				}
+			}
+			socket.destroy();
+			// VALUE <key> <flags> <bytes> <cas unique>
+			return response.split("\r\n")[0].split(" ")[4];
+		};
+
+		it("should write a value of 64 KB or more after the command line, not joined to it", async () => {
+			await client.connect();
+			const command = vi.spyOn(MemcacheNode.prototype, "command");
+			const small = generateKey("small");
+			const large = generateKey("large");
+			const smallValue = "s".repeat(LARGE - 1);
+			const largeValue = "l".repeat(LARGE);
+
+			expect(await client.set(small, smallValue)).toBe(true);
+			expect(await client.set(large, largeValue)).toBe(true);
+
+			expect(command.mock.calls[0]).toEqual([
+				`set ${small} 0 0 ${LARGE - 1}\r\n${smallValue}`,
+				undefined,
+			]);
+			expect(command.mock.calls[1]).toEqual([
+				`set ${large} 0 0 ${LARGE}`,
+				{ data: largeValue },
+			]);
+			command.mockRestore();
+
+			expect(await client.get(small)).toBe(smallValue);
+			expect(await client.get(large)).toBe(largeValue);
+		});
+
+		it("should store large multi-byte values with every storage command", async () => {
+			await client.connect();
+			const key = generateKey("large-utf8");
+			// 3, 2 and 4 bytes per character in UTF-8: 90,000, 80,000 and 80,000 bytes
+			const euros = "€".repeat(30_000);
+			const accents = "é".repeat(40_000);
+			const emoji = "😀".repeat(20_000);
+			const letters = "a".repeat(70_000);
+
+			expect(await client.add(key, euros)).toBe(true);
+			expect(await client.get(key)).toBe(euros);
+			expect(await client.replace(key, accents)).toBe(true);
+			expect(await client.append(key, emoji)).toBe(true);
+			expect(await client.prepend(key, letters)).toBe(true);
+			expect(await client.get(key)).toBe(letters + accents + emoji);
+
+			expect(await client.set(key, euros, 0, 7)).toBe(true);
+			expect(await client.get(key)).toBe(euros);
+			expect(await client.cas(key, emoji, await casToken(key))).toBe(true);
+			expect(await client.get(key)).toBe(emoji);
 		});
 	});
 

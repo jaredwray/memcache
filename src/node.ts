@@ -64,6 +64,13 @@ export interface CommandOptions {
 	isStats?: boolean;
 	isConfig?: boolean;
 	requestedKeys?: string[];
+	/**
+	 * The data block of a storage command (`set`, `cas`, ...), written after
+	 * the command line and its \r\n, then followed by its own \r\n. Passing a
+	 * large value here, instead of joining it to the command string, saves
+	 * copying it before it is encoded.
+	 */
+	data?: string;
 }
 
 export interface MemcacheStats {
@@ -628,6 +635,26 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
+	 * Write a request made of several parts as one write, the way
+	 * `writeToSocket` writes one part: at once on an idle node, otherwise
+	 * with the other writes of the tick.
+	 */
+	private writeParts(socket: Socket, parts: string[], idle: boolean): void {
+		if (idle) {
+			socket.cork();
+			for (const part of parts) {
+				socket.write(part);
+			}
+			socket.uncork();
+			return;
+		}
+
+		for (const part of parts) {
+			this.writeToSocket(socket, part, false);
+		}
+	}
+
+	/**
 	 * Split incoming binary data into response packets. Chunks are only
 	 * joined once a whole packet has arrived, so a large value is copied once
 	 * instead of on every chunk.
@@ -974,6 +1001,7 @@ export class MemcacheNode extends Hookified {
 		}
 
 		const wire = `${cmd}\r\n`;
+		const data = options?.data;
 		return new Promise((resolve, reject) => {
 			const idle = !this.hasPendingCommands();
 			this._commandQueue.push({
@@ -987,7 +1015,12 @@ export class MemcacheNode extends Hookified {
 			});
 			this.startDeadline(idle);
 			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			this.writeToSocket(this._socket!, wire, idle);
+			const socket = this._socket!;
+			if (data === undefined) {
+				this.writeToSocket(socket, wire, idle);
+			} else {
+				this.writeParts(socket, [wire, data, "\r\n"], idle);
+			}
 		});
 	}
 

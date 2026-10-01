@@ -72,7 +72,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
 - In each table, every row does the same total work in a different shape, so tinybench's summary column compares like with like:
   - `concurrency`: 500 gets or sets with 1 / 10 / 100 / 500 in flight
   - `multi-get`: 10,000 keys as `gets()` batches of 100 / 1,000 / 10,000
-  - `large-values`: 4 MB read as 256 KB / 1 MB / 4 MB values, over TCP and TLS
+  - `large-values`: 4 MB read and written as 256 KB / 1 MB / 4 MB values, over TCP and TLS (the writes were added with N1)
   - `bursts`: 60,000 gets as bursts of 10,000 / 30,000 / 60,000
   - `cold-start`: sockets opened by 50 concurrent first requests (a count, not a timing)
   - `set-get` still compares this client with memjs and memcached. Since the P3 PR, each library runs 1,000 single-key and 1,000 10-key set → get → delete tasks; the tasks of all three go into one queue in random order and run one at a time, so no client always goes first. The queue runs 5 times, shuffled each time, and the table shows each library's median total.
@@ -398,6 +398,28 @@ The B1 `concurrency` benchmark, where at most 500 commands are queued, is unchan
 Smaller wins; each needs B1 before/after numbers in its PR. The numbers here come from the second audit's microbenchmarks.
 
 - **N1 — Encode large `set` values once.** Today the value is scanned by `Buffer.byteLength` (`src/index.ts:1493`), concatenated into the command string (`:949`), concatenated again with `\r\n` (`src/node.ts:795`) and then encoded on write. Encoding once with `Buffer.from` and writing header, body and CRLF under P1's cork took a 1 MB value from 1,054 to 332 µs of CPU. Needs an internal command path that accepts Buffers.
+  - **Done.** A storage command (`set`, `add`, `replace`, `append`, `prepend`, `cas`) with a value of 64 KB or more passes the value to `node.command()` in a new `data` option instead of joining it to the command string. The node writes the command line, the value and the closing CRLF as three parts of one write (corked, under P1's rules), so the socket encodes the value straight from the caller's string, with no copy. Smaller values are still joined: three writes cost more than the copy below about 16 KB, and 64 KB leaves a margin. A first version that encoded each large value into one request buffer with `Buffer.allocUnsafe` was faster at 4 MB but used as much CPU as `main` at 1 MB and 2.4× as much at 64 KB: every set allocated a new `ArrayBuffer` outside the JS heap, and V8 collected more often to free them.
+  - **Tests.** A value of 64 KB is passed as `data` and one of 64 KB − 1 is joined to the command; values of 70,000 to 90,000 bytes, with 2-, 3- and 4-byte characters, round-trip through `add`, `replace`, `append`, `prepend`, `set` and `cas` (with a CAS token read from the server); the node writes `data` after the command line in one corked write when idle, and with the other writes of the tick otherwise. The multi-byte round trip also passes on `main`; the other three fail there.
+  - **Result.** One `set` against the container IPs (median latency per call, in µs; 2 runs per build in `main`, N1, N1, `main` order):
+
+    | Value | TCP: `main` → N1 | TLS: `main` → N1 |
+    |---|---|---|
+    | 64 KB | 133–169 → 98–105 | 146–198 → 130–206 |
+    | 256 KB | 571–817 → 219–312 | 690–715 → 469–638 |
+    | 1 MB | 2,402–2,529 → 1,318–1,342 | 2,212–2,645 → 1,765–1,835 |
+    | 4 MB | 6,967–8,329 → 5,307–5,688 | 8,819–8,850 → 6,437–7,062 |
+
+    CPU per call fell by about as much (TCP 1 MB: 2,351–2,421 → 1,288–1,377 µs). Below 64 KB the path is unchanged.
+
+    The B1 `large-values` benchmark, which now also writes the 4 MB (operations per second; 2 runs per build):
+
+    | Sets | TCP: `main` → N1 | TLS: `main` → N1 |
+    |---|---|---|
+    | 16 × 256 KB | 94 → 178–197 | 78–79 → 117–125 |
+    | 4 × 1 MB | 107–108 → 200–222 | 98–109 → 147–151 |
+    | 1 × 4 MB | 110–119 → 213–220 | 114–124 → 146–168 |
+
+    Large sets are about twice as fast over TCP and 1.2–1.6× as fast over TLS. The get rows are unchanged within noise.
 - **N2 — Ketama key cache.** The key→node cache (`src/ketama.ts:336`, `:448-472`) empties itself every 5,000 new keys. With many distinct keys it costs more than it saves (0.57–1.35 µs per lookup vs 0.26–0.42 µs without it). Replace it with a single-node fast path. `ModulaHash` can return a cached, frozen `[node]` per node instead of allocating one per call (`src/modula.ts:207`); `KetamaHash` results are already frozen. Keep `BroadcastHash`'s per-call copy (`src/broadcast.ts:78-80`) unless benchmarks show it matters: `getNodesByKey()` returns a mutable array, so handing out the internal cache would let a caller's `.pop()` remove a node from every later broadcast. If it becomes a frozen array instead, call out that mutating the result now throws. `test/ketama.test.ts:503-504` reads `_cache` directly.
 - **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected. When no retries are configured, replace the extra async frame with a single `.catch(() => undefined)` on `node.command()`. Failures must still resolve to `undefined` (so `set()` resolves `false`) as they do today (`src/index.ts:1569-1575`); a bare `return node.command()` would let them reject instead.
 - **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), and accept it only when the next byte is LF. If the CR is the last byte buffered, keep it and wait for more data rather than assuming a complete delimiter. Also avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
@@ -431,7 +453,8 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
 | P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
-| N1–N6 | Next tier | | Not started |
+| N1 | Encode large values once | | Done |
+| N2–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
