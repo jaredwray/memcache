@@ -1,16 +1,17 @@
 import Memcached from "memcached";
 import memjs from "memjs";
-import { Bench } from "tinybench";
+import { Bench, type BenchOptions } from "tinybench";
 import pkg from "../package.json" with { type: "json" };
 import { cleanVersion, createClient, HOST, PORT, setAll } from "./utils.js";
 
 // The same work through each client against the same server, with every
-// result checked. Clients take turns within each row, so drift on the machine
-// affects them alike. Each cell is the median of tinybench's samples.
+// result checked. Clients take turns within each row, and each cell is the
+// median over ROUNDS rounds of tinybench's median.
 const REQUESTS = 500;
 const IN_FLIGHT = [1, 10, 100, 500];
 const MULTI_GET_KEYS = 10_000;
 const BATCH_SIZES = [100, 1_000, 10_000];
+const ROUNDS = 3;
 
 type Client = {
 	label: string;
@@ -80,9 +81,47 @@ const clients: Client[] = [
 	},
 ];
 
-/** Each row lets a different client go first. */
-function inTurn(row: number): Client[] {
-	return clients.map((_, i) => clients[(row + i) % clients.length]);
+/** Each row and round lets a different client go first. */
+function inTurn(turn: number): Client[] {
+	return clients.map((_, i) => clients[(turn + i) % clients.length]);
+}
+
+type Row = { name: string; task: (client: Client) => () => Promise<void> };
+
+/** Per row and client, the median milliseconds per run in each round. */
+const results = new Map<string, number[]>();
+const taskName = (row: string, client: Client) => `${row} | ${client.label}`;
+
+/**
+ * One machine drifts between runs, so the tables report the median of
+ * ROUNDS rounds, each starting with a different client.
+ */
+async function runRounds(options: BenchOptions, rows: Row[]): Promise<void> {
+	for (let round = 0; round < ROUNDS; round++) {
+		const bench = new Bench({ ...options, throws: true });
+		for (const [i, row] of rows.entries()) {
+			for (const client of inTurn(i + round)) {
+				bench.add(taskName(row.name, client), row.task(client));
+			}
+		}
+		await bench.run();
+		for (const task of bench.tasks) {
+			if (task.result.state !== "completed") {
+				throw new Error(`${task.name} did not complete`);
+			}
+			results.set(task.name, [
+				...(results.get(task.name) ?? []),
+				task.result.latency.p50,
+			]);
+		}
+	}
+}
+
+function median(row: string, client: Client): number {
+	const values = (results.get(taskName(row, client)) ?? []).sort(
+		(a, b) => a - b,
+	);
+	return values[Math.floor(values.length / 2)];
 }
 
 // Concurrent gets and sets: REQUESTS per run, with 1 to 500 in flight
@@ -100,31 +139,29 @@ async function send(inFlight: number, request: (key: string) => Promise<void>) {
 	await Promise.all(Array.from({ length: inFlight }, worker));
 }
 
-const concurrency = new Bench({ throws: true });
-const concurrencyRows: string[] = [];
+const concurrencyRows: Row[] = [];
 for (const name of ["gets", "sets"] as const) {
 	for (const inFlight of IN_FLIGHT) {
-		const row = `${name}, ${inFlight} in flight`;
-		for (const client of inTurn(concurrencyRows.length)) {
-			const request =
-				name === "gets"
-					? async (key: string) => {
-							if ((await client.get(key)) !== value) {
-								throw new Error(
-									`${client.label}: get returned the wrong value`,
-								);
+		concurrencyRows.push({
+			name: `${name}, ${inFlight} in flight`,
+			task: (client) => {
+				const request =
+					name === "gets"
+						? async (key: string) => {
+								if ((await client.get(key)) !== value) {
+									throw new Error(
+										`${client.label}: get returned the wrong value`,
+									);
+								}
 							}
-						}
-					: async (key: string) => {
-							if (!(await client.set(key, value))) {
-								throw new Error(`${client.label}: set failed`);
-							}
-						};
-			concurrency.add(`${row} | ${client.label}`, () =>
-				send(inFlight, request),
-			);
-		}
-		concurrencyRows.push(row);
+						: async (key: string) => {
+								if (!(await client.set(key, value))) {
+									throw new Error(`${client.label}: set failed`);
+								}
+							};
+				return () => send(inFlight, request);
+			},
+		});
 	}
 }
 
@@ -135,20 +172,13 @@ const multiGetKeys = Array.from(
 );
 await setAll(memcacheClient, multiGetKeys, "0123456789");
 
-const multiGet = new Bench({
-	iterations: 3,
-	warmupIterations: 1,
-	time: 3000,
-	throws: true,
-});
-const multiGetRows: string[] = [];
-for (const size of BATCH_SIZES) {
+const multiGetRows: Row[] = BATCH_SIZES.map((size) => {
 	const batches = Array.from({ length: MULTI_GET_KEYS / size }, (_, i) =>
 		multiGetKeys.slice(i * size, (i + 1) * size),
 	);
-	const row = `${batches.length} × ${size.toLocaleString("en-US")} keys`;
-	for (const client of inTurn(multiGetRows.length)) {
-		multiGet.add(`${row} | ${client.label}`, async () => {
+	return {
+		name: `${batches.length} × ${size.toLocaleString("en-US")} keys`,
+		task: (client) => async () => {
 			for (const batch of batches) {
 				const found = await client.getMany(batch);
 				if (found !== batch.length) {
@@ -157,32 +187,28 @@ for (const size of BATCH_SIZES) {
 					);
 				}
 			}
-		});
-	}
-	multiGetRows.push(row);
-}
+		},
+	};
+});
 
 try {
-	await concurrency.run();
-	await multiGet.run();
+	await runRounds(
+		{ iterations: 16, time: 500, warmupIterations: 4, warmupTime: 100 },
+		concurrencyRows,
+	);
+	await runRounds(
+		{ iterations: 3, time: 1000, warmupIterations: 1, warmupTime: 0 },
+		multiGetRows,
+	);
 } finally {
 	for (const client of clients) {
 		await client.close();
 	}
 }
 
-/** Median milliseconds per run of a task. */
-function median(bench: Bench, row: string, client: Client): number {
-	const { result } = bench.getTask(`${row} | ${client.label}`) ?? {};
-	if (result?.state !== "completed") {
-		throw new Error(`${row} | ${client.label} did not complete`);
-	}
-	return result.latency.p50;
-}
-
 function table(
 	header: string,
-	rows: string[],
+	rows: Row[],
 	cell: (row: string, client: Client) => number,
 	format: (value: number) => string,
 	best: (values: number[]) => number,
@@ -191,15 +217,26 @@ function table(
 		`| ${header} | ${clients.map((client) => client.label).join(" | ")} |`,
 		`|---|${clients.map(() => "--:").join("|")}|`,
 	];
-	for (const row of rows) {
+	for (const { name: row } of rows) {
 		const values = clients.map((client) => cell(row, client));
 		const winner = best(values);
+		// The winner gets a medal; every other cell shows how far its number
+		// is from the winner's, so the sign follows the unit (-46% fewer
+		// requests per second, +309% more time)
 		const cells = values.map((v) =>
-			v === winner ? `**${format(v)}**` : format(v),
+			v === winner
+				? `🥇 **${format(v)}**`
+				: `${format(v)} (${percent((v / winner - 1) * 100)})`,
 		);
 		lines.push(`| ${row} | ${cells.join(" | ")} |`);
 	}
 	return lines.join("\n");
+}
+
+function percent(change: number): string {
+	const size = Math.abs(change);
+	const digits = size < 10 ? size.toFixed(1) : Math.round(size).toString();
+	return `${change < 0 ? "-" : "+"}${digits}%`;
 }
 
 const perSecond = (n: number) =>
@@ -213,6 +250,10 @@ console.log("");
 console.log("## Compared with memjs and memcached");
 console.log("");
 console.log(
+	`Each cell is the median of ${ROUNDS} rounds, with the clients taking turns. 🥇 marks the fastest client in each row, and the percentages compare the other clients with it.`,
+);
+console.log("");
+console.log(
 	`Requests per second, ${REQUESTS} requests per run (higher is better). memcached pools up to 10 connections; the other clients use one.`,
 );
 console.log("");
@@ -220,7 +261,7 @@ console.log(
 	table(
 		"Workload",
 		concurrencyRows,
-		(row, client) => (REQUESTS * 1000) / median(concurrency, row, client),
+		(row, client) => (REQUESTS * 1000) / median(row, client),
 		perSecond,
 		(values) => Math.max(...values),
 	),
@@ -234,7 +275,7 @@ console.log(
 	table(
 		"Batches",
 		multiGetRows,
-		(row, client) => median(multiGet, row, client),
+		(row, client) => median(row, client),
 		duration,
 		(values) => Math.min(...values),
 	),

@@ -1315,26 +1315,28 @@ Set and Get compares this client with other Node.js memcached clients one reques
 <!-- BENCHMARK:compare:START -->
 ## Compared with memjs and memcached
 
+Each cell is the median of 3 rounds, with the clients taking turns. 🥇 marks the fastest client in each row, and the percentages compare the other clients with it.
+
 Requests per second, 500 requests per run (higher is better). memcached pools up to 10 connections; the other clients use one.
 
 | Workload | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| gets, 1 in flight | **12.9K** | 11.9K | 10.3K |
-| gets, 10 in flight | **80.7K** | 63.8K | 49.3K |
-| gets, 100 in flight | **197.0K** | 105.5K | 62.8K |
-| gets, 500 in flight | **228.8K** | 105.6K | 58.1K |
-| sets, 1 in flight | **12.5K** | 11.7K | 11.2K |
-| sets, 10 in flight | **85.3K** | 65.7K | 40.7K |
-| sets, 100 in flight | **245.0K** | 97.6K | 44.0K |
-| sets, 500 in flight | **269.5K** | 104.0K | 44.2K |
+| gets, 1 in flight | 🥇 **11.8K** | 11.5K (-2.6%) | 11.2K (-5.5%) |
+| gets, 10 in flight | 🥇 **80.9K** | 64.3K (-21%) | 47.5K (-41%) |
+| gets, 100 in flight | 🥇 **200.5K** | 93.5K (-53%) | 64.8K (-68%) |
+| gets, 500 in flight | 🥇 **224.2K** | 116.3K (-48%) | 67.2K (-70%) |
+| sets, 1 in flight | 🥇 **12.7K** | 11.1K (-12%) | 10.6K (-16%) |
+| sets, 10 in flight | 🥇 **84.4K** | 68.3K (-19%) | 37.7K (-55%) |
+| sets, 100 in flight | 🥇 **250.5K** | 95.9K (-62%) | 45.6K (-82%) |
+| sets, 500 in flight | 🥇 **244.3K** | 91.9K (-62%) | 44.1K (-82%) |
 
 Time to fetch 10,000 keys in batches (lower is better). memjs has no multi-get, so it sends one get per key, all at once.
 
 | Batches | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| 100 × 100 keys | **44 ms** | 100 ms | 68 ms |
-| 10 × 1,000 keys | **36 ms** | 91 ms | 143 ms |
-| 1 × 10,000 keys | **34 ms** | 139 ms | 2.83 s |
+| 100 × 100 keys | 🥇 **42 ms** | 86 ms (+103%) | 67 ms (+58%) |
+| 10 × 1,000 keys | 🥇 **31 ms** | 91 ms (+197%) | 130 ms (+324%) |
+| 1 × 10,000 keys | 🥇 **32 ms** | 143 ms (+347%) | 2.62 s (+8056%) |
 <!-- BENCHMARK:compare:END -->
 
 <!-- BENCHMARK:concurrency:START -->
