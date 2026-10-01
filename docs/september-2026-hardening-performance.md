@@ -472,7 +472,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
-| N2 | Cheaper key lookups (Ketama memo kept) | | Done |
+| N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
 | N3–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
