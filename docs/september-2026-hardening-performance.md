@@ -346,11 +346,50 @@ A 16 MB value is now 12× faster over TCP and 44× faster over TLS, and TLS is n
 | 60k | 6,823 ms | 521 ms |
 | 100k | 18,121 ms | 836 ms |
 
-**Fix.** Keep a head index and compact the array once the consumed part is at least half of it (amortized O(1)), or use a small ring-buffer class. `rejectPendingCommands` iterates once and then resets. Keep `hasPendingCommands()` (the H3 deadline's check) O(1). The binary queue from H1 (`_binaryQueue`) also uses `shift()`; give it the same structure.
+**Fix (done).**
+- `src/queue.ts` adds a small `Queue` class. `push` appends to an array, and `shift` reads from a head index instead of calling `Array.prototype.shift()`. When the queue empties, the array is reset in place. Once the consumed part is at least 1,024 items and at least half of the array, `shift` drops it with one `slice`, so a burst of n commands copies about n items in total instead of about n²/2. A taken item's slot is cleared at once, so a settled command can be garbage collected before the next compaction.
+- `MemcacheNode` uses it for the text command queue and for the binary request queue from H1. `hasPendingCommands()` (the H3 deadline's check) stays O(1). Rejecting pending commands (close, `disconnect()`, `reconnect()`, a timeout, a binary response out of order) drains each queue once.
+- `commandQueue` returns a copy of the pending commands, oldest first. Before, it returned the internal array, so changing the array changed the queue.
 
-**Tests.** More pipelined commands than two compaction thresholds resolve in order; the `commandQueue` getter returns the pending items (`test/node.test.ts:649` and `test/index.test.ts:1473` rely on it being an array with a `length`); close rejects everything pending.
+**Tests.**
+- `test/queue.test.ts`: the order holds across many compactions while the queue grows; a queue that never empties keeps its array to at most 1,024 slots plus its length; a taken item's slot is cleared at once; `drain` returns the rest in order and leaves the queue usable; `toArray` returns a copy; `peek` and `shift` on an empty queue return `undefined`.
+- 5,000 pipelined text commands are answered in order, with the responses in three chunks; 5,000 pipelined binary requests likewise, in two chunks.
+- With 5,000 text commands pending, 3,000 are answered and then the connection closes: the other 2,000 reject with `Connection closed`.
+- `commandQueue` lists the pending commands, and clearing the returned array doesn't clear the queue.
 
-**Compatibility.** `commandQueue` returns a snapshot array instead of the live internal array. Call this out in the release notes.
+**Result.** Only the copy test fails on `main`, where clearing the returned array empties the queue. The other node tests guard order and rejection, which `main` already got right at this size; the speed-up is shown by the numbers below rather than a timing assertion.
+
+A burst of concurrent gets against the container IP, fired at once and awaited together (median of 5 bursts, or 3 from 60,000 up; 2 runs per build in `main`, P4, P4, `main` order):
+
+| Concurrent gets | `main` | P4 |
+|---|---|---|
+| 10,000 | 59–60 ms | 64–66 ms |
+| 30,000 | 1,699–1,854 ms | 173–187 ms (about 10×) |
+| 60,000 | 6,624–6,757 ms | 371–396 ms (about 17×) |
+| 100,000 | 18,341–18,567 ms | 573–777 ms (about 27×) |
+
+At 10,000 there is no reliable difference. Ten more alternating pairs of 15 bursts each gave `main` 52–61 ms (median 59) and P4 52–59 ms (median 55). At that size V8 can usually trim the array in place, so `shift()` is cheap on `main` too; at times it falls back to copying the array, for example while the garbage collector is marking. A CPU profile of 40 bursts of 10,000 put 720 ms of self time in `processLine` (where `shift()` runs) on `main` and 283 ms on P4.
+
+The B1 `bursts` benchmark (time to send 60,000 gets in bursts of each size; 2 runs per build):
+
+| Bursts | `main` | P4 |
+|---|---|---|
+| 6 × 10,000 | 458–475 ms | 362–417 ms |
+| 2 × 30,000 | 3.4–3.7 s | 388–399 ms |
+| 1 × 60,000 | 6.7 s | 391–412 ms |
+
+The burst size no longer matters: 60,000 gets take about 0.4 s however they are split.
+
+The B1 `concurrency` benchmark, where at most 500 commands are queued, is unchanged within noise (batches of 500 commands per second, 2 runs per build):
+
+| In flight | gets: `main` → P4 | sets: `main` → P4 |
+|---|---|---|
+| 1 | 22–23 → 22–23 | 22–23 → 23–25 |
+| 10 | 135–148 → 149–153 | 153–159 → 180–181 |
+| 100 | 307–346 → 361–369 | 436–444 → 430–468 |
+| 500 | 322–349 → 390–392 | 427–473 → 410–418 |
+
+**Compatibility.** `commandQueue` returns a copy instead of the live internal array. Code that only reads it, as the tests do (`length`, `Array.isArray`), works as before; code that changed the queue through it no longer can. Call this out in the release notes.
 
 ---
 
@@ -375,7 +414,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 ## R1 — Docs and release
 
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
-- The README benchmark tables were regenerated in the P3 PR, so they include P1–P3. Regenerate them again with `pnpm benchmark:readme` once P4 has landed (it changes the `bursts` table).
+- The README benchmark tables were regenerated in the P3 PR, and the `bursts` table again in the P4 PR, so they include P1–P4.
 - Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
 - Keep the tracking table below up to date.
 
@@ -391,7 +430,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P1 | Coalesce writes per tick | [#153](https://github.com/jaredwray/memcache/pull/153) | Done |
 | P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
 | P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
-| P4 | O(1) command queue | | Not started |
+| P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
 | N1–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 

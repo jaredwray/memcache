@@ -1383,9 +1383,9 @@ Time to fetch 10,000 keys in batches (lower is better). memjs has no multi-get, 
 ## Bursts (60,000 gets per operation)
 |             name             |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |------------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  6 × 10,000 concurrent gets  |    🥇     |       2   |    407ms  |  ±4.89%  |      13   |
-|  2 × 30,000 concurrent gets  |   -88%    |    0.29   |      4s   |  ±5.44%  |       3   |
-|  1 × 60,000 concurrent gets  |   -94%    |    0.16   |      6s   |  ±7.93%  |       3   |
+|  6 × 10,000 concurrent gets  |    🥇     |       3   |    364ms  |  ±3.11%  |      14   |
+|  1 × 60,000 concurrent gets  |   -6.7%   |       3   |    393ms  |  ±5.84%  |      13   |
+|  2 × 30,000 concurrent gets  |   -12%    |       2   |    418ms  |  ±6.31%  |      13   |
 <!-- BENCHMARK:bursts:END -->
 
 <!-- BENCHMARK:cold-start:START -->

@@ -31,6 +31,7 @@ import {
 	STATUS_KEY_NOT_FOUND,
 	STATUS_SUCCESS,
 } from "./binary-protocol.js";
+import { Queue } from "./queue.js";
 import type { SASLCredentials } from "./types.js";
 
 /**
@@ -109,7 +110,7 @@ export class MemcacheNode extends Hookified {
 	private _keepAliveDelay: number;
 	private _weight: number;
 	private _connected: boolean = false;
-	private _commandQueue: CommandQueueItem[] = [];
+	private _commandQueue = new Queue<CommandQueueItem>();
 	private _buffer: Buffer = Buffer.alloc(0);
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
@@ -119,7 +120,7 @@ export class MemcacheNode extends Hookified {
 	private _sasl: SASLCredentials | undefined;
 	private _tls: MemcacheTlsOption | undefined;
 	private _authenticated: boolean = false;
-	private _binaryQueue: BinaryQueueItem[] = [];
+	private _binaryQueue = new Queue<BinaryQueueItem>();
 	private _binaryChunks: Buffer[] = [];
 	private _binaryLength: number = 0;
 	private _binaryOpaque: number = 0;
@@ -244,10 +245,11 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
-	 * Get the command queue
+	 * Get the commands waiting for a response, oldest first. This is a copy,
+	 * so changing it doesn't change the queue.
 	 */
 	public get commandQueue(): CommandQueueItem[] {
-		return this._commandQueue;
+		return this._commandQueue.toArray();
 	}
 
 	/**
@@ -669,7 +671,7 @@ export class MemcacheNode extends Hookified {
 	}
 
 	private handleBinaryPacket(packet: Buffer): void {
-		const request = this._binaryQueue[0];
+		const request = this._binaryQueue.peek();
 		// No request is waiting for this packet.
 		if (!request) {
 			return;
@@ -701,8 +703,7 @@ export class MemcacheNode extends Hookified {
 	}
 
 	private rejectBinaryRequests(error: Error): void {
-		const pending = this._binaryQueue;
-		this._binaryQueue = [];
+		const pending = this._binaryQueue.drain();
 		this._binaryChunks = [];
 		this._binaryLength = 0;
 		for (const request of pending) {
@@ -1231,12 +1232,8 @@ export class MemcacheNode extends Hookified {
 			/* v8 ignore next -- @preserve */
 			this._currentCommand = undefined;
 		}
-		while (this._commandQueue.length > 0) {
-			const cmd = this._commandQueue.shift();
-			/* v8 ignore next -- @preserve */
-			if (cmd) {
-				cmd.reject(error);
-			}
+		for (const cmd of this._commandQueue.drain()) {
+			cmd.reject(error);
 		}
 		// Any partly received response belonged to a rejected command
 		this._buffer = Buffer.alloc(0);
