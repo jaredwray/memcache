@@ -76,6 +76,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
   - `bursts`: 60,000 gets as bursts of 10,000 / 30,000 / 60,000
   - `cold-start`: sockets opened by 50 concurrent first requests (a count, not a timing)
   - `set-get` still compares this client with memjs and memcached.
+  - `compare` (added with P2) runs this client, memjs and memcached through the same gets and sets at 1 / 10 / 100 / 500 in flight and the same 10,000-key multi-gets, and prints one table per workload with a column per client.
 - `memcached-bench` (port 11216) and `memcached-bench-tls` (port 21216) compose services, without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values). They sit in a `bench` profile, so `test:services:start` and CI don't start them; use `pnpm benchmark:services:start` / `stop`. `test:services:stop` enables the profile so it tears everything down.
 - `MEMCACHE_BENCH_*` variables override the targets and TLS settings (see the README). Every timed operation checks its result, so a change that returns misses can't pass as a speedup. On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IPs.
 - Multi-get keys share a long prefix (`bench:user:profile:<id>`), the common real-world shape. Comparing such keys takes longer, so the quadratic miss check shows at 1,000 keys, not only at 10,000.
@@ -257,9 +258,32 @@ Over TLS (4 runs per build) the gain shrinks as concurrency grows. At 10 in flig
 | 5,000 | 372 ms | 16.1 ms |
 | 10,000 | 1,722 ms | 38.3 ms |
 
-**Fix.** Build `new Set(foundKeys)` once and emit `miss` for each requested key that isn't in it.
+**Fix (done).** The miss check builds `new Set(foundKeys)` once and emits `miss` for each requested key that isn't in it, in request order. A key requested twice still gets one event per request, as before: memcached returns a found key once for each time it is requested.
 
-**Tests.** The existing hit/miss event tests, plus a 10,000-key `gets()` correctness test (no timing assertion).
+**Tests.**
+- A 10,000-key `gets()` where every third key exists returns exactly the stored keys and values. It emits `hit` for each stored key and `miss` for every other key, both in request order.
+- A `get` that requests a missing key and a found key twice each emits two `hit`s and two `miss`es.
+- The existing hit/miss event tests pass unchanged.
+- Both new tests also pass on `main`. The change is a pure speed-up, so they guard its behavior; the speed-up itself is shown by the numbers below, because a timing assertion would be flaky.
+
+**Result.** B1 `multi-get` benchmark against the container IP (operations per second; each operation fetches the same 10,000 keys; 2 runs per build):
+
+| Operation | `main` | P2 |
+|---|---|---|
+| 100 × `gets()` of 100 keys | 13–15 | 19–22 |
+| 10 × `gets()` of 1,000 keys | 4 | 30–32 |
+| 1 × `gets()` of 10,000 keys | 0.56–0.58 | 29 |
+
+Time for one `gets()`, all hits (median of 4 runs per build, each the median of 7 calls):
+
+| Keys | `main` | P2 |
+|---|---|---|
+| 100 | 0.71 ms | 0.61 ms |
+| 1,000 | 18.2 ms | 3.7 ms |
+| 5,000 | 352 ms | 13.7 ms |
+| 10,000 | 1,805 ms | 35.6 ms |
+
+At 10,000 keys, all but about 36 ms of `main`'s 1.8 s was the miss check, which ran synchronously and blocked the event loop. The prototype's numbers above (1,722 → 38.3 ms) hold.
 
 **Compatibility.** None.
 
@@ -338,7 +362,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | H2 | Single-flight connect, socket-scoped handlers | [#151](https://github.com/jaredwray/memcache/pull/151) | Done |
 | H3 | Connect timeout plus command deadline | [#152](https://github.com/jaredwray/memcache/pull/152) | Done |
 | P1 | Coalesce writes per tick | [#153](https://github.com/jaredwray/memcache/pull/153) | Done |
-| P2 | Linear multi-get miss detection | | Not started |
+| P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
 | P3 | Large-value buffering | | Not started |
 | P4 | O(1) command queue | | Not started |
 | N1–N6 | Next tier | | Not started |

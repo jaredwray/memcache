@@ -3941,6 +3941,27 @@ describe("Memcache", () => {
 			expect(misses).toEqual(["nonexist1", "nonexist2", "nonexist3"]);
 		});
 
+		it("should report every hit and miss for a 10,000-key gets()", async () => {
+			const prefix = generateKey("many");
+			const keys = Array.from({ length: 10_000 }, (_, i) => `${prefix}:${i}`);
+			// Every third key exists
+			const stored = keys.filter((_, i) => i % 3 === 0);
+			const missing = keys.filter((_, i) => i % 3 !== 0);
+
+			const hits: string[] = [];
+			const misses: string[] = [];
+			client.on(MemcacheEvents.HIT, (key: string) => hits.push(key));
+			client.on(MemcacheEvents.MISS, (key: string) => misses.push(key));
+
+			await client.connect();
+			await Promise.all(stored.map((key) => client.set(key, `v${key}`)));
+			const values = await client.gets(keys);
+
+			expect(values).toEqual(new Map(stored.map((key) => [key, `v${key}`])));
+			expect(hits).toEqual(stored);
+			expect(misses).toEqual(missing);
+		});
+
 		it("should emit error event when node emits error", async () => {
 			let errorEmitted = false;
 			let errorNodeId = "";

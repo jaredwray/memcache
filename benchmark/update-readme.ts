@@ -8,6 +8,7 @@ type BenchmarkSection = {
 
 const SECTIONS: BenchmarkSection[] = [
 	{ id: "set-get", script: "benchmark/set-get.ts" },
+	{ id: "compare", script: "benchmark/compare.ts" },
 	{ id: "concurrency", script: "benchmark/concurrency.ts" },
 	{ id: "multi-get", script: "benchmark/multi-get.ts" },
 	{ id: "large-values", script: "benchmark/large-values.ts" },
@@ -47,9 +48,18 @@ function replaceSection(readme: string, id: string, content: string): string {
 	return `${before}\n${content}\n${after}`;
 }
 
+// Section ids on the command line update only those sections
+const only = process.argv.slice(2);
+const unknown = only.filter((id) => !SECTIONS.some((s) => s.id === id));
+if (unknown.length > 0) {
+	throw new Error(`Unknown benchmark section: ${unknown.join(", ")}`);
+}
+const selected =
+	only.length > 0 ? SECTIONS.filter((s) => only.includes(s.id)) : SECTIONS;
+
 let readme = fs.readFileSync(README_PATH, "utf8");
 
-for (const { id, script } of SECTIONS) {
+for (const { id, script } of selected) {
 	console.log(`\n▶ ${script}`);
 	const output = runBenchmark(script);
 	process.stdout.write(`${output}\n`);

@@ -1150,12 +1150,15 @@ export class MemcacheNode extends Hookified {
 						this.emit("hit", foundKeys[i], this._multilineData[i]);
 					}
 
-					// Emit miss events for keys that weren't found
-					const missedKeys = this._currentCommand.requestedKeys.filter(
-						(key) => !foundKeys.includes(key),
-					);
-					for (const key of missedKeys) {
-						this.emit("miss", key);
+					// Emit miss events for keys that weren't found. A Set keeps this
+					// linear: this runs inside the data handler, and scanning
+					// foundKeys for every requested key blocked the event loop for
+					// seconds on large multi-gets.
+					const found = new Set(foundKeys);
+					for (const key of this._currentCommand.requestedKeys) {
+						if (!found.has(key)) {
+							this.emit("miss", key);
+						}
 					}
 				}
 
