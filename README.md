@@ -1306,15 +1306,15 @@ Set, Get and Delete compares this client with other Node.js memcached clients on
 <!-- BENCHMARK:set-get:START -->
 ## Set, Get and Delete (one task at a time, in random order)
 
-Each library runs 1,000 tasks that set, get and delete one key, and 1,000 that set, get and delete 10 keys. The tasks of all 3 libraries go into one queue in random order and run one at a time. The queue runs 5 times, shuffled each time, after an untimed warm-up of 100 tasks of each kind per library. Every result is checked.
+Each library runs 5,000 tasks that set, get and delete one key, and 5,000 that set, get and delete 10 keys. The tasks of all 3 libraries go into one queue in random order and run one at a time. The queue runs 5 times, shuffled each time, after an untimed warm-up of 100 tasks of each kind per library. Every result is checked.
 
 Total time per library, the median of the 5 runs (lower is better). 🥇 marks the fastest library in each row, and the percentages compare the others with it. The text protocol has no multi-set or multi-delete, so for 10 keys every library sends its 10 sets, and then its 10 deletes, at once. memjs has no multi-get either, so it does the same with its gets. memcached pools up to 10 connections; the other clients use one.
 
 | Tasks | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| 1,000 × set, get, delete 1 key | 🥇 **328 ms** | 336 ms (+2.3%) | 358 ms (+8.9%) |
-| 1,000 × set, get, delete 10 keys | 🥇 **508 ms** | 578 ms (+14%) | 771 ms (+52%) |
-| All 2,000 tasks | 🥇 **832 ms** | 916 ms (+10%) | 1.12 s (+35%) |
+| 5,000 × set, get, delete 1 key | 🥇 **1.59 s** | 1.63 s (+2.5%) | 1.76 s (+10%) |
+| 5,000 × set, get, delete 10 keys | 🥇 **2.51 s** | 2.92 s (+17%) | 3.82 s (+52%) |
+| All 10,000 tasks | 🥇 **4.10 s** | 4.58 s (+12%) | 5.57 s (+36%) |
 <!-- BENCHMARK:set-get:END -->
 
 <!-- BENCHMARK:compare:START -->

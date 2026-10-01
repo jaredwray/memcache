@@ -18,7 +18,7 @@ import {
 // alike. Every result is checked. A few slow tasks (a GC pause, a late
 // packet) can move a library's total by several percent, so the queue runs
 // ROUNDS times, shuffled each time, and the table shows the median.
-const TASKS = 1000;
+const TASKS = 5000;
 const MULTI_KEYS = 10;
 const WARMUP_TASKS = 100;
 const ROUNDS = 5;
