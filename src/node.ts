@@ -114,6 +114,8 @@ export class MemcacheNode extends Hookified {
 	private _currentCommand: CommandQueueItem | undefined = undefined;
 	private _multilineData: string[] = [];
 	private _pendingValueBytes: number = 0;
+	private _valueChunks: Buffer[] = [];
+	private _valueLength: number = 0;
 	private _sasl: SASLCredentials | undefined;
 	private _tls: MemcacheTlsOption | undefined;
 	private _authenticated: boolean = false;
@@ -990,8 +992,29 @@ export class MemcacheNode extends Hookified {
 
 	private handleData(data: Buffer | string): void {
 		const chunk = typeof data === "string" ? Buffer.from(data, "utf8") : data;
-		this._buffer =
-			this._buffer.length === 0 ? chunk : Buffer.concat([this._buffer, chunk]);
+		if (this._pendingValueBytes > 0) {
+			// A value body is arriving: collect its chunks and join them once,
+			// when the value and its CRLF are all here. Joining on every chunk
+			// copied a large value over and over.
+			this._valueChunks.push(chunk);
+			this._valueLength += chunk.length;
+			const buffered = this._buffer.length + this._valueLength;
+			if (buffered < this._pendingValueBytes + 2) {
+				return;
+			}
+
+			this._buffer = Buffer.concat(
+				[this._buffer, ...this._valueChunks],
+				buffered,
+			);
+			this._valueChunks = [];
+			this._valueLength = 0;
+		} else {
+			this._buffer =
+				this._buffer.length === 0
+					? chunk
+					: Buffer.concat([this._buffer, chunk]);
+		}
 
 		while (true) {
 			// If we're waiting for value data, try to read it first
@@ -1219,6 +1242,8 @@ export class MemcacheNode extends Hookified {
 		this._buffer = Buffer.alloc(0);
 		this._multilineData = [];
 		this._pendingValueBytes = 0;
+		this._valueChunks = [];
+		this._valueLength = 0;
 		this.rejectBinaryRequests(error);
 		// Nothing is waiting for a response any more
 		clearTimeout(this._deadline);

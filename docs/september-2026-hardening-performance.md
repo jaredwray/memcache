@@ -75,7 +75,7 @@ T1 and B1 are small and make every later PR easier to trust. H1 has no dependenc
   - `large-values`: 4 MB read as 256 KB / 1 MB / 4 MB values, over TCP and TLS
   - `bursts`: 60,000 gets as bursts of 10,000 / 30,000 / 60,000
   - `cold-start`: sockets opened by 50 concurrent first requests (a count, not a timing)
-  - `set-get` still compares this client with memjs and memcached.
+  - `set-get` still compares this client with memjs and memcached. Since the P3 PR, each library runs 1,000 single-key and 1,000 10-key set → get → delete tasks; the tasks of all three go into one queue in random order and run one at a time, so no client always goes first. The queue runs 5 times, shuffled each time, and the table shows each library's median total.
   - `compare` (added with P2) runs this client, memjs and memcached through the same gets and sets at 1 / 10 / 100 / 500 in flight and the same 10,000-key multi-gets, and prints one table per workload with a column per client.
 - `memcached-bench` (port 11216) and `memcached-bench-tls` (port 21216) compose services, without `-vv` (it logs every command and caps throughput) and with `-I 32m` (for large values). They sit in a `bench` profile, so `test:services:start` and CI don't start them; use `pnpm benchmark:services:start` / `stop`. `test:services:stop` enables the profile so it tears everything down.
 - `MEMCACHE_BENCH_*` variables override the targets and TLS settings (see the README). Every timed operation checks its result, so a change that returns misses can't pass as a speedup. On Linux, published ports go through `docker-proxy`, which adds per-packet work and inflates write-heavy results. The numbers in this plan were measured against the container IPs.
@@ -300,9 +300,36 @@ At 10,000 keys, all but about 36 ms of `main`'s 1.8 s was the miss check, which 
 | 4 MB | 30.4 → 8.8 ms (3.5×) | 110.2 → 9.5 ms (11.6×) |
 | 16 MB | 517 → 48 ms (10.8×) | not measured |
 
-**Fix.** While waiting for a value body, keep incoming chunks in a list with a running byte count and return until the value plus its CRLF is buffered, then concatenate once. The binary path has worked this way since H1 (`handleBinaryData`).
+**Fix (done).** While a value body is arriving, `handleData` keeps the incoming chunks in a list with a running byte count and returns until the value and its CRLF are all here, then joins them with one `Buffer.concat`. Lines (`VALUE` headers, `END`, errors) are parsed as before. Rejecting pending commands (close, `disconnect()`, `reconnect()`, a timeout) also drops any collected chunks. The binary path has worked this way since H1 (`handleBinaryData`).
 
-**Tests.** Values delivered in 1-byte, 16 KB and 64 KB chunks; CRLF split across chunks; values containing `\r\n`; several values in one chunk; a value and `END` in the same chunk; the existing partial-delivery tests (`test/node.test.ts:699`, `:914`).
+**Tests.**
+- A 1 MB value delivered in 16 KB and in 64 KB chunks is joined with exactly one `Buffer.concat`. On `main` it's one per chunk.
+- A value containing CRLF, delivered one byte at a time.
+- A value's CRLF split across chunks: the value, then `\r`, then `\nEND`.
+- Several values, one of them empty, and `END` in one chunk.
+- A connection that closes with value chunks already collected leaves nothing behind: on the next connection, a value that also arrives in pieces is read correctly.
+- The existing partial-delivery tests pass unchanged.
+
+**Result.** The two copy-once tests fail on `main`; the other four guard behavior that was already correct.
+
+B1 `large-values` benchmark against the container IPs (operations per second; each operation reads the same 4 MB; 2 runs per build):
+
+| Values | TCP: `main` → P3 | TLS: `main` → P3 |
+|---|---|---|
+| 16 × 256 KB | 80–89 → 108–113 | 46–54 → 66–80 |
+| 4 × 1 MB | 75–76 → 106–113 | 28 → 97–105 |
+| 1 × 4 MB | 30–33 → 126–129 | 9 → 80–110 |
+
+Time for one `get` (median of 4 runs per build, each the median of 7 gets, or 3 for 16 MB):
+
+| Value | TCP: `main` → P3 | TLS: `main` → P3 |
+|---|---|---|
+| 256 KB | 1.3 → 0.9 ms | 1.2 → 0.8 ms |
+| 1 MB | 7.4 → 2.7 ms | 11.0 → 2.5 ms |
+| 4 MB | 35.6 → 9.9 ms | 112.9 → 10.0 ms |
+| 16 MB | 460 → 38.7 ms | 2,017 → 46.3 ms |
+
+A 16 MB value is now 12× faster over TCP and 44× faster over TLS, and TLS is no longer slower than TCP for large values. The prototype's numbers above hold (TCP 16 MB: 517 → 48 ms; TLS 4 MB: 110 → 9.5 ms).
 
 **Compatibility.** None.
 
@@ -348,7 +375,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 ## R1 — Docs and release
 
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
-- Regenerate the README benchmark tables with `pnpm benchmark:readme` once P1–P4 have landed. They still show the `main` baseline from B1.
+- The README benchmark tables were regenerated in the P3 PR, so they include P1–P3. Regenerate them again with `pnpm benchmark:readme` once P4 has landed (it changes the `bursts` table).
 - Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
 - Keep the tracking table below up to date.
 
@@ -363,7 +390,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | H3 | Connect timeout plus command deadline | [#152](https://github.com/jaredwray/memcache/pull/152) | Done |
 | P1 | Coalesce writes per tick | [#153](https://github.com/jaredwray/memcache/pull/153) | Done |
 | P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
-| P3 | Large-value buffering | | Not started |
+| P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | | Not started |
 | N1–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
