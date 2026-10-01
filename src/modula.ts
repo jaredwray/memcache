@@ -221,14 +221,15 @@ export class ModulaHash implements HashProvider {
 	}
 
 	/**
-	 * Keeps the result to return without hashing while the list holds
-	 * exactly one node. A node with a negative weight gets no place in the
-	 * list, so it doesn't count.
+	 * Keeps the result to return without hashing while every entry in the
+	 * weighted list is the same node. A node with a negative weight gets no
+	 * entry, and so no keys, so it doesn't count.
 	 */
 	private updateOnlyResult(): void {
+		const first = this.nodeList[0];
 		this._onlyResult =
-			this.nodeMap.size === 1 && this.nodeList.length > 0
-				? this._results.get(this.nodeList[0])
+			first !== undefined && this.nodeList.every((id) => id === first)
+				? this._results.get(first)
 				: undefined;
 	}
 }

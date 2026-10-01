@@ -494,15 +494,16 @@ export class KetamaHash implements HashProvider {
 	}
 
 	/**
-	 * Keeps the result to return without hashing while the ring has exactly
-	 * one node. A node added with weight 0, or too light to get a point on
-	 * the ring, doesn't count.
+	 * Keeps the result to return without hashing while every point on the
+	 * ring belongs to one node. A node added with weight 0, or too light to
+	 * get a point, gets no keys, so it doesn't count.
 	 */
 	private updateOnlyResult(): void {
-		const ids = this.hashRing.nodes;
+		const clock = this.hashRing.clock;
+		const first = clock[0]?.[1];
 		this._onlyResult =
-			ids.size === 1 && this.hashRing.clock.length > 0
-				? this._results.get(ids.keys().next().value as string)
+			first !== undefined && clock.every(([, id]) => id === first)
+				? this._results.get(first)
 				: undefined;
 	}
 }

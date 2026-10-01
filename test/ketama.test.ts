@@ -562,6 +562,21 @@ describe("KetamaHash", () => {
 			}
 		});
 
+		it("should not hash keys when the other nodes have no points on the ring", () => {
+			const distribution = new KetamaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			// Too light to get a point on the ring, so it gets no keys
+			const light = new MemcacheNode("server2", 11211);
+			light.weight = 0.001;
+			const ring = (distribution as unknown as { hashRing: HashRing }).hashRing;
+			const getNode = vi.spyOn(ring, "getNode");
+
+			distribution.addNode(node1);
+			distribution.addNode(light);
+			expect(distribution.getNodesByKey("a")).toEqual([node1]);
+			expect(getNode).not.toHaveBeenCalled();
+		});
+
 		it("should forget remembered keys when a node is removed", () => {
 			const distribution = new KetamaHash();
 			const nodes = ["server1", "server2", "server3"].map(

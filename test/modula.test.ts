@@ -288,6 +288,23 @@ describe("ModulaHash", () => {
 			expect(hash).not.toHaveBeenCalled();
 		});
 
+		it("should not hash keys when the other nodes have no place in the list", () => {
+			const distribution = new ModulaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			// A negative weight gives the node no entries, so it gets no keys
+			const unlisted = new MemcacheNode("server2", 11211);
+			unlisted.weight = -1;
+			const hash = vi.spyOn(
+				distribution as unknown as { hashStr: (key: string) => number },
+				"hashStr",
+			);
+
+			distribution.addNode(node1);
+			distribution.addNode(unlisted);
+			expect(distribution.getNodesByKey("a")).toEqual([node1]);
+			expect(hash).not.toHaveBeenCalled();
+		});
+
 		it("should not treat a node with no place in the list as the only node", () => {
 			const distribution = new ModulaHash();
 			const node = new MemcacheNode("server1", 11211);
