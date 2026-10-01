@@ -390,7 +390,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | H3 | Connect timeout plus command deadline | [#152](https://github.com/jaredwray/memcache/pull/152) | Done |
 | P1 | Coalesce writes per tick | [#153](https://github.com/jaredwray/memcache/pull/153) | Done |
 | P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
-| P3 | Large-value buffering | | Done |
+| P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | | Not started |
 | N1–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
