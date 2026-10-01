@@ -2,7 +2,15 @@ import Memcached from "memcached";
 import memjs from "memjs";
 import { Bench, type BenchOptions } from "tinybench";
 import pkg from "../package.json" with { type: "json" };
-import { cleanVersion, createClient, HOST, PORT, setAll } from "./utils.js";
+import {
+	cleanVersion,
+	comparisonTable,
+	createClient,
+	duration,
+	HOST,
+	PORT,
+	setAll,
+} from "./utils.js";
 
 // The same work through each client against the same server, with every
 // result checked. Clients take turns within each row, and each cell is the
@@ -213,38 +221,20 @@ function table(
 	format: (value: number) => string,
 	best: (values: number[]) => number,
 ): string {
-	const lines = [
-		`| ${header} | ${clients.map((client) => client.label).join(" | ")} |`,
-		`|---|${clients.map(() => "--:").join("|")}|`,
-	];
-	for (const { name: row } of rows) {
-		const values = clients.map((client) => cell(row, client));
-		const winner = best(values);
-		// The winner gets a medal; every other cell shows how far its number
-		// is from the winner's, so the sign follows the unit (-46% fewer
-		// requests per second, +309% more time)
-		const cells = values.map((v) =>
-			v === winner
-				? `🥇 **${format(v)}**`
-				: `${format(v)} (${percent((v / winner - 1) * 100)})`,
-		);
-		lines.push(`| ${row} | ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
-}
-
-function percent(change: number): string {
-	const size = Math.abs(change);
-	const digits = size < 10 ? size.toFixed(1) : Math.round(size).toString();
-	return `${change < 0 ? "-" : "+"}${digits}%`;
+	return comparisonTable(
+		header,
+		clients.map((client) => client.label),
+		rows.map(({ name }) => ({
+			name,
+			values: clients.map((client) => cell(name, client)),
+		})),
+		format,
+		best,
+	);
 }
 
 const perSecond = (n: number) =>
 	n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${Math.round(n)}`;
-const duration = (ms: number) =>
-	ms >= 1000
-		? `${(ms / 1000).toFixed(2)} s`
-		: `${ms >= 10 ? Math.round(ms) : ms.toFixed(1)} ms`;
 
 console.log("");
 console.log("## Compared with memjs and memcached");

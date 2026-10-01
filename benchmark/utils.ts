@@ -62,3 +62,43 @@ export async function setAll(
 		throw new Error("Failed to store benchmark keys");
 	}
 }
+
+/**
+ * A markdown table comparing clients, one column each. The best value in
+ * each row gets a medal; every other cell shows how far its value is from
+ * the best, so the sign follows the unit (-46% fewer requests per second,
+ * +309% more time).
+ */
+export function comparisonTable(
+	header: string,
+	columns: string[],
+	rows: Array<{ name: string; values: number[] }>,
+	format: (value: number) => string,
+	best: (values: number[]) => number,
+): string {
+	const lines = [
+		`| ${header} | ${columns.join(" | ")} |`,
+		`|---|${columns.map(() => "--:").join("|")}|`,
+	];
+	for (const { name, values } of rows) {
+		const winner = best(values);
+		const cells = values.map((v) =>
+			v === winner
+				? `🥇 **${format(v)}**`
+				: `${format(v)} (${percent((v / winner - 1) * 100)})`,
+		);
+		lines.push(`| ${name} | ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
+}
+
+function percent(change: number): string {
+	const size = Math.abs(change);
+	const digits = size < 10 ? size.toFixed(1) : Math.round(size).toString();
+	return `${change < 0 ? "-" : "+"}${digits}%`;
+}
+
+export const duration = (ms: number) =>
+	ms >= 1000
+		? `${(ms / 1000).toFixed(2)} s`
+		: `${ms >= 10 ? Math.round(ms) : ms.toFixed(1)} ms`;
