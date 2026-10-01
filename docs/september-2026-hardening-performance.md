@@ -453,7 +453,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P2 | Linear multi-get miss detection | [#154](https://github.com/jaredwray/memcache/pull/154) | Done |
 | P3 | Large-value buffering | [#155](https://github.com/jaredwray/memcache/pull/155) | Done |
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
-| N1 | Encode large values once | | Done |
+| N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
 | N2–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
