@@ -1362,9 +1362,9 @@ Time to fetch 10,000 keys in batches (lower is better). memjs has no multi-get, 
 ## Multi-Get (10,000 keys per operation)
 |            name             |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |-----------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  10 × gets() of 1,000 keys  |    🥇     |      28   |     37ms  |  ±3.64%  |      81   |
-|  1 × gets() of 10,000 keys  |   -3.9%   |      27   |     39ms  |  ±4.35%  |      77   |
-|  100 × gets() of 100 keys   |   -24%    |      21   |     48ms  |  ±3.52%  |      63   |
+|  10 × gets() of 1,000 keys  |    🥇     |      47   |     21ms  |  ±1.76%  |     140   |
+|  1 × gets() of 10,000 keys  |   -19%    |      38   |     27ms  |  ±2.65%  |     113   |
+|  100 × gets() of 100 keys   |   -22%    |      37   |     28ms  |  ±2.83%  |     108   |
 <!-- BENCHMARK:multi-get:END -->
 
 <!-- BENCHMARK:large-values:START -->
