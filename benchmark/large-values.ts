@@ -3,7 +3,8 @@ import { Bench } from "tinybench";
 import type { Memcache } from "../src/index.js";
 import { createClient, MB, SKIP_TLS, setAll } from "./utils.js";
 
-// Every row reads the same 4 MB, as values of different sizes, over TCP and TLS.
+// Every row moves the same 4 MB, as values of different sizes, over TCP and
+// TLS: the gets read it and the sets write it.
 const TOTAL = 4 * MB;
 const bench = new Bench({
 	name: "Large Values (4 MB per operation)",
@@ -25,12 +26,21 @@ for (const secure of SKIP_TLS ? [false] : [false, true]) {
 			{ length: count },
 			(_, i) => `bench:large:${size}:${i}`,
 		);
-		await setAll(client, keys, "v".repeat(size));
+		const value = "v".repeat(size);
+		await setAll(client, keys, value);
 		const label = size >= MB ? `${size / MB} MB` : `${size / 1024} KB`;
-		bench.add(`${secure ? "TLS" : "TCP"}: ${count} × ${label}`, async () => {
+		const name = `${secure ? "TLS" : "TCP"}: ${count} × ${label}`;
+		bench.add(`${name} gets`, async () => {
 			for (const key of keys) {
 				if ((await client.get(key))?.length !== size) {
 					throw new Error(`get() returned the wrong value for ${key}`);
+				}
+			}
+		});
+		bench.add(`${name} sets`, async () => {
+			for (const key of keys) {
+				if (!(await client.set(key, value))) {
+					throw new Error(`set() failed for ${key}`);
 				}
 			}
 		});
