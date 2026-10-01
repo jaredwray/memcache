@@ -1195,6 +1195,114 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Large value buffering", () => {
+		let socket: Socket;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = node.socket as Socket;
+			// Requests never reach the server; each test supplies the response
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		const get = (key: string) =>
+			node.command(`get ${key}`, { isMultiline: true, requestedKeys: [key] });
+
+		const deliver = (target: Socket, data: string, size: number) => {
+			const bytes = Buffer.from(data);
+			for (let i = 0; i < bytes.length; i += size) {
+				target.emit("data", bytes.subarray(i, i + size));
+			}
+		};
+
+		it.each([
+			["16 KB", 16 * 1024],
+			["64 KB", 64 * 1024],
+		])("should copy a 1 MB value in %s chunks once", async (_, size) => {
+			const value = generateLargeValue(1024 * 1024);
+			const result = get("large");
+
+			socket.emit("data", Buffer.from(`VALUE large 0 ${value.length}\r\n`));
+			const concat = vi.spyOn(Buffer, "concat");
+			deliver(socket, value, size);
+			socket.emit("data", Buffer.from("\r\nEND\r\n"));
+			expect(concat).toHaveBeenCalledTimes(1);
+			concat.mockRestore();
+
+			expect(await result).toEqual({ values: [value], foundKeys: ["large"] });
+		});
+
+		it("should read a value delivered one byte at a time", async () => {
+			// CRLF inside a value must not end it early
+			const value = `line one\r\nline two\r\n${generateLargeValue(1000)}`;
+			const result = get("bytes");
+
+			deliver(
+				socket,
+				`VALUE bytes 0 ${Buffer.byteLength(value)}\r\n${value}\r\nEND\r\n`,
+				1,
+			);
+
+			expect(await result).toEqual({ values: [value], foundKeys: ["bytes"] });
+		});
+
+		it("should wait for a value's CRLF split across chunks", async () => {
+			const value = generateLargeValue(100);
+			const result = get("split");
+
+			socket.emit("data", Buffer.from("VALUE split 0 100\r\n"));
+			socket.emit("data", Buffer.from(value));
+			socket.emit("data", Buffer.from("\r"));
+			socket.emit("data", Buffer.from("\nEND\r\n"));
+
+			expect(await result).toEqual({ values: [value], foundKeys: ["split"] });
+		});
+
+		it("should read several values and END from one chunk", async () => {
+			const keys = ["first", "second", "empty"];
+			const values = ["one", "two\r\nlines", ""];
+			const result = node.command(`get ${keys.join(" ")}`, {
+				isMultiline: true,
+				requestedKeys: keys,
+			});
+
+			const response = keys
+				.map(
+					(key, i) =>
+						`VALUE ${key} 0 ${Buffer.byteLength(values[i])}\r\n${values[i]}\r\n`,
+				)
+				.join("");
+			socket.emit("data", Buffer.from(`${response}END\r\n`));
+
+			expect(await result).toEqual({ values, foundKeys: keys });
+		});
+
+		it("should drop a partly received value when the connection closes", async () => {
+			const partial = get("dropped");
+			socket.emit("data", Buffer.from("VALUE dropped 0 10\r\nabc"));
+			socket.emit("data", Buffer.from("def"));
+			socket.destroy();
+			await expect(partial).rejects.toThrow("Connection closed");
+
+			await node.connect();
+			const next = node.socket as Socket;
+			const nextWrite = vi.spyOn(next, "write").mockImplementation(() => true);
+			const result = get("fresh");
+			// Arriving in pieces, the next value would pick up any leftover chunks
+			next.emit("data", Buffer.from("VALUE fresh 0 5\r\n"));
+			next.emit("data", Buffer.from("hello"));
+			next.emit("data", Buffer.from("\r\nEND\r\n"));
+
+			expect(await result).toEqual({ values: ["hello"], foundKeys: ["fresh"] });
+			nextWrite.mockRestore();
+		});
+	});
+
 	describe("Error Handling", () => {
 		it("should handle ERROR response for stats command", async () => {
 			await node.connect();
