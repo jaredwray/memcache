@@ -1188,6 +1188,60 @@ describe("MemcacheNode", () => {
 			expect(await results).toEqual(["value-a", "value-b"]);
 			writeSpy.mockRestore();
 		});
+
+		it("should write a data block after the command line, together, at once on an idle node", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const uncork = vi.spyOn(socket, "uncork");
+			const write = vi.spyOn(socket, "write");
+			const key = generateKey("data");
+
+			const stored = node.command(`set ${key} 0 0 5`, { data: "hello" });
+
+			expect(write.mock.calls.map((call) => call[0])).toEqual([
+				`set ${key} 0 0 5\r\n`,
+				"hello",
+				"\r\n",
+			]);
+			expect(cork).toHaveBeenCalledTimes(1);
+			expect(uncork).toHaveBeenCalledTimes(1);
+			expect(socket.writableCorked).toBe(0);
+			expect(await stored).toBe("STORED");
+			expect(
+				await node.command(`get ${key}`, {
+					isMultiline: true,
+					requestedKeys: [key],
+				}),
+			).toEqual({ values: ["hello"], foundKeys: [key] });
+		});
+
+		it("should send a data block with the other commands of the tick", async () => {
+			await node.connect();
+			const socket = node.socket as Socket;
+			const cork = vi.spyOn(socket, "cork");
+			const uncork = vi.spyOn(socket, "uncork");
+			const write = vi.spyOn(socket, "write");
+			const key = generateKey("data-tick");
+
+			const version = node.command("version");
+			const stored = node.command(`set ${key} 0 0 5`, { data: "world" });
+
+			// The version goes out at once; the set's parts wait for the tick to end
+			expect(write.mock.calls.map((call) => call[0])).toEqual([
+				"version\r\n",
+				`set ${key} 0 0 5\r\n`,
+				"world",
+				"\r\n",
+			]);
+			expect(cork).toHaveBeenCalledTimes(1);
+			expect(uncork).not.toHaveBeenCalled();
+
+			await nextTick();
+			expect(uncork).toHaveBeenCalledTimes(1);
+			expect(await version).toMatch(/^VERSION /);
+			expect(await stored).toBe("STORED");
+		});
 	});
 
 	describe("Multiline Response Handling", () => {

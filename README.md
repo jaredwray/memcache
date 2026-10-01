@@ -1369,14 +1369,20 @@ Time to fetch 10,000 keys in batches (lower is better). memjs has no multi-get, 
 
 <!-- BENCHMARK:large-values:START -->
 ## Large Values (4 MB per operation)
-|        name        |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
-|--------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  TCP: 16 × 256 KB  |    🥇     |     119   |      9ms  |  ±2.94%  |     116   |
-|  TCP: 1 × 4 MB     |   -3.2%   |     116   |      9ms  |  ±2.80%  |     113   |
-|  TLS: 1 × 4 MB     |   -7.1%   |     111   |     10ms  |  ±4.36%  |     105   |
-|  TCP: 4 × 1 MB     |   -10%    |     107   |     10ms  |  ±2.63%  |     106   |
-|  TLS: 4 × 1 MB     |   -20%    |      96   |     11ms  |  ±5.26%  |      90   |
-|  TLS: 16 × 256 KB  |   -39%    |      73   |     15ms  |  ±6.62%  |      68   |
+|          name           |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
+|-------------------------|:---------:|----------:|----------:|:--------:|----------:|
+|  TCP: 4 × 1 MB sets     |    🥇     |     193   |      5ms  |  ±2.68%  |     186   |
+|  TCP: 1 × 4 MB sets     |  -0.57%   |     192   |      5ms  |  ±1.66%  |     190   |
+|  TCP: 16 × 256 KB sets  |    -6%    |     181   |      6ms  |  ±2.33%  |     177   |
+|  TLS: 1 × 4 MB sets     |   -33%    |     129   |      8ms  |  ±3.37%  |     122   |
+|  TCP: 1 × 4 MB gets     |   -35%    |     126   |      8ms  |  ±3.52%  |     118   |
+|  TCP: 4 × 1 MB gets     |   -39%    |     118   |      9ms  |  ±3.38%  |     113   |
+|  TLS: 4 × 1 MB sets     |   -41%    |     114   |     10ms  |  ±4.23%  |     105   |
+|  TLS: 1 × 4 MB gets     |   -45%    |     106   |     10ms  |  ±5.30%  |      99   |
+|  TLS: 4 × 1 MB gets     |   -45%    |     106   |     10ms  |  ±3.23%  |     104   |
+|  TCP: 16 × 256 KB gets  |   -48%    |     101   |     10ms  |  ±2.46%  |     100   |
+|  TLS: 16 × 256 KB sets  |   -50%    |      97   |     11ms  |  ±3.81%  |      94   |
+|  TLS: 16 × 256 KB gets  |   -64%    |      70   |     15ms  |  ±4.52%  |      67   |
 <!-- BENCHMARK:large-values:END -->
 
 <!-- BENCHMARK:bursts:START -->

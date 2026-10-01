@@ -53,6 +53,13 @@ export const exponentialRetryBackoff: RetryBackoffFunction = (
 const KEY_INVALID_CHARS = /[\s\r\n\0]/;
 
 /**
+ * Storage commands write a value of at least this many bytes after the
+ * command line as its own part. Smaller values are joined to the command
+ * string, which costs less for them.
+ */
+const LARGE_VALUE_BYTES = 64 * 1024;
+
+/**
  * Resolve the user-supplied `hashLargeKey` option into the (enabled, hashery)
  * pair used internally. A boolean value selects/disables the feature with a
  * fresh Hashery; passing a Hashery instance enables the feature and uses that
@@ -911,10 +918,10 @@ export class Memcache extends Hookified {
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `cas ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes} ${casToken}\r\n${valueStr}`;
+		const line = `cas ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes} ${casToken}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
@@ -956,10 +963,10 @@ export class Memcache extends Hookified {
 		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const bytes = this.validateValue(value);
-		const command = `set ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${value}`;
+		const line = `set ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, value, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (hasHooks) {
@@ -994,10 +1001,10 @@ export class Memcache extends Hookified {
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `add ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
+		const line = `add ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
@@ -1032,10 +1039,10 @@ export class Memcache extends Hookified {
 		const sanitizedExptime = this.validateExpiration(exptime);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `replace ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}\r\n${valueStr}`;
+		const line = `replace ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
@@ -1062,10 +1069,10 @@ export class Memcache extends Hookified {
 		this.validateKey(resolvedKey);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `append ${resolvedKey} 0 0 ${bytes}\r\n${valueStr}`;
+		const line = `append ${resolvedKey} 0 0 ${bytes}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
@@ -1092,10 +1099,10 @@ export class Memcache extends Hookified {
 		this.validateKey(resolvedKey);
 		const valueStr = String(value);
 		const bytes = this.validateValue(valueStr);
-		const command = `prepend ${resolvedKey} 0 0 ${bytes}\r\n${valueStr}`;
+		const line = `prepend ${resolvedKey} 0 0 ${bytes}`;
 
 		const nodes = await this.getNodesByKey(resolvedKey);
-		const results = await this.execute(command, nodes);
+		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
 		if (this._hasHooks) {
@@ -1555,6 +1562,24 @@ export class Memcache extends Hookified {
 	 */
 	private sleep(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	/**
+	 * Run a storage command on the nodes. A large value is written after the
+	 * command line as its own part: joined to the command string, it was
+	 * copied once more before being encoded.
+	 */
+	private store(
+		line: string,
+		value: string,
+		bytes: number,
+		nodes: MemcacheNode[],
+	): Promise<unknown[]> {
+		if (bytes < LARGE_VALUE_BYTES) {
+			return this.execute(`${line}\r\n${value}`, nodes);
+		}
+
+		return this.execute(line, nodes, { commandOptions: { data: value } });
 	}
 
 	/**
