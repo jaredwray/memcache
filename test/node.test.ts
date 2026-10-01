@@ -1012,6 +1012,76 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Many pending commands", () => {
+		let socket: Socket;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = node.socket as Socket;
+			// Requests never reach the server; each test supplies the responses
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		// More than twice the queue's compaction threshold (1,024)
+		const count = 5000;
+		const incr = (i: number) => node.command(`incr counter-${i} 1`);
+		const numbers = (start: number, end: number) =>
+			Array.from({ length: end - start }, (_, i) => start + i);
+		const replies = (start: number, end: number) =>
+			Buffer.from(numbers(start, end).join("\r\n").concat("\r\n"));
+
+		it("should answer each of 5,000 pipelined commands in order", async () => {
+			const results = Promise.all(numbers(0, count).map(incr));
+
+			// Commands are taken off the queue between chunks
+			socket.emit("data", replies(0, 1500));
+			socket.emit("data", replies(1500, 3500));
+			socket.emit("data", replies(3500, count));
+
+			expect(await results).toEqual(numbers(0, count));
+			expect(node.commandQueue).toEqual([]);
+		});
+
+		it("should reject every unanswered command when the connection closes", async () => {
+			const results = numbers(0, count).map((i) =>
+				incr(i).catch((error: Error) => error.message),
+			);
+
+			socket.emit("data", replies(0, 3000));
+			socket.destroy();
+
+			const settled = await Promise.all(results);
+			expect(settled.slice(0, 3000)).toEqual(numbers(0, 3000));
+			expect(settled.slice(3000)).toEqual(
+				Array(count - 3000).fill("Connection closed"),
+			);
+			expect(node.commandQueue).toEqual([]);
+		});
+
+		it("should list the pending commands in a copy", async () => {
+			const first = node.command("incr a 1");
+			const second = node.command("incr b 1");
+
+			const pending = node.commandQueue;
+			expect(pending.map((item) => item.command)).toEqual([
+				"incr a 1",
+				"incr b 1",
+			]);
+			pending.length = 0;
+			expect(node.commandQueue).toHaveLength(2);
+
+			socket.emit("data", Buffer.from("1\r\n2\r\n"));
+			expect(await first).toBe(1);
+			expect(await second).toBe(2);
+			expect(node.commandQueue).toEqual([]);
+		});
+	});
+
 	describe("Write coalescing", () => {
 		const nextTick = () =>
 			new Promise<void>((resolve) => {
@@ -1770,6 +1840,27 @@ describe("MemcacheNode", () => {
 
 			await expect(pending).rejects.toThrow("expected magic byte 0x81");
 			expect(socket.destroyed).toBe(true);
+		});
+
+		it("should answer each of 5,000 pipelined requests in order", async () => {
+			// More than twice the queue's compaction threshold (1,024)
+			const count = 5000;
+			const results = Promise.all(
+				Array.from({ length: count }, (_, i) => node.binaryGet(`key-${i}`)),
+			);
+
+			const packets = Buffer.concat(
+				Array.from({ length: count }, (_, i) =>
+					getResponse(writtenOpaque(writeSpy, i), `value-${i}`),
+				),
+			);
+			// Requests are taken off the queue between chunks
+			socket.emit("data", packets.subarray(0, packets.length / 2));
+			socket.emit("data", packets.subarray(packets.length / 2));
+
+			expect(await results).toEqual(
+				Array.from({ length: count }, (_, i) => `value-${i}`),
+			);
 		});
 
 		it("should reject pending requests when the connection closes", async () => {
