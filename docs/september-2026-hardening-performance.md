@@ -514,6 +514,24 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     With 1 in flight the round trip dominates: gets took 2% less time and sets 7% less, within the spread between runs.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
+  - **Done.** A new `maxPendingCommands` option, on the client and on a node, caps the requests each node keeps waiting for a reply. It is off by default (`0`).
+    - A request made while a node has that many, text or binary, fails at once: it is neither queued nor written. Through the client it fails like any other command, so `set()` resolves `false` and `get()` `undefined`; `node.command()` and the `binary*` methods reject with a "Too many pending commands" error. A command whose reply has started to arrive still counts.
+    - The client's setter updates every node, and nodes added later, including those found by Auto Discovery, get the limit. The client rounds it down and treats anything below 1, or not a finite number, as no limit.
+    - Every request a node refuses gets the same Error, built again when the limit changes. A new Error for each, with its stack trace, made the 100,000 calls in the measurement below take about 920 ms at a limit of 1,000, three times as long as queueing them all; without stack traces they took 500–620 ms.
+    - A quit still goes out at the limit. Refused, it made `quit()` close the connection at once, and the requests ahead of it failed instead of getting their replies.
+    - The return value of `socket.write()` is still not used. Every pending request has already been written, so the limit also bounds what the socket buffers. A server that reads requests without answering them, as in the measurement below, never fills that buffer, so a limit on buffered bytes wouldn't catch it.
+  - **Tests.** A node has no limit unless given one; at the limit a command fails without being queued or written, and a reply makes room again; a command whose reply is still arriving counts; binary requests count toward the same limit; refused requests share one error, and a new limit gives a new one; a text and a binary quit still go out at the limit, and the request ahead of the quit gets its reply. Through the client: the default and the option reach every node, the value is rounded down or ignored, the setter reaches existing nodes and nodes added later, discovered nodes get the limit with and without TLS, and at the limit `set()`, `get()` and `delete()` fail at once without writing, then succeed once there is room.
+  - **Result.** With no limit, the default, the request path is unchanged. With the fake socket from N3, the median N6/`main` time ratio over 8 pairs of alternating rounds was 0.99–1.03 for gets and sets with 1, 100 and 500 in flight. For 100-key multi-gets it was 0.98–1.00 over 14 pairs; a first run of 8 pairs gave 0.99–1.09, with single pairs from 0.63 to 1.25.
+
+    A server that reads requests and never answers, and 100,000 gets made at once with `timeout: 2000` (2 runs per limit):
+
+    | Limit | Making the calls | Failed at once | Waited for the timeout | Heap held while waiting |
+    |---|--:|--:|--:|--:|
+    | none | 297–313 ms | 0 | 100,000 (until 2.08 s) | 123.6 MB |
+    | 1,000 | 343–420 ms | 99,000 (by 388–469 ms) | 1,000 | 6.7 MB |
+    | 100 | 356–399 ms | 99,900 (by 401–448 ms) | 100 | 5.7 MB |
+
+    Times are from the first call. Without a limit every caller waits for the timeout, and each pending request holds about 1.2 KB of heap. With one, the callers beyond it get `undefined` right after the calls are made, and most of the heap left is the measurement's own 100,000 promises. Refusing a request costs a little more than queueing one, so making the calls took 15–35% longer, but nothing is written for the refused requests.
 
 ## Checked and not worth changing
 
@@ -527,7 +545,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
 - The README benchmark tables were regenerated in the P3 PR, and the `bursts` table again in the P4 PR, so they include P1–P4.
 - The `concurrency` table was not regenerated for N3. In that session the bench containers' published ports took about twice as long per round trip as when the table was made, on `main` as on N3 (1 in flight: 24 → 11–12 operations per second), so a new table would have shown drops N3 didn't cause. Regenerate all tables in one session here.
-- Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4), and that N4 fixes a crash when a hit or miss listener closes the connection.
+- Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4), that N4 fixes a crash when a hit or miss listener closes the connection, and the new `maxPendingCommands` option (N6).
 - Keep the tracking table below up to date.
 
 ## Tracking
@@ -548,7 +566,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
 | N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
 | N5 | Binary packets in one allocation | [#161](https://github.com/jaredwray/memcache/pull/161) | Done |
-| N6 | Backpressure (optional) | | Not started |
+| N6 | Optional pending request limit (`maxPendingCommands`) | | Done |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
