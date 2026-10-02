@@ -1699,6 +1699,26 @@ describe("MemcacheNode", () => {
 			expect(await partial).toEqual({ values: ["hello"], foundKeys: ["a"] });
 		});
 
+		it("should give refused requests one error, rebuilt when the limit changes", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.command("delete a");
+			const first = await node.command("delete b").catch((error) => error);
+			const second = await node.command("delete c").catch((error) => error);
+			expect(second).toBe(first);
+			expect(first.message).toContain("(maxPendingCommands: 1)");
+
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			await pending;
+			node.maxPendingCommands = 2;
+			const more = [node.command("delete d"), node.command("delete e")];
+			const third = await node.command("delete f").catch((error) => error);
+			expect(third).not.toBe(first);
+			expect(third.message).toContain("(maxPendingCommands: 2)");
+
+			socket.emit("data", Buffer.from("DELETED\r\nDELETED\r\n"));
+			await Promise.all(more);
+		});
+
 		it("should count binary requests toward the same limit", async () => {
 			node.maxPendingCommands = 1;
 			const pending = node.binaryGet("a");
