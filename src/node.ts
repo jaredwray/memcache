@@ -22,6 +22,7 @@ import {
 	buildVersionRequest,
 	deserializeHeader,
 	HEADER_SIZE,
+	OPCODE_QUIT,
 	OPCODE_STAT,
 	parseGetResponse,
 	parseIncrDecrResponse,
@@ -730,8 +731,9 @@ export class MemcacheNode extends Hookified {
 			return;
 		}
 
+		// A quit still goes out under overload, as in command()
 		const overload = this.overloadError();
-		if (overload) {
+		if (overload && packet[1] !== OPCODE_QUIT) {
 			reject(overload);
 			return;
 		}
@@ -1132,9 +1134,11 @@ export class MemcacheNode extends Hookified {
 				return;
 			}
 
-			// Under overload, fail now rather than queue without bound
+			// Under overload, fail now rather than queue without bound. A quit
+			// still goes out: refusing it would make quit() close the
+			// connection before the requests ahead of it get their replies.
 			const overload = this.overloadError();
-			if (overload) {
+			if (overload && cmd !== "quit") {
 				reject(overload);
 				return;
 			}

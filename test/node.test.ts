@@ -1734,6 +1734,31 @@ describe("MemcacheNode", () => {
 			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
 			expect(await pending).toBe("value-a");
 		});
+
+		it("should still send a quit at the limit, behind the requests ahead of it", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.command("delete a");
+			const quitting = node.quit();
+			expect(writeSpy).toHaveBeenLastCalledWith("quit\r\n");
+
+			// The delete gets its reply before memcached closes the connection
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			expect(await pending).toBe("DELETED");
+			socket.destroy();
+			await quitting;
+			expect(node.isConnected()).toBe(false);
+		});
+
+		it("should still send a binary quit at the limit", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.binaryGet("a");
+			await node.binaryQuit();
+			expect(writeSpy).toHaveBeenCalledTimes(2);
+			expect((writeSpy.mock.calls[1][0] as Buffer)[1]).toBe(OPCODE_QUIT);
+
+			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
+			expect(await pending).toBe("value-a");
+		});
 	});
 
 	describe("Error Handling", () => {
