@@ -1179,35 +1179,31 @@ export class MemcacheNode extends Hookified {
 					this._pendingValueBytes = bytes;
 				}
 			} else if (line === "END") {
-				let result:
-					| string[]
-					| { values: string[] | undefined; foundKeys: string[] }
-					| undefined;
+				// The response is complete: settle the command and clear the
+				// state before the hit and miss listeners run. A listener that
+				// closes the connection then can't fail this command, and the
+				// command can't be read after the close has cleared it.
+				const command = this._currentCommand;
+				const values = this._multilineData;
+				this._multilineData = [];
+				this._currentCommand = undefined;
 
-				// If requestedKeys is present, return object with keys and values
-				if (
-					this._currentCommand.requestedKeys &&
-					this._currentCommand.foundKeys
-				) {
-					result = {
-						values:
-							this._multilineData.length > 0 ? this._multilineData : undefined,
-						foundKeys: this._currentCommand.foundKeys,
-					};
+				// If requestedKeys is present, resolve with keys and values
+				const { requestedKeys, foundKeys } = command;
+				if (requestedKeys && foundKeys) {
+					command.resolve({
+						values: values.length > 0 ? values : undefined,
+						foundKeys,
+					});
 				} else {
-					result =
-						this._multilineData.length > 0 ? this._multilineData : undefined;
+					command.resolve(values.length > 0 ? values : undefined);
 				}
 
 				// Emit hit/miss events if we have requested keys
 				/* v8 ignore next -- @preserve */
-				if (
-					this._currentCommand.requestedKeys &&
-					this._currentCommand.foundKeys
-				) {
-					const foundKeys = this._currentCommand.foundKeys;
+				if (requestedKeys && foundKeys) {
 					for (let i = 0; i < foundKeys.length; i++) {
-						this.emit("hit", foundKeys[i], this._multilineData[i]);
+						this.emit("hit", foundKeys[i], values[i]);
 					}
 
 					// Emit miss events for keys that weren't found. A Set keeps this
@@ -1215,16 +1211,12 @@ export class MemcacheNode extends Hookified {
 					// foundKeys for every requested key blocked the event loop for
 					// seconds on large multi-gets.
 					const found = new Set(foundKeys);
-					for (const key of this._currentCommand.requestedKeys) {
+					for (const key of requestedKeys) {
 						if (!found.has(key)) {
 							this.emit("miss", key);
 						}
 					}
 				}
-
-				this._currentCommand.resolve(result);
-				this._multilineData = [];
-				this._currentCommand = undefined;
 			} else if (
 				line.startsWith("ERROR") ||
 				line.startsWith("CLIENT_ERROR") ||

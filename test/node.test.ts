@@ -1438,6 +1438,78 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Hit and miss listeners", () => {
+		let socket: Socket;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = node.socket as Socket;
+			// Requests never reach the server; each test supplies the response
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		const get = (key: string) =>
+			node.command(`get ${key}`, { isMultiline: true, requestedKeys: [key] });
+
+		it("should finish a get whose hit listener closes the connection, and drop the rest", async () => {
+			node.on("hit", () => {
+				void node.disconnect();
+			});
+			const first = get("first");
+			const second = get("second");
+			// The rest of the chunk starts the reply to the second get
+			socket.emit(
+				"data",
+				Buffer.from("VALUE first 0 1\r\na\r\nEND\r\nVALUE second 0 5\r\nab"),
+			);
+
+			expect(await first).toEqual({ values: ["a"], foundKeys: ["first"] });
+			await expect(second).rejects.toThrow("Connection closed");
+
+			// The next connection starts with nothing left over
+			node.removeAllListeners("hit");
+			await node.connect();
+			const next = node.socket as Socket;
+			const nextWrite = vi.spyOn(next, "write").mockImplementation(() => true);
+			const fresh = get("fresh");
+			next.emit("data", Buffer.from("VALUE fresh 0 5\r\nhello\r\nEND\r\n"));
+			expect(await fresh).toEqual({ values: ["hello"], foundKeys: ["fresh"] });
+			nextWrite.mockRestore();
+		});
+
+		it("should not read a reply again after a hit listener throws", async () => {
+			const hits: string[] = [];
+			node.on("hit", (key: string) => {
+				hits.push(key);
+				if (key === "first") {
+					throw new Error("listener failed");
+				}
+			});
+			const first = get("first");
+			const second = get("second");
+
+			expect(() =>
+				socket.emit(
+					"data",
+					Buffer.from(
+						"VALUE first 0 1\r\na\r\nEND\r\nVALUE second 0 1\r\nb\r\nEND\r\n",
+					),
+				),
+			).toThrow("listener failed");
+			expect(await first).toEqual({ values: ["a"], foundKeys: ["first"] });
+
+			// The rest of the chunk is read with the next one
+			socket.emit("data", Buffer.alloc(0));
+			expect(await second).toEqual({ values: ["b"], foundKeys: ["second"] });
+			expect(hits).toEqual(["first", "second"]);
+		});
+	});
+
 	describe("Error Handling", () => {
 		it("should handle ERROR response for stats command", async () => {
 			await node.connect();
