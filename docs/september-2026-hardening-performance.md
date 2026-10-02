@@ -485,6 +485,34 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     Gets gain the most: every value comes with a `VALUE` line, and the reply ends with `END`. The other `concurrency` rows (sets with 500, 10 or 1 in flight, and gets with 10 or 1) took 1% to 9% less time, within the spread between runs.
 - **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
+  - **Done.** These are the `binary*` methods on a node, which SASL-enabled servers require, and the SASL handshake itself; the client's own commands use the text protocol.
+    - Each builder computes the packet's length and writes the header, extras, key and value into one `Buffer.allocUnsafe()`. Before, a request allocated a header object and a zeroed 24-byte header, Buffers for the key, value and extras, and joined them with `Buffer.concat`: 5 to 7 allocations, with the value copied twice. Every byte is written, since that memory can hold old bytes: the data type, vbucket, opaque and CAS are set to 0.
+    - `handleBinaryPacket()` reads the opaque straight from the packet, and the methods read the status with `readStatus()`. Before, each response was parsed into a header object with a CAS `subarray` twice, once for its opaque and once for its status. The binary queue's callback no longer gets a parsed header; `binaryStats()` and `binaryVersion()`, which need more of it, still call `deserializeHeader()`.
+    - `parseGetResponse()` and `parseIncrDecrResponse()` return the status and the value, without a header object or subarrays. An empty value still reads as no value in `binaryGet()`, as before.
+  - **Tests.** Every builder's packet matches, byte for byte, the packet the old code joined, with multi-byte keys and values, string and `Buffer` values and 64-bit counters, while `Buffer.allocUnsafe()` returns memory filled with `0xff`; each build takes one allocation and no `concat`, which fails on `main`. The CAS field of every packet is zero; this passes on `main` too, where `Buffer.alloc` zeroed it. The parse helpers return the status and the value, skip a key in the response, and read an empty value as none.
+  - **Result.** Building one packet (median of 9 alternating rounds in one process; lower is better): `get` 329 → 162 ns, `set` of 100 bytes 645 → 409 ns, `incr` 489 → 216 ns, `set` of 64 KB 24 → 20 µs, `set` of 1 MB 319 → 252 µs.
+
+    Client time per binary request, with a fake socket that answers from memory as in N3: the median change over 8 pairs of alternating rounds in one process (negative is faster).
+
+    | Request | 1 in flight | 10 | 100 | 500 |
+    |---|---|---|---|---|
+    | `binaryGet` | −25% | −24% | −33% | −31% |
+    | `binarySet` | −21% | −34% | −31% | −40% |
+    | `binaryDelete` | −23% | −33% | −32% | −37% |
+    | `binaryIncr` | −19% | −25% | −35% | −34% |
+
+    Against the bench container's IP, with B1 `concurrency`'s shape but a node's binary methods (a scratch script, as B1 has no binary benchmark): time per batch of 500 requests, from the median operations per second over 4 runs per build in `main`, N5, N5, `main` order twice, so lower is better.
+
+    | Row | `main` | N5 | Time | Throughput |
+    |---|--:|--:|--:|--:|
+    | 500 gets, 10 in flight | 4.00 ms | 3.40 ms | −15% | +18% |
+    | 500 gets, 100 in flight | 1.45 ms | 0.98 ms | −32% | +47% |
+    | 500 gets, 500 in flight | 1.23 ms | 0.97 ms | −21% | +27% |
+    | 500 sets, 10 in flight | 4.00 ms | 3.49 ms | −13% | +15% |
+    | 500 sets, 100 in flight | 1.44 ms | 1.05 ms | −27% | +38% |
+    | 500 sets, 500 in flight | 1.63 ms | 1.32 ms | −19% | +24% |
+
+    With 1 in flight the round trip dominates: gets took 2% less time and sets 7% less, within the spread between runs.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
 
 ## Checked and not worth changing
@@ -519,7 +547,8 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
 | N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
-| N5–N6 | Next tier | | Not started |
+| N5 | Binary packets in one allocation | | Done |
+| N6 | Backpressure (optional) | | Not started |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
