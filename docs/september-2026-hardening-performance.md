@@ -441,7 +441,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
     B1 `multi-get`, whose 10,000 distinct keys churned the 5,000-key memo on `main` (operations per second; 2 runs per build): 10 × 1,000 keys 33–35 → 43–45, 1 × 10,000 keys 30 → 38–40, 100 × 100 keys 23–24 → 32–34. B1 `concurrency`, whose 1,000 keys already hit the memo, is unchanged within noise.
 - **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected. When no retries are configured, replace the extra async frame with a single `.catch(() => undefined)` on `node.command()`. Failures must still resolve to `undefined` (so `set()` resolves `false`) as they do today (`src/index.ts:1569-1575`); a bare `return node.command()` would let them reject instead.
   - **Done.**
-    - The single-key commands (`get`, `set`, `add`, `replace`, `append`, `prepend`, `cas`, `delete`, `incr`, `decr`, `touch`) look up their nodes synchronously when all of them are connected, so the command is written before the call returns. Only when a node isn't connected do they await `getNodesByKey()`, which connects it. Its own single-node fast path is gone, since the commands no longer reach it; its loop returns the same nodes.
+    - The single-key commands (`get`, `set`, `add`, `replace`, `append`, `prepend`, `cas`, `delete`, `incr`, `decr`, `touch`) look up their nodes synchronously when all of them are connected, so with no hooks registered the command is written before the call returns. Only when a node isn't connected do they await `getNodesByKey()`, which connects it. Its own single-node fast path is gone, since the commands no longer reach it; its loop returns the same nodes.
     - `execute()` is no longer an async function. Without retries (the default) each command's promise gets one handler: `[result]` for a single node, and a failure gives `undefined`, so `set()` still resolves `false`. Retries keep the async loop in `executeWithRetry()`.
     - `node.command()` is no longer async either. Everything runs in the promise executor, so a node that isn't connected still rejects; it never throws.
     - A `set` or `delete` on one server now creates 3 promises instead of 6, and a `get` 2 instead of 4. After the reply, each settles in half as many microtask turns.
@@ -489,7 +489,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
-| N3 | Fewer async layers per request | | Done |
+| N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
 | N4–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
