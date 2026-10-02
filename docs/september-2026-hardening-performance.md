@@ -462,7 +462,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
     - Lines and values are read from an offset into the buffer, and what is left is kept once per chunk, instead of a new `subarray` per line and value.
     - Found while changing this code: a hit or miss listener that closed the connection, such as `client.on("hit", () => client.disconnect())`, crashed the process with a `TypeError`. `processLine()` read the command after the close had cleared it. A multi-get is now settled before its hit and miss events, so a listener can't fail it. Parsing stops when a listener closes the connection, so nothing is kept for the next one. When a listener throws, the lines before it aren't read again.
   - **Tests.** A CR at the end of a chunk waits for its LF, in a reply and in a `VALUE` line. A CR without an LF stays in the line, also across chunks. The fixed replies resolve as before without decoding, and a line of the same length but another word is decoded. A chunk of replies is parsed without a `subarray`, and an unfinished reply takes one. A get whose hit listener disconnects resolves with its value, the next get on that connection is rejected, and the next connection starts clean. A hit listener that throws doesn't make a reply be read twice. The last four fail on N3; the first two pass there.
-  - **Result.** Client time per request with the fake socket from N3: the median change over 8 pairs of alternating rounds in one process, N3 → N4.
+  - **Result.** Client time per request with the fake socket from N3: the median change over 8 pairs of alternating rounds in one process, N3 → N4 (negative is faster).
 
     | Request | 1 in flight | 10 | 100 | 500 |
     |---|---|---|---|---|
@@ -472,18 +472,18 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
     | `incr` | −11% | −11% | −18% | −12% |
     | 100-key multi-get | −29% | −26% | −28% | −27% |
 
-    B1 against the container IP (operations per second; 4 runs per build, in N3, N4, N4, N3 order twice):
+    B1 against the container IP (4 runs per build, in N3, N4, N4, N3 order twice). Time per benchmark operation, from the median operations per second, so lower is better. A `multi-get` operation is the whole batch, and a `concurrency` operation is 500 requests.
 
-    | Benchmark row | N3 → N4 | Change of medians |
-    |---|---|---|
-    | `multi-get` 10 × 1,000 keys | 39–41 → 52–53 | +30% |
-    | `multi-get` 1 × 10,000 keys | 31–33 → 44–47 | +39% |
-    | `multi-get` 100 × 100 keys | 26–29 → 35–37 | +25% |
-    | `concurrency` 500 gets, 500 in flight | 335–442 → 514–577 | +27% |
-    | `concurrency` 500 gets, 100 in flight | 342–409 → 480–528 | +26% |
-    | `concurrency` 500 sets, 100 in flight | 475–596 → 531–658 | +11% |
+    | Benchmark row | N3 | N4 | Time | Throughput |
+    |---|--:|--:|--:|--:|
+    | `multi-get` 10 × 1,000 keys | 25 ms | 19 ms | −23% | +30% |
+    | `multi-get` 1 × 10,000 keys | 30 ms | 22 ms | −28% | +39% |
+    | `multi-get` 100 × 100 keys | 36 ms | 29 ms | −20% | +25% |
+    | `concurrency` 500 gets, 500 in flight | 2.36 ms | 1.86 ms | −21% | +27% |
+    | `concurrency` 500 gets, 100 in flight | 2.51 ms | 1.99 ms | −21% | +26% |
+    | `concurrency` 500 sets, 100 in flight | 1.80 ms | 1.63 ms | −10% | +11% |
 
-    Gets gain the most: every value comes with a `VALUE` line, and the reply ends with `END`. The other `concurrency` rows (sets with 500, 10 or 1 in flight, and gets with 10 or 1) changed by +1% to +9%, within the spread between runs.
+    Gets gain the most: every value comes with a `VALUE` line, and the reply ends with `END`. The other `concurrency` rows (sets with 500, 10 or 1 in flight, and gets with 10 or 1) took 1% to 9% less time, within the spread between runs.
 - **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
 
