@@ -209,6 +209,7 @@ const client = new Memcache({
 - `nodes?: (string | MemcacheNode)[]` - Array of node URIs or MemcacheNode instances
   - Examples: `["localhost:11211", "memcache://192.168.1.100:11212"]`
 - `timeout?: number` - Milliseconds to wait for a connection to open, and for the server to respond while commands are pending (default: 5000). If pending commands get no response in time, the node emits `timeout`, the pending commands fail and the connection is closed; the next command reconnects. Idle connections stay open.
+- `maxPendingCommands?: number` - The most requests each node keeps waiting for a response (default: 0, no limit). While a node has that many, a new request to it fails at once instead of joining its queue, so a slow or unreachable server can't build up an unbounded backlog. It fails like any other command: `set()` and the other writes resolve `false`, and `get()` resolves `undefined`. Called directly, `node.command()` and the node's `binary*` methods reject with a "Too many pending commands" error.
 - `keepAlive?: boolean` - Keep connection alive (default: true)
 - `keepAliveDelay?: number` - Keep alive delay in milliseconds (default: 1000)
 - `hash?: HashProvider` - Hash provider for consistent hashing (default: KetamaHash)
@@ -238,6 +239,9 @@ Get or set the hash provider used for consistent hashing distribution.
 
 ### `timeout: number`
 Get or set the timeout in milliseconds (default: 5000). Setting it updates existing nodes and the Auto Discovery connection, and applies to commands that are already waiting.
+
+### `maxPendingCommands: number`
+Get or set the most requests each node keeps waiting for a response (default: 0, no limit). Setting it updates existing nodes and applies to the next request; requests already waiting are not affected.
 
 ### `keepAlive: boolean`
 Get or set the keepAlive setting. Updates all existing nodes. Requires `reconnect()` to apply changes.

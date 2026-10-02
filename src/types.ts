@@ -74,6 +74,14 @@ export interface MemcacheOptions {
 	 */
 	timeout?: number;
 	/**
+	 * The most requests each node keeps waiting for a response. A request
+	 * made while a node has that many fails at once instead of joining the
+	 * queue, like any failed command: `set()` resolves `false` and `get()`
+	 * `undefined`. `0` means no limit.
+	 * @default 0
+	 */
+	maxPendingCommands?: number;
+	/**
 	 * Whether to keep the connection alive.
 	 * @default true
 	 */

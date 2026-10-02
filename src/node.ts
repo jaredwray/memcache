@@ -45,6 +45,13 @@ export type MemcacheTlsOption = boolean | TlsConnectionOptions;
 
 export interface MemcacheNodeOptions {
 	timeout?: number;
+	/**
+	 * The most requests the node keeps waiting for a response. A request
+	 * made while that many are pending fails at once instead of joining the
+	 * queue. `0` means no limit.
+	 * @default 0
+	 */
+	maxPendingCommands?: number;
 	keepAlive?: boolean;
 	keepAliveDelay?: number;
 	weight?: number;
@@ -190,6 +197,7 @@ export class MemcacheNode extends Hookified {
 	private _socket: Socket | undefined = undefined;
 	private _connecting: Promise<void> | undefined = undefined;
 	private _timeout: number;
+	private _maxPendingCommands: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _weight: number;
@@ -216,6 +224,7 @@ export class MemcacheNode extends Hookified {
 		this._host = host;
 		this._port = port;
 		this._timeout = options?.timeout || 5000;
+		this._maxPendingCommands = options?.maxPendingCommands ?? 0;
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._weight = options?.weight || 1;
@@ -326,6 +335,22 @@ export class MemcacheNode extends Hookified {
 			clearTimeout(this._deadline);
 			this.scheduleDeadline(value - (performance.now() - this._waitingSince));
 		}
+	}
+
+	/**
+	 * Get the most requests the node keeps waiting for a response. `0` means
+	 * no limit.
+	 */
+	public get maxPendingCommands(): number {
+		return this._maxPendingCommands;
+	}
+
+	/**
+	 * Set the most requests the node keeps waiting for a response. Requests
+	 * made while that many are pending fail at once. `0` means no limit.
+	 */
+	public set maxPendingCommands(value: number) {
+		this._maxPendingCommands = value;
 	}
 
 	/**
@@ -491,6 +516,27 @@ export class MemcacheNode extends Hookified {
 			this._commandQueue.length > 0 ||
 			this._binaryQueue.length > 0
 		);
+	}
+
+	/**
+	 * The error for a request made while `maxPendingCommands` requests are
+	 * already waiting, or undefined when there is room for it.
+	 */
+	private overloadError(): Error | undefined {
+		const limit = this._maxPendingCommands;
+		if (
+			limit > 0 &&
+			(this._currentCommand ? 1 : 0) +
+				this._commandQueue.length +
+				this._binaryQueue.length >=
+				limit
+		) {
+			return new Error(
+				`Too many pending commands on memcache server ${this.id} (maxPendingCommands: ${limit})`,
+			);
+		}
+
+		return undefined;
 	}
 
 	/**
@@ -675,6 +721,12 @@ export class MemcacheNode extends Hookified {
 	): void {
 		if (!this._connected || !this._socket) {
 			reject(new Error(`Not connected to memcache server ${this.id}`));
+			return;
+		}
+
+		const overload = this.overloadError();
+		if (overload) {
+			reject(overload);
 			return;
 		}
 
@@ -1071,6 +1123,13 @@ export class MemcacheNode extends Hookified {
 			const socket = this._socket;
 			if (!this._connected || !socket) {
 				reject(new Error(`Not connected to memcache server ${this.id}`));
+				return;
+			}
+
+			// Under overload, fail now rather than queue without bound
+			const overload = this.overloadError();
+			if (overload) {
+				reject(overload);
 				return;
 			}
 

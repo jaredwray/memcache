@@ -1024,6 +1024,26 @@ describe("Memcache AutoDiscovery Integration", () => {
 			expect(client.getNode("10.0.0.2:11211")?.tls).toBe(true);
 		});
 
+		it("should give discovered nodes the client's maxPendingCommands", async () => {
+			const config = {
+				version: 1,
+				nodes: [{ hostname: "host1.example.com", ip: "10.0.0.9", port: 11211 }],
+			};
+			for (const tls of [true, undefined]) {
+				const client = new Memcache({
+					nodes: [],
+					lazyConnect: true,
+					tls,
+					maxPendingCommands: 5,
+				});
+
+				// @ts-expect-error - accessing private method for testing
+				await client.applyClusterConfig(config);
+
+				expect(client.getNode("10.0.0.9:11211")?.maxPendingCommands).toBe(5);
+			}
+		});
+
 		it("should not set SNI when discovered hostname is empty", async () => {
 			const client = new Memcache({
 				nodes: [],

@@ -93,6 +93,7 @@ const toResults = (result: unknown): unknown[] => [result];
 export class Memcache extends Hookified {
 	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
+	private _maxPendingCommands: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _hash: HashProvider;
@@ -118,6 +119,7 @@ export class Memcache extends Hookified {
 		if (typeof options === "string") {
 			this._hash = new KetamaHash();
 			this._timeout = 5000;
+			this._maxPendingCommands = 0;
 			this._keepAlive = true;
 			this._keepAliveDelay = 1000;
 			this._retries = 0;
@@ -138,6 +140,14 @@ export class Memcache extends Hookified {
 			// Handle MemcacheOptions object
 			this._hash = options?.hash ?? new KetamaHash();
 			this._timeout = options?.timeout || 5000;
+			this._maxPendingCommands = Math.max(
+				0,
+				Math.floor(
+					Number.isFinite(options?.maxPendingCommands)
+						? (options?.maxPendingCommands as number)
+						: 0,
+				),
+			);
 			this._keepAlive = options?.keepAlive !== false;
 			this._keepAliveDelay = options?.keepAliveDelay || 1000;
 			this._retries = options?.retries ?? 0;
@@ -266,6 +276,33 @@ export class Memcache extends Hookified {
 		}
 		if (this._autoDiscovery) {
 			this._autoDiscovery.timeout = value;
+		}
+	}
+
+	/**
+	 * Get the most requests each node keeps waiting for a response. A
+	 * request made while a node has that many fails at once. `0` means no
+	 * limit.
+	 * @returns {number}
+	 * @default 0
+	 */
+	public get maxPendingCommands(): number {
+		return this._maxPendingCommands;
+	}
+
+	/**
+	 * Set the most requests each node keeps waiting for a response. Applies
+	 * to existing nodes. `0` means no limit.
+	 * @param {number} value
+	 * @default 0
+	 */
+	public set maxPendingCommands(value: number) {
+		this._maxPendingCommands = Math.max(
+			0,
+			Math.floor(Number.isFinite(value) ? value : 0),
+		);
+		for (const node of this._nodes) {
+			node.maxPendingCommands = this._maxPendingCommands;
 		}
 	}
 
@@ -546,6 +583,7 @@ export class Memcache extends Hookified {
 			// node even when the client-level `tls` option is not set.
 			node = new MemcacheNode(host, port, {
 				timeout: this._timeout,
+				maxPendingCommands: this._maxPendingCommands,
 				keepAlive: this._keepAlive,
 				keepAliveDelay: this._keepAliveDelay,
 				weight,
@@ -1843,6 +1881,7 @@ export class Memcache extends Hookified {
 			await this.addNode(
 				new MemcacheNode(host, node.port, {
 					timeout: this._timeout,
+					maxPendingCommands: this._maxPendingCommands,
 					keepAlive: this._keepAlive,
 					keepAliveDelay: this._keepAliveDelay,
 					sasl: this._sasl,

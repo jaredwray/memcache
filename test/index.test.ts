@@ -1,5 +1,10 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import { type AddressInfo, createConnection, createServer } from "node:net";
+import {
+	type AddressInfo,
+	createConnection,
+	createServer,
+	type Socket,
+} from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache, {
 	createNode,
@@ -1336,6 +1341,71 @@ describe("Memcache", () => {
 			await expect(client.set("orphan", "value")).rejects.toThrow(
 				"No node available for key: orphan",
 			);
+		});
+	});
+
+	describe("maxPendingCommands", () => {
+		it("should default to no limit and pass the option to every node", () => {
+			expect(client.maxPendingCommands).toBe(0);
+			expect(client.nodes[0].maxPendingCommands).toBe(0);
+
+			const limited = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+				maxPendingCommands: 100,
+			});
+			expect(limited.maxPendingCommands).toBe(100);
+			expect(limited.nodes.map((node) => node.maxPendingCommands)).toEqual([
+				100, 100,
+			]);
+		});
+
+		it("should round the limit down and treat other values as no limit", () => {
+			expect(new Memcache({ maxPendingCommands: 2.9 }).maxPendingCommands).toBe(
+				2,
+			);
+			expect(new Memcache({ maxPendingCommands: -5 }).maxPendingCommands).toBe(
+				0,
+			);
+			expect(
+				new Memcache({ maxPendingCommands: Number.NaN }).maxPendingCommands,
+			).toBe(0);
+			expect(new Memcache("localhost:11211").maxPendingCommands).toBe(0);
+
+			client.maxPendingCommands = Number.POSITIVE_INFINITY;
+			expect(client.maxPendingCommands).toBe(0);
+			expect(client.nodes[0].maxPendingCommands).toBe(0);
+		});
+
+		it("should apply a new limit to existing nodes and to nodes added later", async () => {
+			client.maxPendingCommands = 7;
+			expect(client.nodes[0].maxPendingCommands).toBe(7);
+
+			await client.addNode("localhost:11212");
+			expect(client.getNode("localhost:11212")?.maxPendingCommands).toBe(7);
+		});
+
+		it("should fail commands at once while a node has the limit pending", async () => {
+			const limited = new Memcache({ maxPendingCommands: 1 });
+			await limited.connect();
+			const socket = limited.nodes[0].socket as Socket;
+			const write = vi.spyOn(socket, "write").mockImplementation(() => true);
+			const key = generateKey("limited");
+
+			const first = limited.set(key, "1");
+			// The node has one command waiting: these fail without being sent
+			expect(await limited.set(key, "2")).toBe(false);
+			expect(await limited.get(key)).toBeUndefined();
+			expect(await limited.delete(key)).toBe(false);
+			expect(write).toHaveBeenCalledTimes(1);
+
+			socket.emit("data", Buffer.from("STORED\r\n"));
+			expect(await first).toBe(true);
+			write.mockRestore();
+
+			// Room again, and this one reaches the server
+			expect(await limited.set(key, "3")).toBe(true);
+			expect(await limited.get(key)).toBe("3");
+			await limited.disconnect();
 		});
 	});
 

@@ -1637,6 +1637,85 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Pending command limit", () => {
+		let socket: Socket;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = node.socket as Socket;
+			// Requests never reach the server; each test supplies the response
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		it("should have no limit unless one is given", () => {
+			expect(node.maxPendingCommands).toBe(0);
+			const limited = new MemcacheNode("localhost", 11211, {
+				maxPendingCommands: 3,
+			});
+			expect(limited.maxPendingCommands).toBe(3);
+		});
+
+		it("should fail a command at once while the limit is pending", async () => {
+			node.maxPendingCommands = 2;
+			const first = node.command("delete a");
+			const second = node.command("delete b");
+
+			await expect(node.command("delete c")).rejects.toThrow(
+				"Too many pending commands on memcache server localhost:11211 (maxPendingCommands: 2)",
+			);
+			// Neither queued nor written
+			expect(node.commandQueue).toHaveLength(2);
+			expect(writeSpy).toHaveBeenCalledTimes(2);
+
+			// A reply makes room again
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			expect(await first).toBe("DELETED");
+			const third = node.command("delete c");
+			socket.emit("data", Buffer.from("NOT_FOUND\r\nDELETED\r\n"));
+			expect(await second).toBe("NOT_FOUND");
+			expect(await third).toBe("DELETED");
+		});
+
+		it("should count a command whose reply is still arriving", async () => {
+			node.maxPendingCommands = 1;
+			const partial = node.command("get a", {
+				isMultiline: true,
+				requestedKeys: ["a"],
+			});
+			// The reply has started, so the command is no longer queued
+			socket.emit("data", Buffer.from("VALUE a 0 5\r\nhel"));
+			expect(node.commandQueue).toHaveLength(0);
+
+			await expect(node.command("delete b")).rejects.toThrow(
+				"Too many pending commands",
+			);
+
+			socket.emit("data", Buffer.from("lo\r\nEND\r\n"));
+			expect(await partial).toEqual({ values: ["hello"], foundKeys: ["a"] });
+		});
+
+		it("should count binary requests toward the same limit", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.binaryGet("a");
+
+			await expect(node.command("version")).rejects.toThrow(
+				"Too many pending commands",
+			);
+			await expect(node.binaryGet("b")).rejects.toThrow(
+				"Too many pending commands",
+			);
+			expect(writeSpy).toHaveBeenCalledTimes(1);
+
+			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
+			expect(await pending).toBe("value-a");
+		});
+	});
+
 	describe("Error Handling", () => {
 		it("should handle ERROR response for stats command", async () => {
 			await node.connect();
