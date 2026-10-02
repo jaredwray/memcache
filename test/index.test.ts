@@ -1407,6 +1407,71 @@ describe("Memcache", () => {
 			expect(await limited.get(key)).toBe("3");
 			await limited.disconnect();
 		});
+
+		it("should not retry a request refused at the limit", async () => {
+			const limited = new Memcache({
+				maxPendingCommands: 1,
+				retries: 2,
+				retryDelay: 50,
+				retryOnlyIdempotent: false,
+			});
+			await limited.connect();
+			const node = limited.nodes[0];
+			const socket = node.socket as Socket;
+			const write = vi.spyOn(socket, "write").mockImplementation(() => true);
+			const command = vi.spyOn(node, "command");
+			const key = generateKey("no-retry");
+
+			const first = limited.set(key, "1");
+			expect(await limited.set(key, "2")).toBe(false);
+			// The refused set was tried once
+			expect(command).toHaveBeenCalledTimes(2);
+
+			socket.emit("data", Buffer.from("STORED\r\n"));
+			expect(await first).toBe(true);
+			write.mockRestore();
+			await limited.disconnect();
+		});
+
+		it("should count requests waiting for a node's connection", async () => {
+			// Accepts connections but never answers, so the TLS handshake stalls
+			const server = createServer((socket) => {
+				socket.on("data", () => undefined);
+			});
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve);
+			});
+			const { port } = server.address() as AddressInfo;
+			const limited = new Memcache({
+				nodes: [`127.0.0.1:${port}`],
+				tls: { rejectUnauthorized: false },
+				timeout: 200,
+				lazyConnect: true,
+				maxPendingCommands: 2,
+			});
+
+			try {
+				const waiting = [limited.get("a"), limited.set("b", "1")];
+				let settled = false;
+				void Promise.allSettled(waiting).then(() => {
+					settled = true;
+				});
+
+				// Past the limit, requests fail at once, as a failed connection does
+				await expect(limited.delete("c")).rejects.toThrow(
+					"Too many pending commands",
+				);
+				expect(await limited.gets(["d"])).toEqual(new Map());
+				expect(settled).toBe(false);
+
+				for (const request of waiting) {
+					await expect(request).rejects.toThrow("Connection timeout");
+				}
+			} finally {
+				await limited.disconnect();
+				server.close();
+			}
+		});
 	});
 
 	describe("Expiration Validation", () => {

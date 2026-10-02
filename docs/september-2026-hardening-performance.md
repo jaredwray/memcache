@@ -514,14 +514,16 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     With 1 in flight the round trip dominates: gets took 2% less time and sets 7% less, within the spread between runs.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
-  - **Done.** A new `maxPendingCommands` option, on the client and on a node, caps the requests each node keeps waiting for a reply. It is off by default (`0`).
+  - **Done.** A new `maxPendingCommands` option, on the client and on a node, caps the requests each node keeps waiting for a reply or for its connection to open. It is off by default (`0`).
     - A request made while a node has that many, text or binary, fails at once: it is neither queued nor written. Through the client it fails like any other command, so `set()` resolves `false` and `get()` `undefined`; `node.command()` and the `binary*` methods reject with a "Too many pending commands" error. A command whose reply has started to arrive still counts.
-    - The client's setter updates every node, and nodes added later, including those found by Auto Discovery, get the limit. The client rounds it down and treats anything below 1, or not a finite number, as no limit.
+    - Requests waiting for a node's connection count too. A request that finds its node not connected waits in `connectForRequest()`, a new node method that the client's commands use instead of `connect()`, and past the limit it fails at once. It fails the way a failed connection does: single-key commands reject, and `gets()` leaves out that node's keys. Before this, found in review, a burst against a server whose connection never opened waited without limit until the connect timeout.
+    - Refused requests are not retried, even with `retries` set: the retry loop stops at the node's `PendingLimitError`. A retry would wait out its delay and add to the load.
+    - The client's setter updates every node, and nodes added later, including those found by Auto Discovery, get the limit. The client and the node round it down and treat anything below 1, or not a finite number, as no limit.
     - Every request a node refuses gets the same Error, built again when the limit changes. A new Error for each, with its stack trace, made the 100,000 calls in the measurement below take about 920 ms at a limit of 1,000, three times as long as queueing them all; without stack traces they took 500–620 ms.
     - A quit still goes out at the limit. Refused, it made `quit()` close the connection at once, and the requests ahead of it failed instead of getting their replies.
     - The return value of `socket.write()` is still not used. Every pending request has already been written, so the limit also bounds what the socket buffers. A server that reads requests without answering them, as in the measurement below, never fills that buffer, so a limit on buffered bytes wouldn't catch it.
-  - **Tests.** A node has no limit unless given one; at the limit a command fails without being queued or written, and a reply makes room again; a command whose reply is still arriving counts; binary requests count toward the same limit; refused requests share one error, and a new limit gives a new one; a text and a binary quit still go out at the limit, and the request ahead of the quit gets its reply. Through the client: the default and the option reach every node, the value is rounded down or ignored, the setter reaches existing nodes and nodes added later, discovered nodes get the limit with and without TLS, and at the limit `set()`, `get()` and `delete()` fail at once without writing, then succeed once there is room.
-  - **Result.** With no limit, the default, the request path is unchanged. With the fake socket from N3, the median N6/`main` time ratio over 8 pairs of alternating rounds was 0.99–1.03 for gets and sets with 1, 100 and 500 in flight. For 100-key multi-gets it was 0.98–1.00 over 14 pairs; a first run of 8 pairs gave 0.99–1.09, with single pairs from 0.63 to 1.25.
+  - **Tests.** A node has no limit unless given one, and rounds the limit down or ignores it like the client; at the limit a command fails without being queued or written, and a reply makes room again; a command whose reply is still arriving counts; binary requests count toward the same limit; refused requests share one error, and a new limit gives a new one; a text and a binary quit still go out at the limit, and the request ahead of the quit gets its reply; requests waiting for a connection that never opens count, the one past the limit fails at once, and they stop counting when the connection fails or opens. Through the client: the default and the option reach every node, the value is rounded down or ignored, the setter reaches existing nodes and nodes added later, discovered nodes get the limit with and without TLS, at the limit `set()`, `get()` and `delete()` fail at once without writing and then succeed once there is room, a refused `set()` isn't retried, and while a connection is being opened a request past the limit rejects and `gets()` leaves out the node's keys before the waiting requests settle.
+  - **Result.** With no limit, the default, the request path is unchanged. With the fake socket from N3, the median N6/`main` time ratio over 8 pairs of alternating rounds, with 1, 100 and 500 in flight, was 0.98–1.01 for gets, 0.96–1.02 for sets and 0.91–1.00 for 100-key multi-gets (1.00 is no change; lower is faster).
 
     A server that reads requests and never answers, and 100,000 gets made at once with `timeout: 2000` (2 runs per limit):
 
@@ -532,6 +534,16 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
     | 100 | 356–399 ms | 99,900 (by 401–448 ms) | 100 | 5.7 MB |
 
     Times are from the first call. Without a limit every caller waits for the timeout, and each pending request holds about 1.2 KB of heap. With one, the callers beyond it get `undefined` right after the calls are made, and most of the heap left is the measurement's own 100,000 promises. Refusing a request costs a little more than queueing one, so making the calls took 15–35% longer, but nothing is written for the refused requests.
+
+    The same burst on a client that isn't connected yet, against a server that accepts the connection but never answers its TLS handshake (`timeout: 2000`, 2 runs per limit):
+
+    | Limit | Failed at once | Waited for the connection | Heap held while waiting |
+    |---|--:|--:|--:|
+    | none | 0 | 100,000 (until 2.50–2.57 s) | 123.5 MB |
+    | 1,000 | 99,000 (by 450–484 ms) | 1,000 | 7.2 MB |
+    | 100 | 99,900 (by 430–431 ms) | 100 | 5.8 MB |
+
+    Before requests waiting for the connection counted, a limit of 1,000 gave the first row: all 100,000 waited, holding 123.5 MB.
 
 ## Checked and not worth changing
 

@@ -47,9 +47,10 @@ export type MemcacheTlsOption = boolean | TlsConnectionOptions;
 export interface MemcacheNodeOptions {
 	timeout?: number;
 	/**
-	 * The most requests the node keeps waiting for a response. A request
-	 * made while that many are pending fails at once instead of joining the
-	 * queue. `0` means no limit.
+	 * The most requests the node keeps waiting for a response, or for its
+	 * connection to open (see `connectForRequest()`). A request made while
+	 * that many are pending fails at once instead of joining them. `0`, or
+	 * anything below 1 or not finite, means no limit.
 	 * @default 0
 	 */
 	maxPendingCommands?: number;
@@ -189,6 +190,20 @@ function hasBytesAt(buffer: Buffer, start: number, bytes: Buffer): boolean {
 }
 
 /**
+ * A pending request limit as a whole number of requests. Anything below 1,
+ * or not a finite number, means no limit: 0.
+ */
+export function toPendingLimit(value: number | undefined): number {
+	return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : 0;
+}
+
+/**
+ * The error a node gives a request it refuses because `maxPendingCommands`
+ * requests are already pending. The client doesn't retry these.
+ */
+export class PendingLimitError extends Error {}
+
+/**
  * MemcacheNode represents a single memcache server connection.
  * It handles the socket connection, command queue, and protocol parsing for one node.
  */
@@ -199,7 +214,8 @@ export class MemcacheNode extends Hookified {
 	private _connecting: Promise<void> | undefined = undefined;
 	private _timeout: number;
 	private _maxPendingCommands: number;
-	private _overloadError: Error | undefined;
+	private _overloadError: PendingLimitError | undefined;
+	private _connectWaiters = 0;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _weight: number;
@@ -226,7 +242,7 @@ export class MemcacheNode extends Hookified {
 		this._host = host;
 		this._port = port;
 		this._timeout = options?.timeout || 5000;
-		this._maxPendingCommands = options?.maxPendingCommands ?? 0;
+		this._maxPendingCommands = toPendingLimit(options?.maxPendingCommands);
 		this._keepAlive = options?.keepAlive !== false;
 		this._keepAliveDelay = options?.keepAliveDelay || 1000;
 		this._weight = options?.weight || 1;
@@ -349,10 +365,11 @@ export class MemcacheNode extends Hookified {
 
 	/**
 	 * Set the most requests the node keeps waiting for a response. Requests
-	 * made while that many are pending fail at once. `0` means no limit.
+	 * made while that many are pending fail at once. `0`, or anything below
+	 * 1 or not finite, means no limit.
 	 */
 	public set maxPendingCommands(value: number) {
-		this._maxPendingCommands = value;
+		this._maxPendingCommands = toPendingLimit(value);
 		this._overloadError = undefined;
 	}
 
@@ -414,6 +431,30 @@ export class MemcacheNode extends Hookified {
 		});
 		this._connecting = connecting;
 		return connecting;
+	}
+
+	/**
+	 * Connect for a request that is sent once the connection is open. With
+	 * `maxPendingCommands` set, the requests waiting for the connection
+	 * count toward it, so a server that can't be reached can't gather an
+	 * unbounded backlog either: past the limit, this rejects at once with
+	 * the error a refused command gets. The client's commands connect this
+	 * way.
+	 */
+	public connectForRequest(): Promise<void> {
+		if (this._maxPendingCommands === 0) {
+			return this.connect();
+		}
+
+		const overload = this.overloadError(this._connectWaiters);
+		if (overload) {
+			return Promise.reject(overload);
+		}
+
+		this._connectWaiters++;
+		return this.connect().finally(() => {
+			this._connectWaiters--;
+		});
 	}
 
 	/**
@@ -523,21 +564,23 @@ export class MemcacheNode extends Hookified {
 
 	/**
 	 * The error for a request made while `maxPendingCommands` requests are
-	 * already waiting, or undefined when there is room for it. Every refused
-	 * request gets the same Error, built once per limit: an Error with its
-	 * stack trace for each one made refusing a request cost 3x as much as
-	 * queueing it.
+	 * already waiting, or undefined when there is room for it. `waiting`
+	 * adds requests that are not in the queues, such as those waiting for
+	 * the connection. Every refused request gets the same Error, built once
+	 * per limit: an Error with its stack trace for each one made refusing a
+	 * request cost 3x as much as queueing it.
 	 */
-	private overloadError(): Error | undefined {
+	private overloadError(waiting = 0): PendingLimitError | undefined {
 		const limit = this._maxPendingCommands;
 		if (
 			limit > 0 &&
-			(this._currentCommand ? 1 : 0) +
+			waiting +
+				(this._currentCommand ? 1 : 0) +
 				this._commandQueue.length +
 				this._binaryQueue.length >=
 				limit
 		) {
-			this._overloadError ??= new Error(
+			this._overloadError ??= new PendingLimitError(
 				`Too many pending commands on memcache server ${this.id} (maxPendingCommands: ${limit})`,
 			);
 			return this._overloadError;

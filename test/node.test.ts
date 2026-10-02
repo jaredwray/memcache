@@ -1759,6 +1759,69 @@ describe("MemcacheNode", () => {
 			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
 			expect(await pending).toBe("value-a");
 		});
+
+		it("should round the limit down and treat other values as no limit", () => {
+			const cases: Array<[number, number]> = [
+				[2.9, 2],
+				[0.5, 0],
+				[-3, 0],
+				[Number.NaN, 0],
+				[Number.POSITIVE_INFINITY, 0],
+			];
+			for (const [value, limit] of cases) {
+				node.maxPendingCommands = value;
+				expect(node.maxPendingCommands).toBe(limit);
+				const created = new MemcacheNode("localhost", 11211, {
+					maxPendingCommands: value,
+				});
+				expect(created.maxPendingCommands).toBe(limit);
+			}
+		});
+
+		it("should count requests waiting for the connection, and refuse them past the limit", async () => {
+			const server = await startStalledServer();
+			// The TLS handshake gets no response, so the connection never opens
+			const tlsNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 200,
+				tls: { rejectUnauthorized: false },
+				maxPendingCommands: 2,
+			});
+
+			try {
+				const waiting = [
+					tlsNode.connectForRequest(),
+					tlsNode.connectForRequest(),
+				];
+				await expect(tlsNode.connectForRequest()).rejects.toThrow(
+					`Too many pending commands on memcache server 127.0.0.1:${server.port} (maxPendingCommands: 2)`,
+				);
+
+				// Once they fail with the connection, the next request may wait
+				for (const wait of waiting) {
+					await expect(wait).rejects.toThrow("Connection timeout");
+				}
+				await expect(tlsNode.connectForRequest()).rejects.toThrow(
+					"Connection timeout",
+				);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("should stop counting requests that waited once the connection opens", async () => {
+			const fresh = new MemcacheNode("localhost", 11211, {
+				maxPendingCommands: 1,
+			});
+			const waiting = fresh.connectForRequest();
+			await expect(fresh.connectForRequest()).rejects.toThrow(
+				"Too many pending commands",
+			);
+
+			await waiting;
+			await expect(fresh.connectForRequest()).resolves.toBeUndefined();
+			expect(await fresh.command("version")).toMatch(/^VERSION /);
+			await fresh.disconnect();
+		});
 	});
 
 	describe("Error Handling", () => {
