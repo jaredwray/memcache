@@ -1,22 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+	buildAddRequest,
 	buildAppendRequest,
+	buildDecrementRequest,
+	buildDeleteRequest,
 	buildFlushRequest,
+	buildGetRequest,
+	buildIncrementRequest,
 	buildPrependRequest,
 	buildQuitRequest,
+	buildReplaceRequest,
 	buildSaslListMechsRequest,
 	buildSaslPlainRequest,
+	buildSetRequest,
 	buildStatRequest,
 	buildTouchRequest,
 	buildVersionRequest,
 	deserializeHeader,
 	HEADER_SIZE,
+	OPCODE_ADD,
 	OPCODE_APPEND,
+	OPCODE_DECREMENT,
+	OPCODE_DELETE,
 	OPCODE_FLUSH,
+	OPCODE_GET,
+	OPCODE_INCREMENT,
 	OPCODE_PREPEND,
 	OPCODE_QUIT,
+	OPCODE_REPLACE,
 	OPCODE_SASL_AUTH,
 	OPCODE_SASL_LIST_MECHS,
+	OPCODE_SET,
 	OPCODE_STAT,
 	OPCODE_TOUCH,
 	OPCODE_VERSION,
@@ -210,6 +224,156 @@ describe("Binary Protocol", () => {
 			expect(deserialized.totalBodyLength).toBe(original.totalBodyLength);
 			expect(deserialized.opaque).toBe(original.opaque);
 			expect(deserialized.cas).toEqual(original.cas);
+		});
+	});
+
+	describe("Request packets", () => {
+		/** 32-bit big-endian numbers, for the expected extras. */
+		const u32 = (...values: number[]) => {
+			const buf = Buffer.alloc(values.length * 4);
+			values.forEach((value, i) => {
+				buf.writeUInt32BE(value, i * 4);
+			});
+			return buf;
+		};
+
+		/**
+		 * A packet as the builders made it before they wrote into one
+		 * allocation: a zeroed header, then the extras, key and value joined.
+		 */
+		const joined = (
+			opcode: number,
+			extras: Buffer,
+			key = "",
+			value: string | Buffer = "",
+		) => {
+			const keyBuf = Buffer.from(key);
+			const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value);
+			const header = serializeHeader({
+				magic: REQUEST_MAGIC,
+				opcode,
+				keyLength: keyBuf.length,
+				extrasLength: extras.length,
+				totalBodyLength: extras.length + keyBuf.length + valueBuf.length,
+			});
+			return Buffer.concat([header, extras, keyBuf, valueBuf]);
+		};
+
+		const none = Buffer.alloc(0);
+		const bytes = Buffer.from([0, 1, 0x80, 0xff]);
+		// [build, the same packet joined the old way]
+		const cases: Array<[string, () => Buffer, Buffer]> = [
+			[
+				"get",
+				() => buildGetRequest("ключ:1"),
+				joined(OPCODE_GET, none, "ключ:1"),
+			],
+			[
+				"set",
+				() => buildSetRequest("k€y", "välue 😀", 7, 3600),
+				joined(OPCODE_SET, u32(7, 3600), "k€y", "välue 😀"),
+			],
+			[
+				"set with a Buffer value",
+				() => buildSetRequest("k", bytes),
+				joined(OPCODE_SET, u32(0, 0), "k", bytes),
+			],
+			[
+				"add",
+				() => buildAddRequest("k", "v", 1, 2),
+				joined(OPCODE_ADD, u32(1, 2), "k", "v"),
+			],
+			[
+				"replace",
+				() => buildReplaceRequest("k", "€", 3, 4),
+				joined(OPCODE_REPLACE, u32(3, 4), "k", "€"),
+			],
+			[
+				"delete",
+				() => buildDeleteRequest("k"),
+				joined(OPCODE_DELETE, none, "k"),
+			],
+			[
+				"increment",
+				() => buildIncrementRequest("n", 2 ** 33 + 5, 2 ** 40 + 7, 60),
+				joined(OPCODE_INCREMENT, u32(2, 5, 256, 7, 60), "n"),
+			],
+			[
+				"decrement",
+				() => buildDecrementRequest("n"),
+				joined(OPCODE_DECREMENT, u32(0, 1, 0, 0, 0), "n"),
+			],
+			[
+				"append",
+				() => buildAppendRequest("k", "-ü"),
+				joined(OPCODE_APPEND, none, "k", "-ü"),
+			],
+			[
+				"prepend with a Buffer value",
+				() => buildPrependRequest("k", bytes),
+				joined(OPCODE_PREPEND, none, "k", bytes),
+			],
+			[
+				"touch",
+				() => buildTouchRequest("k", 99),
+				joined(OPCODE_TOUCH, u32(99), "k"),
+			],
+			["flush", () => buildFlushRequest(30), joined(OPCODE_FLUSH, u32(30))],
+			["version", () => buildVersionRequest(), joined(OPCODE_VERSION, none)],
+			["stat", () => buildStatRequest(), joined(OPCODE_STAT, none)],
+			[
+				"stat with a key",
+				() => buildStatRequest("items"),
+				joined(OPCODE_STAT, none, "items"),
+			],
+			["quit", () => buildQuitRequest(), joined(OPCODE_QUIT, none)],
+			[
+				"SASL list mechanisms",
+				() => buildSaslListMechsRequest(),
+				joined(OPCODE_SASL_LIST_MECHS, none),
+			],
+			[
+				"SASL PLAIN",
+				() => buildSaslPlainRequest("user", "pässword"),
+				joined(OPCODE_SASL_AUTH, none, "PLAIN", "\x00user\x00pässword"),
+			],
+		];
+
+		it("should write every byte of each packet, in one allocation", () => {
+			// Old heap bytes, as Buffer.allocUnsafe() can return them
+			const allocUnsafe = vi
+				.spyOn(Buffer, "allocUnsafe")
+				.mockImplementation((size: number) => Buffer.alloc(size, 0xff));
+			const concat = vi.spyOn(Buffer, "concat");
+			try {
+				for (const [name, build, expected] of cases) {
+					allocUnsafe.mockClear();
+					const packet = build();
+					expect(packet, name).toEqual(expected);
+					expect(allocUnsafe, name).toHaveBeenCalledTimes(1);
+				}
+				expect(concat).not.toHaveBeenCalled();
+			} finally {
+				allocUnsafe.mockRestore();
+				concat.mockRestore();
+			}
+		});
+
+		it("should leave the CAS field zero, since no request sends one", () => {
+			const allocUnsafe = vi
+				.spyOn(Buffer, "allocUnsafe")
+				.mockImplementation((size: number) => Buffer.alloc(size, 0xff));
+			try {
+				for (const [name, build] of cases) {
+					const packet = build();
+					expect(packet.subarray(16, HEADER_SIZE), name).toEqual(
+						Buffer.alloc(8),
+					);
+					expect(deserializeHeader(packet).cas, name).toEqual(Buffer.alloc(8));
+				}
+			} finally {
+				allocUnsafe.mockRestore();
+			}
 		});
 	});
 
@@ -548,9 +712,8 @@ describe("Binary Protocol", () => {
 			buf.writeUInt8(RESPONSE_MAGIC, 0);
 			buf.writeUInt16BE(STATUS_KEY_NOT_FOUND, 6);
 			const result = parseGetResponse(buf);
-			expect(result.header.status).toBe(STATUS_KEY_NOT_FOUND);
+			expect(result.status).toBe(STATUS_KEY_NOT_FOUND);
 			expect(result.value).toBeUndefined();
-			expect(result.key).toBeUndefined();
 		});
 
 		it("should return undefined value when status is AUTH_ERROR", () => {
@@ -558,7 +721,7 @@ describe("Binary Protocol", () => {
 			buf.writeUInt8(RESPONSE_MAGIC, 0);
 			buf.writeUInt16BE(STATUS_AUTH_ERROR, 6);
 			const result = parseGetResponse(buf);
-			expect(result.header.status).toBe(STATUS_AUTH_ERROR);
+			expect(result.status).toBe(STATUS_AUTH_ERROR);
 			expect(result.value).toBeUndefined();
 		});
 
@@ -578,8 +741,40 @@ describe("Binary Protocol", () => {
 			const buf = Buffer.concat([header, extras, valueBuf]);
 			const result = parseGetResponse(buf);
 
-			expect(result.header.status).toBe(STATUS_SUCCESS);
-			expect(result.value?.toString()).toBe(value);
+			expect(result.status).toBe(STATUS_SUCCESS);
+			expect(result.value).toBe(value);
+		});
+
+		it("should skip a key in the response and read an empty value as none", () => {
+			// GETK-style response: 4 bytes of flags, the key, then the value
+			const key = Buffer.from("ключ");
+			const header = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				keyLength: key.length,
+				extrasLength: 4,
+				totalBodyLength: 4 + key.length + 3,
+			});
+			const withValue = Buffer.concat([
+				header,
+				Buffer.alloc(4),
+				key,
+				Buffer.from("€"),
+			]);
+			expect(parseGetResponse(withValue)).toEqual({
+				status: STATUS_SUCCESS,
+				value: "€",
+			});
+
+			const emptyHeader = serializeHeader({
+				magic: RESPONSE_MAGIC,
+				extrasLength: 4,
+				totalBodyLength: 4,
+			});
+			const empty = Buffer.concat([emptyHeader, Buffer.alloc(4)]);
+			expect(parseGetResponse(empty)).toEqual({
+				status: STATUS_SUCCESS,
+				value: undefined,
+			});
 		});
 	});
 
@@ -589,7 +784,7 @@ describe("Binary Protocol", () => {
 			buf.writeUInt8(RESPONSE_MAGIC, 0);
 			buf.writeUInt16BE(STATUS_KEY_NOT_FOUND, 6);
 			const result = parseIncrDecrResponse(buf);
-			expect(result.header.status).toBe(STATUS_KEY_NOT_FOUND);
+			expect(result.status).toBe(STATUS_KEY_NOT_FOUND);
 			expect(result.value).toBeUndefined();
 		});
 
@@ -612,7 +807,7 @@ describe("Binary Protocol", () => {
 			buf.writeUInt32BE(42, HEADER_SIZE + 4); // low 32 bits
 
 			const result = parseIncrDecrResponse(buf);
-			expect(result.header.status).toBe(STATUS_SUCCESS);
+			expect(result.status).toBe(STATUS_SUCCESS);
 			expect(result.value).toBe(42);
 		});
 

@@ -96,6 +96,116 @@ export function deserializeHeader(buf: Buffer): BinaryHeader {
 }
 
 /**
+ * A request packet with room for a body of `bodyLength` bytes after the
+ * header, in one allocation. `Buffer.allocUnsafe()` can hand out old bytes,
+ * so every header byte is written: the data type and vbucket are 0, so is
+ * the opaque (the node sets it when it queues the request), and so is the
+ * CAS, since no request here sends one. The caller writes the whole body.
+ */
+function requestPacket(
+	opcode: number,
+	keyLength: number,
+	extrasLength: number,
+	bodyLength: number,
+): Buffer {
+	const packet = Buffer.allocUnsafe(HEADER_SIZE + bodyLength);
+	packet[0] = REQUEST_MAGIC;
+	packet[1] = opcode;
+	packet.writeUInt16BE(keyLength, 2);
+	packet[4] = extrasLength;
+	packet[5] = 0;
+	packet.writeUInt16BE(0, 6);
+	packet.writeUInt32BE(bodyLength, 8);
+	packet.writeUInt32BE(0, 12);
+	packet.writeUInt32BE(0, 16);
+	packet.writeUInt32BE(0, 20);
+	return packet;
+}
+
+function byteLength(value: string | Buffer): number {
+	return typeof value === "string" ? Buffer.byteLength(value) : value.length;
+}
+
+function writeValue(packet: Buffer, value: string | Buffer, offset: number) {
+	if (typeof value === "string") {
+		packet.write(value, offset);
+	} else {
+		value.copy(packet, offset);
+	}
+}
+
+/** A request whose body is only the key (GET, DELETE, STAT). */
+function keyRequest(opcode: number, key: string): Buffer {
+	const keyLength = Buffer.byteLength(key);
+	const packet = requestPacket(opcode, keyLength, 0, keyLength);
+	packet.write(key, HEADER_SIZE);
+	return packet;
+}
+
+/** A request whose body is the key and then a value, without extras. */
+function keyValueRequest(
+	opcode: number,
+	key: string,
+	value: string | Buffer,
+): Buffer {
+	const keyLength = Buffer.byteLength(key);
+	const packet = requestPacket(
+		opcode,
+		keyLength,
+		0,
+		keyLength + byteLength(value),
+	);
+	packet.write(key, HEADER_SIZE);
+	writeValue(packet, value, HEADER_SIZE + keyLength);
+	return packet;
+}
+
+/** SET, ADD or REPLACE: flags and expiration as extras, then key and value. */
+function storageRequest(
+	opcode: number,
+	key: string,
+	value: string | Buffer,
+	flags: number,
+	exptime: number,
+): Buffer {
+	const keyLength = Buffer.byteLength(key);
+	const packet = requestPacket(
+		opcode,
+		keyLength,
+		8,
+		8 + keyLength + byteLength(value),
+	);
+	packet.writeUInt32BE(flags, HEADER_SIZE);
+	packet.writeUInt32BE(exptime, HEADER_SIZE + 4);
+	packet.write(key, HEADER_SIZE + 8);
+	writeValue(packet, value, HEADER_SIZE + 8 + keyLength);
+	return packet;
+}
+
+/**
+ * INCREMENT or DECREMENT: the 64-bit delta and initial value and the
+ * expiration as extras, then the key.
+ */
+function counterRequest(
+	opcode: number,
+	key: string,
+	delta: number,
+	initial: number,
+	exptime: number,
+): Buffer {
+	const keyLength = Buffer.byteLength(key);
+	const packet = requestPacket(opcode, keyLength, 20, 20 + keyLength);
+	// Each 64-bit big-endian number as two 32-bit writes
+	packet.writeUInt32BE(Math.floor(delta / 0x100000000), HEADER_SIZE);
+	packet.writeUInt32BE(delta >>> 0, HEADER_SIZE + 4);
+	packet.writeUInt32BE(Math.floor(initial / 0x100000000), HEADER_SIZE + 8);
+	packet.writeUInt32BE(initial >>> 0, HEADER_SIZE + 12);
+	packet.writeUInt32BE(exptime, HEADER_SIZE + 16);
+	packet.write(key, HEADER_SIZE + 20);
+	return packet;
+}
+
+/**
  * Build a SASL PLAIN authentication request packet.
  * SASL PLAIN format: \0username\0password
  * @param username - The username for authentication
@@ -106,20 +216,11 @@ export function buildSaslPlainRequest(
 	username: string,
 	password: string,
 ): Buffer {
-	const mechanism = "PLAIN";
-	const authData = `\x00${username}\x00${password}`;
-
-	const keyBuf = Buffer.from(mechanism, "utf8");
-	const valueBuf = Buffer.from(authData, "utf8");
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_SASL_AUTH,
-		keyLength: keyBuf.length,
-		totalBodyLength: keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, keyBuf, valueBuf]);
+	return keyValueRequest(
+		OPCODE_SASL_AUTH,
+		"PLAIN",
+		`\x00${username}\x00${password}`,
+	);
 }
 
 /**
@@ -128,10 +229,7 @@ export function buildSaslPlainRequest(
  * @returns Buffer containing the complete binary request packet
  */
 export function buildSaslListMechsRequest(): Buffer {
-	return serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_SASL_LIST_MECHS,
-	});
+	return requestPacket(OPCODE_SASL_LIST_MECHS, 0, 0, 0);
 }
 
 /**
@@ -140,14 +238,7 @@ export function buildSaslListMechsRequest(): Buffer {
  * @returns Buffer containing the complete binary request packet
  */
 export function buildGetRequest(key: string): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_GET,
-		keyLength: keyBuf.length,
-		totalBodyLength: keyBuf.length,
-	});
-	return Buffer.concat([header, keyBuf]);
+	return keyRequest(OPCODE_GET, key);
 }
 
 /**
@@ -164,24 +255,7 @@ export function buildSetRequest(
 	flags = 0,
 	exptime = 0,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	/* v8 ignore next -- @preserve */
-	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-
-	// Extras: 4 bytes flags + 4 bytes expiration
-	const extras = Buffer.alloc(8);
-	extras.writeUInt32BE(flags, 0);
-	extras.writeUInt32BE(exptime, 4);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_SET,
-		keyLength: keyBuf.length,
-		extrasLength: 8,
-		totalBodyLength: 8 + keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf, valueBuf]);
+	return storageRequest(OPCODE_SET, key, value, flags, exptime);
 }
 
 /**
@@ -193,23 +267,7 @@ export function buildAddRequest(
 	flags = 0,
 	exptime = 0,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	/* v8 ignore next -- @preserve */
-	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-
-	const extras = Buffer.alloc(8);
-	extras.writeUInt32BE(flags, 0);
-	extras.writeUInt32BE(exptime, 4);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_ADD,
-		keyLength: keyBuf.length,
-		extrasLength: 8,
-		totalBodyLength: 8 + keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf, valueBuf]);
+	return storageRequest(OPCODE_ADD, key, value, flags, exptime);
 }
 
 /**
@@ -221,23 +279,7 @@ export function buildReplaceRequest(
 	flags = 0,
 	exptime = 0,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	/* v8 ignore next -- @preserve */
-	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-
-	const extras = Buffer.alloc(8);
-	extras.writeUInt32BE(flags, 0);
-	extras.writeUInt32BE(exptime, 4);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_REPLACE,
-		keyLength: keyBuf.length,
-		extrasLength: 8,
-		totalBodyLength: 8 + keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf, valueBuf]);
+	return storageRequest(OPCODE_REPLACE, key, value, flags, exptime);
 }
 
 /**
@@ -246,14 +288,7 @@ export function buildReplaceRequest(
  * @returns Buffer containing the complete binary request packet
  */
 export function buildDeleteRequest(key: string): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_DELETE,
-		keyLength: keyBuf.length,
-		totalBodyLength: keyBuf.length,
-	});
-	return Buffer.concat([header, keyBuf]);
+	return keyRequest(OPCODE_DELETE, key);
 }
 
 /**
@@ -270,28 +305,7 @@ export function buildIncrementRequest(
 	initial = 0,
 	exptime = 0,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-
-	// Extras: 8 bytes delta + 8 bytes initial + 4 bytes expiration
-	const extras = Buffer.alloc(20);
-	// Write delta as 64-bit big-endian (split into two 32-bit writes)
-	extras.writeUInt32BE(Math.floor(delta / 0x100000000), 0);
-	extras.writeUInt32BE(delta >>> 0, 4);
-	// Write initial as 64-bit big-endian
-	extras.writeUInt32BE(Math.floor(initial / 0x100000000), 8);
-	extras.writeUInt32BE(initial >>> 0, 12);
-	// Write expiration
-	extras.writeUInt32BE(exptime, 16);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_INCREMENT,
-		keyLength: keyBuf.length,
-		extrasLength: 20,
-		totalBodyLength: 20 + keyBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf]);
+	return counterRequest(OPCODE_INCREMENT, key, delta, initial, exptime);
 }
 
 /**
@@ -308,24 +322,7 @@ export function buildDecrementRequest(
 	initial = 0,
 	exptime = 0,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-
-	const extras = Buffer.alloc(20);
-	extras.writeUInt32BE(Math.floor(delta / 0x100000000), 0);
-	extras.writeUInt32BE(delta >>> 0, 4);
-	extras.writeUInt32BE(Math.floor(initial / 0x100000000), 8);
-	extras.writeUInt32BE(initial >>> 0, 12);
-	extras.writeUInt32BE(exptime, 16);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_DECREMENT,
-		keyLength: keyBuf.length,
-		extrasLength: 20,
-		totalBodyLength: 20 + keyBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf]);
+	return counterRequest(OPCODE_DECREMENT, key, delta, initial, exptime);
 }
 
 /**
@@ -335,17 +332,7 @@ export function buildAppendRequest(
 	key: string,
 	value: string | Buffer,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_APPEND,
-		keyLength: keyBuf.length,
-		totalBodyLength: keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, keyBuf, valueBuf]);
+	return keyValueRequest(OPCODE_APPEND, key, value);
 }
 
 /**
@@ -355,64 +342,34 @@ export function buildPrependRequest(
 	key: string,
 	value: string | Buffer,
 ): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-	const valueBuf = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_PREPEND,
-		keyLength: keyBuf.length,
-		totalBodyLength: keyBuf.length + valueBuf.length,
-	});
-
-	return Buffer.concat([header, keyBuf, valueBuf]);
+	return keyValueRequest(OPCODE_PREPEND, key, value);
 }
 
 /**
  * Build a TOUCH request packet
  */
 export function buildTouchRequest(key: string, exptime: number): Buffer {
-	const keyBuf = Buffer.from(key, "utf8");
-
-	const extras = Buffer.alloc(4);
-	extras.writeUInt32BE(exptime, 0);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_TOUCH,
-		keyLength: keyBuf.length,
-		extrasLength: 4,
-		totalBodyLength: 4 + keyBuf.length,
-	});
-
-	return Buffer.concat([header, extras, keyBuf]);
+	const keyLength = Buffer.byteLength(key);
+	const packet = requestPacket(OPCODE_TOUCH, keyLength, 4, 4 + keyLength);
+	packet.writeUInt32BE(exptime, HEADER_SIZE);
+	packet.write(key, HEADER_SIZE + 4);
+	return packet;
 }
 
 /**
  * Build a FLUSH request packet
  */
 export function buildFlushRequest(exptime = 0): Buffer {
-	const extras = Buffer.alloc(4);
-	extras.writeUInt32BE(exptime, 0);
-
-	const header = serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_FLUSH,
-		extrasLength: 4,
-		totalBodyLength: 4,
-	});
-
-	return Buffer.concat([header, extras]);
+	const packet = requestPacket(OPCODE_FLUSH, 0, 4, 4);
+	packet.writeUInt32BE(exptime, HEADER_SIZE);
+	return packet;
 }
 
 /**
  * Build a VERSION request packet
  */
 export function buildVersionRequest(): Buffer {
-	return serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_VERSION,
-	});
+	return requestPacket(OPCODE_VERSION, 0, 0, 0);
 }
 
 /**
@@ -420,76 +377,62 @@ export function buildVersionRequest(): Buffer {
  */
 export function buildStatRequest(key?: string): Buffer {
 	if (key) {
-		const keyBuf = Buffer.from(key, "utf8");
-		const header = serializeHeader({
-			magic: REQUEST_MAGIC,
-			opcode: OPCODE_STAT,
-			keyLength: keyBuf.length,
-			totalBodyLength: keyBuf.length,
-		});
-		return Buffer.concat([header, keyBuf]);
+		return keyRequest(OPCODE_STAT, key);
 	}
-	return serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_STAT,
-	});
+	return requestPacket(OPCODE_STAT, 0, 0, 0);
 }
 
 /**
  * Build a QUIT request packet
  */
 export function buildQuitRequest(): Buffer {
-	return serializeHeader({
-		magic: REQUEST_MAGIC,
-		opcode: OPCODE_QUIT,
-	});
+	return requestPacket(OPCODE_QUIT, 0, 0, 0);
 }
 
 /**
- * Parse a binary response and extract the value
+ * The status of a response packet, read without parsing the rest of the
+ * header into an object.
+ */
+export function readStatus(packet: Buffer): number {
+	return packet.readUInt16BE(6);
+}
+
+/**
+ * Parse a GET response: its status, and the value after the extras and the
+ * key. An empty value reads as no value.
  */
 export function parseGetResponse(buf: Buffer): {
-	header: BinaryHeader;
-	value: Buffer | undefined;
-	key: string | undefined;
+	status: number;
+	value: string | undefined;
 } {
-	const header = deserializeHeader(buf);
-	if (header.status !== STATUS_SUCCESS) {
-		return { header, value: undefined, key: undefined };
+	const status = readStatus(buf);
+	if (status !== STATUS_SUCCESS) {
+		return { status, value: undefined };
 	}
 
-	const extrasEnd = HEADER_SIZE + header.extrasLength;
-	const keyEnd = extrasEnd + header.keyLength;
-	const valueEnd = HEADER_SIZE + header.totalBodyLength;
-
-	/* v8 ignore next -- @preserve */
-	const key =
-		header.keyLength > 0
-			? buf.subarray(extrasEnd, keyEnd).toString("utf8")
+	const valueStart = HEADER_SIZE + buf[4] + buf.readUInt16BE(2);
+	const valueEnd = HEADER_SIZE + buf.readUInt32BE(8);
+	const value =
+		valueEnd > valueStart
+			? buf.toString("utf8", valueStart, valueEnd)
 			: undefined;
-
-	/* v8 ignore next -- @preserve */
-	const value = valueEnd > keyEnd ? buf.subarray(keyEnd, valueEnd) : undefined;
-
-	return { header, value, key };
+	return { status, value };
 }
 
 /**
  * Parse an increment/decrement response
  */
 export function parseIncrDecrResponse(buf: Buffer): {
-	header: BinaryHeader;
+	status: number;
 	value: number | undefined;
 } {
-	const header = deserializeHeader(buf);
-	if (header.status !== STATUS_SUCCESS || header.totalBodyLength < 8) {
-		return { header, value: undefined };
+	const status = readStatus(buf);
+	if (status !== STATUS_SUCCESS || buf.readUInt32BE(8) < 8) {
+		return { status, value: undefined };
 	}
 
 	// Value is 8-byte big-endian unsigned integer
 	const high = buf.readUInt32BE(HEADER_SIZE);
 	const low = buf.readUInt32BE(HEADER_SIZE + 4);
-	const value = high * 0x100000000 + low;
-
-	return { header, value };
+	return { status, value: high * 0x100000000 + low };
 }
