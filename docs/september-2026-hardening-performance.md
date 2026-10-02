@@ -456,6 +456,34 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     A `set` with 100 in flight went from 2.45 to 1.78 µs. B1 `concurrency` against the container IP (operations per second; 4 runs per build, in `main`, N3, N3, `main` order twice): 500 sets with 500 in flight 370–434 → 497–540 (+25% by median), with 100 in flight 333–462 → 470–518 (+10%), with 10 in flight 159–166 → 160–179 (+4%). Sets with 1 in flight and every gets row are unchanged within noise. With 1 in flight the round trip dominates, and a get saves about 0.3 µs of the roughly 5 µs it costs even with 500 in flight, less than the spread between runs.
 - **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), and accept it only when the next byte is LF. If the CR is the last byte buffered, keep it and wait for more data rather than assuming a complete delimiter. Also avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
+  - **Done.** A profile of gets, sets and 100-key multi-gets put parsing at about a third of the client's time, not 10%: the `"\r\n"` search took 10%, a `subarray` per line or value 7%, decoding 9%, and `processLine()` 12%.
+    - Line ends are found with `indexOf(13)`, a byte search, and a CR only counts when an LF follows it. A CR that is the last byte buffered waits for the next chunk.
+    - The fixed one-word replies (`OK`, `END`, `ERROR`, `EXISTS`, `STORED`, `DELETED`, `TOUCHED`, `NOT_FOUND`, `NOT_STORED`) come back as constant strings instead of being decoded. A JS byte loop matches them: on a mix of replies it took 61 ns per line, against 140 ns to decode every line and 218 ns with `Buffer.compare()` and offsets.
+    - Lines and values are read from an offset into the buffer, and what is left is kept once per chunk, instead of a new `subarray` per line and value.
+    - Found while changing this code: a hit or miss listener that closed the connection, such as `client.on("hit", () => client.disconnect())`, crashed the process with a `TypeError`. `processLine()` read the command after the close had cleared it. A multi-get is now settled before its hit and miss events, so a listener can't fail it. Parsing stops when a listener closes the connection, so nothing is kept for the next one. When a listener throws, the lines before it aren't read again.
+  - **Tests.** A CR at the end of a chunk waits for its LF, in a reply and in a `VALUE` line. A CR without an LF stays in the line, also across chunks. The fixed replies resolve as before without decoding, and a line of the same length but another word is decoded. A chunk of replies is parsed without a `subarray`, and an unfinished reply takes one. A get whose hit listener disconnects resolves with its value, the next get on that connection is rejected, and the next connection starts clean. A hit listener that throws doesn't make a reply be read twice. The last four fail on N3; the first two pass there.
+  - **Result.** Client time per request with the fake socket from N3: the median change over 8 pairs of alternating rounds in one process, N3 → N4 (negative is faster).
+
+    | Request | 1 in flight | 10 | 100 | 500 |
+    |---|---|---|---|---|
+    | `get` | −21% | −26% | −30% | −33% |
+    | `set` | −11% | −22% | −30% | −9% |
+    | `delete` | −10% | −18% | −18% | −22% |
+    | `incr` | −11% | −11% | −18% | −12% |
+    | 100-key multi-get | −29% | −26% | −28% | −27% |
+
+    B1 against the container IP (4 runs per build, in N3, N4, N4, N3 order twice). Time per benchmark operation, from the median operations per second, so lower is better. A `multi-get` operation is the whole batch, and a `concurrency` operation is 500 requests.
+
+    | Benchmark row | N3 | N4 | Time | Throughput |
+    |---|--:|--:|--:|--:|
+    | `multi-get` 10 × 1,000 keys | 25 ms | 19 ms | −23% | +30% |
+    | `multi-get` 1 × 10,000 keys | 30 ms | 22 ms | −28% | +39% |
+    | `multi-get` 100 × 100 keys | 36 ms | 29 ms | −20% | +25% |
+    | `concurrency` 500 gets, 500 in flight | 2.36 ms | 1.86 ms | −21% | +27% |
+    | `concurrency` 500 gets, 100 in flight | 2.51 ms | 1.99 ms | −21% | +26% |
+    | `concurrency` 500 sets, 100 in flight | 1.80 ms | 1.63 ms | −10% | +11% |
+
+    Gets gain the most: every value comes with a `VALUE` line, and the reply ends with `END`. The other `concurrency` rows (sets with 500, 10 or 1 in flight, and gets with 10 or 1) took 1% to 9% less time, within the spread between runs.
 - **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
 
@@ -471,7 +499,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
 - The README benchmark tables were regenerated in the P3 PR, and the `bursts` table again in the P4 PR, so they include P1–P4.
 - The `concurrency` table was not regenerated for N3. In that session the bench containers' published ports took about twice as long per round trip as when the table was made, on `main` as on N3 (1 in flight: 24 → 11–12 operations per second), so a new table would have shown drops N3 didn't cause. Regenerate all tables in one session here.
-- Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
+- Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4), and that N4 fixes a crash when a hit or miss listener closes the connection.
 - Keep the tracking table below up to date.
 
 ## Tracking
@@ -490,7 +518,8 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
-| N4–N6 | Next tier | | Not started |
+| N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
+| N5–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
