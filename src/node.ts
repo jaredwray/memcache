@@ -987,22 +987,27 @@ export class MemcacheNode extends Hookified {
 	}
 
 	/**
-	 * Send a generic command to the memcache server
+	 * Send a generic command to the memcache server. Not an async function:
+	 * returning the promise directly saves the extra promise and microtask
+	 * turns an async wrapper adds to every command. Everything happens in the
+	 * executor, so any failure still rejects instead of throwing.
 	 * @param cmd The command string to send (without trailing \r\n)
 	 * @param options Command options for response parsing
 	 */
-	public async command(
+	public command(
 		cmd: string,
 		options?: CommandOptions,
 		// biome-ignore lint/suspicious/noExplicitAny: expected
 	): Promise<any> {
-		if (!this._connected || !this._socket) {
-			throw new Error(`Not connected to memcache server ${this.id}`);
-		}
-
-		const wire = `${cmd}\r\n`;
-		const data = options?.data;
 		return new Promise((resolve, reject) => {
+			const socket = this._socket;
+			if (!this._connected || !socket) {
+				reject(new Error(`Not connected to memcache server ${this.id}`));
+				return;
+			}
+
+			const wire = `${cmd}\r\n`;
+			const data = options?.data;
 			const idle = !this.hasPendingCommands();
 			this._commandQueue.push({
 				command: cmd,
@@ -1014,8 +1019,6 @@ export class MemcacheNode extends Hookified {
 				requestedKeys: options?.requestedKeys,
 			});
 			this.startDeadline(idle);
-			// biome-ignore lint/style/noNonNullAssertion: socket is checked
-			const socket = this._socket!;
 			if (data === undefined) {
 				this.writeToSocket(socket, wire, idle);
 			} else {

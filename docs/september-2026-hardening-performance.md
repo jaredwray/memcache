@@ -440,6 +440,21 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
     B1 `multi-get`, whose 10,000 distinct keys churned the 5,000-key memo on `main` (operations per second; 2 runs per build): 10 × 1,000 keys 33–35 → 43–45, 1 × 10,000 keys 30 → 38–40, 100 × 100 keys 23–24 → 32–34. B1 `concurrency`, whose 1,000 keys already hit the memo, is unchanged within noise.
 - **N3 — Fewer async layers on the hot path.** `get` → `getNodesByKey` (async) → `execute` → `executeWithRetry` → `command` costs about 0.2–0.5 µs per operation. Use a synchronous node lookup when already connected. When no retries are configured, replace the extra async frame with a single `.catch(() => undefined)` on `node.command()`. Failures must still resolve to `undefined` (so `set()` resolves `false`) as they do today (`src/index.ts:1569-1575`); a bare `return node.command()` would let them reject instead.
+  - **Done.**
+    - The single-key commands (`get`, `set`, `add`, `replace`, `append`, `prepend`, `cas`, `delete`, `incr`, `decr`, `touch`) look up their nodes synchronously when all of them are connected, so with no hooks registered the command is written before the call returns. Only when a node isn't connected do they await `getNodesByKey()`, which connects it. Its own single-node fast path is gone, since the commands no longer reach it; its loop returns the same nodes.
+    - `execute()` is no longer an async function. Without retries (the default) each command's promise gets one handler: `[result]` for a single node, and a failure gives `undefined`, so `set()` still resolves `false`. Retries keep the async loop in `executeWithRetry()`.
+    - `node.command()` is no longer async either. Everything runs in the promise executor, so a node that isn't connected still rejects; it never throws.
+    - A `set` or `delete` on one server now creates 3 promises instead of 6, and a `get` 2 instead of 4. After the reply, each settles in half as many microtask turns.
+  - **Tests.** Each of the 11 commands is written before its call returns on a connected node (fails on `main`); each connects first on a client that isn't connected; only the unconnected node of a two-node key is connected; with retries off a failing command makes `set`, `add`, `touch` and `delete` resolve `false`, `get` and `incr` `undefined`, and `execute()` `[undefined]`; a failing replica gives `undefined` in its slot and `set` resolves `false`; a key with no node still rejects; and `command()` on a node that isn't connected rejects without throwing.
+  - **Result.** Client time per request, with a fake socket that answers from memory so the network doesn't count: the median change over 8 pairs of alternating rounds in one process, 100,000 requests per round.
+
+    | Request | 1 in flight | 10 | 100 | 500 |
+    |---|---|---|---|---|
+    | `get` | −8% | −15% | −7% | −8% |
+    | `set` | −15% | −19% | −28% | −26% |
+    | `delete` | −7% | −19% | −21% | −22% |
+
+    A `set` with 100 in flight went from 2.45 to 1.78 µs. B1 `concurrency` against the container IP (operations per second; 4 runs per build, in `main`, N3, N3, `main` order twice): 500 sets with 500 in flight 370–434 → 497–540 (+25% by median), with 100 in flight 333–462 → 470–518 (+10%), with 10 in flight 159–166 → 160–179 (+4%). Sets with 1 in flight and every gets row are unchanged within noise. With 1 in flight the round trip dominates, and a get saves about 0.3 µs of the roughly 5 µs it costs even with 500 in flight, less than the spread between runs.
 - **N4 — Cheaper line parsing.** Search for CR with `indexOf(13)` instead of the `"\r\n"` string (`src/node.ts:832`), and accept it only when the next byte is LF. If the CR is the last byte buffered, keep it and wait for more data rather than assuming a complete delimiter. Also avoid decoding fixed tokens such as `END` and `STORED` into strings, and use an offset cursor instead of a new `subarray` per line. Line parsing is about 10% of client CPU in profiles.
 - **N5 — Binary packet building.** Allocate each packet once instead of 3–4 buffers plus `concat` (`src/binary-protocol.ts:142-446`), and parse headers without allocating an object and a `subarray` (`:84-96`). If the packet comes from `Buffer.allocUnsafe`, every byte must be written explicitly: `serializeHeader` (`:63-77`) relies on `Buffer.alloc` to zero the CAS field (bytes 16–23) when no CAS is given, and leftover heap bytes there would send a random CAS token. Add a test that the CAS bytes are zero when no CAS is given.
 - **N6 — Backpressure (optional).** The queue is unbounded and the return value of `socket.write()` is ignored. Consider an optional `maxPendingCommands` that fails fast under overload.
@@ -455,6 +470,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 
 - README: `timeout` option and event semantics (H3), SASL concurrency (H1), benchmarks section (B1).
 - The README benchmark tables were regenerated in the P3 PR, and the `bursts` table again in the P4 PR, so they include P1–P4.
+- The `concurrency` table was not regenerated for N3. In that session the bench containers' published ports took about twice as long per round trip as when the table was made, on `main` as on N3 (1 in flight: 24 → 11–12 operations per second), so a new table would have shown drops N3 didn't cause. Regenerate all tables in one session here.
 - Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4).
 - Keep the tracking table below up to date.
 
@@ -473,7 +489,8 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | P4 | O(1) command queue | [#156](https://github.com/jaredwray/memcache/pull/156) | Done |
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
-| N3–N6 | Next tier | | Not started |
+| N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
+| N4–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
