@@ -103,6 +103,83 @@ type BinaryQueueItem = {
 	reject: (reason?: any) => void;
 };
 
+const CR = 13;
+const LF = 10;
+
+/** Held once every byte received has been parsed. */
+const EMPTY_BUFFER = Buffer.alloc(0);
+
+/**
+ * The replies that are one fixed word, by length. A line that is one of
+ * them gets the constant string instead of being decoded into a new one.
+ */
+const FIXED_LINES: Array<Array<[Buffer, string]>> = [];
+for (const line of [
+	"OK",
+	"END",
+	"ERROR",
+	"EXISTS",
+	"STORED",
+	"DELETED",
+	"TOUCHED",
+	"NOT_FOUND",
+	"NOT_STORED",
+]) {
+	const sameLength = FIXED_LINES[line.length] ?? [];
+	sameLength.push([Buffer.from(line), line]);
+	FIXED_LINES[line.length] = sameLength;
+}
+
+/**
+ * Where the next line ends: the index of the CR of the first CRLF at or
+ * after `from`, or -1 if no whole line is buffered yet. A CR only ends a
+ * line when an LF follows it, so a CR that is the last byte buffered waits
+ * for the next chunk.
+ */
+function findLineEnd(buffer: Buffer, from: number): number {
+	let cr = buffer.indexOf(CR, from);
+	while (cr !== -1 && cr + 1 < buffer.length) {
+		if (buffer[cr + 1] === LF) {
+			return cr;
+		}
+
+		cr = buffer.indexOf(CR, cr + 1);
+	}
+
+	return -1;
+}
+
+/**
+ * The line from `start` to `end`, decoded, or the constant string when it
+ * is one of the fixed replies.
+ */
+function readLine(buffer: Buffer, start: number, end: number): string {
+	const fixed = FIXED_LINES[end - start];
+	if (fixed !== undefined) {
+		for (const [bytes, line] of fixed) {
+			if (hasBytesAt(buffer, start, bytes)) {
+				return line;
+			}
+		}
+	}
+
+	return buffer.toString("utf8", start, end);
+}
+
+/**
+ * Whether `buffer` holds `bytes` at `start`. For words this short, a loop
+ * is about 3x as fast as `Buffer.compare()` with offsets.
+ */
+function hasBytesAt(buffer: Buffer, start: number, bytes: Buffer): boolean {
+	for (let i = 0; i < bytes.length; i++) {
+		if (buffer[start + i] !== bytes[i]) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 /**
  * MemcacheNode represents a single memcache server connection.
  * It handles the socket connection, command queue, and protocol parsing for one node.
@@ -1053,29 +1130,48 @@ export class MemcacheNode extends Hookified {
 					: Buffer.concat([this._buffer, chunk]);
 		}
 
-		while (true) {
-			// If we're waiting for value data, try to read it first
-			if (this._pendingValueBytes > 0) {
-				if (this._buffer.length >= this._pendingValueBytes + 2) {
-					const value = this._buffer
-						.subarray(0, this._pendingValueBytes)
-						.toString("utf8");
-					this._buffer = this._buffer.subarray(this._pendingValueBytes + 2);
-					this._multilineData.push(value);
+		// Read from an offset into the buffer, and keep what is left once at
+		// the end, instead of slicing off every line and value
+		const buffer = this._buffer;
+		let offset = 0;
+		try {
+			while (true) {
+				// If we're waiting for value data, try to read it first
+				if (this._pendingValueBytes > 0) {
+					const valueEnd = offset + this._pendingValueBytes;
+					if (buffer.length < valueEnd + 2) {
+						// Not enough data yet, wait for more
+						break;
+					}
+
+					this._multilineData.push(buffer.toString("utf8", offset, valueEnd));
+					offset = valueEnd + 2;
 					this._pendingValueBytes = 0;
-				} else {
-					// Not enough data yet, wait for more
-					break;
+				}
+
+				const lineEnd = findLineEnd(buffer, offset);
+				if (lineEnd === -1) break;
+
+				const line = readLine(buffer, offset, lineEnd);
+				offset = lineEnd + 2;
+				this.processLine(line);
+
+				// A hit or miss listener closed the connection, which dropped
+				// everything buffered
+				if (this._buffer !== buffer) {
+					return;
 				}
 			}
-
-			const lineEnd = this._buffer.indexOf("\r\n");
-			if (lineEnd === -1) break;
-
-			const line = this._buffer.subarray(0, lineEnd).toString("utf8");
-			this._buffer = this._buffer.subarray(lineEnd + 2);
-
-			this.processLine(line);
+		} finally {
+			// Also when a hit or miss listener throws: the lines before it are
+			// done, and must not be read again with the next chunk
+			if (this._buffer === buffer) {
+				if (offset === buffer.length) {
+					this._buffer = EMPTY_BUFFER;
+				} else if (offset > 0) {
+					this._buffer = buffer.subarray(offset);
+				}
+			}
 		}
 	}
 
