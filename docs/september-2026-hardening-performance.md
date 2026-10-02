@@ -547,7 +547,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
 | N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
-| N5 | Binary packets in one allocation | | Done |
+| N5 | Binary packets in one allocation | [#161](https://github.com/jaredwray/memcache/pull/161) | Done |
 | N6 | Backpressure (optional) | | Not started |
 | R1 | Docs and release | | Not started |
 
