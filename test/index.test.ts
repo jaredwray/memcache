@@ -1212,6 +1212,133 @@ describe("Memcache", () => {
 		});
 	});
 
+	describe("Request path", () => {
+		it("should send each single-key command before the call returns when its node is connected", async () => {
+			await client.connect();
+			const command = vi.spyOn(client.nodes[0], "command");
+			const key = generateKey("sent-at-once");
+			const counter = generateKey("sent-at-once-counter");
+			const requests: Array<[string, () => Promise<unknown>, unknown]> = [
+				["set", () => client.set(key, "a"), true],
+				["add", () => client.add(counter, "1"), true],
+				["replace", () => client.replace(key, "b"), true],
+				["append", () => client.append(key, "c"), true],
+				["prepend", () => client.prepend(key, "d"), true],
+				["cas", () => client.cas(key, "e", "1"), false],
+				["get", () => client.get(key), "dbc"],
+				["incr", () => client.incr(counter, 2), 3],
+				["decr", () => client.decr(counter, 1), 2],
+				["touch", () => client.touch(key, 60), true],
+				["delete", () => client.delete(key), true],
+			];
+
+			for (const [name, request, expected] of requests) {
+				const sent = command.mock.calls.length;
+				const pending = request();
+				// No await came before the command
+				expect(command.mock.calls.length).toBe(sent + 1);
+				expect(command.mock.calls[sent][0].split(" ")[0]).toBe(name);
+				expect(await pending).toBe(expected);
+			}
+		});
+
+		it("should connect first when a single-key command finds its node not connected", async () => {
+			const key = generateKey("connects-first");
+			const counter = generateKey("connects-first-counter");
+			const requests: Array<[(lazy: Memcache) => Promise<unknown>, unknown]> = [
+				[(lazy) => lazy.set(key, "a"), true],
+				[(lazy) => lazy.add(counter, "5"), true],
+				[(lazy) => lazy.replace(key, "b"), true],
+				[(lazy) => lazy.append(key, "c"), true],
+				[(lazy) => lazy.prepend(key, "d"), true],
+				[(lazy) => lazy.cas(key, "e", "1"), false],
+				[(lazy) => lazy.get(key), "dbc"],
+				[(lazy) => lazy.incr(counter, 2), 7],
+				[(lazy) => lazy.decr(counter, 1), 6],
+				[(lazy) => lazy.touch(key, 60), true],
+				[(lazy) => lazy.delete(key), true],
+			];
+
+			for (const [request, expected] of requests) {
+				const lazy = new Memcache();
+				const connect = vi.spyOn(lazy.nodes[0], "connect");
+				expect(await request(lazy)).toBe(expected);
+				expect(connect).toHaveBeenCalledTimes(1);
+				await lazy.disconnect();
+			}
+		});
+
+		it("should connect only the nodes of a key that are not connected", async () => {
+			const replicated = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+			});
+			const [first, second] = replicated.nodes;
+			await first.connect();
+			vi.spyOn(replicated.hash, "getNodesByKey").mockReturnValue([
+				first,
+				second,
+			]);
+			const connectFirst = vi.spyOn(first, "connect");
+			const connectSecond = vi.spyOn(second, "connect");
+
+			expect(await replicated.set(generateKey("half-connected"), "a")).toBe(
+				true,
+			);
+			expect(connectFirst).not.toHaveBeenCalled();
+			expect(connectSecond).toHaveBeenCalledTimes(1);
+
+			await replicated.disconnect();
+		});
+
+		it("should resolve without a result, not reject, when a command fails and retries are off", async () => {
+			await client.connect();
+			const key = generateKey("failing");
+			vi.spyOn(client.nodes[0], "command").mockRejectedValue(
+				new Error("Connection closed"),
+			);
+
+			expect(await client.set(key, "value")).toBe(false);
+			expect(await client.add(key, "value")).toBe(false);
+			expect(await client.get(key)).toBeUndefined();
+			expect(await client.incr(key)).toBeUndefined();
+			expect(await client.touch(key, 60)).toBe(false);
+			expect(await client.delete(key)).toBe(false);
+			expect(await client.execute(`get ${key}`, client.nodes)).toEqual([
+				undefined,
+			]);
+		});
+
+		it("should give no result for a replica whose command fails", async () => {
+			const replicated = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+			});
+			await replicated.connect();
+			const [first, second] = replicated.nodes;
+			vi.spyOn(second, "command").mockRejectedValue(
+				new Error("Connection closed"),
+			);
+			vi.spyOn(replicated.hash, "getNodesByKey").mockReturnValue([
+				first,
+				second,
+			]);
+			const key = generateKey("replica-failing");
+
+			expect(
+				await replicated.execute(`set ${key} 0 0 1\r\na`, [first, second]),
+			).toEqual(["STORED", undefined]);
+			expect(await replicated.set(key, "b")).toBe(false);
+
+			await replicated.disconnect();
+		});
+
+		it("should reject when no node is available for the key", async () => {
+			vi.spyOn(client.hash, "getNodesByKey").mockReturnValue([]);
+			await expect(client.set("orphan", "value")).rejects.toThrow(
+				"No node available for key: orphan",
+			);
+		});
+	});
+
 	describe("Expiration Validation", () => {
 		it("should default maxExpiration to 2592000", () => {
 			expect(client.maxExpiration).toBe(2592000);

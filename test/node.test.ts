@@ -941,6 +941,17 @@ describe("MemcacheNode", () => {
 			);
 		});
 
+		it("should reject, not throw, when a command is sent while not connected", async () => {
+			const disconnectedNode = new MemcacheNode("localhost", 11211);
+			let pending: Promise<unknown> | undefined;
+			expect(() => {
+				pending = disconnectedNode.command("version");
+			}).not.toThrow();
+			await expect(pending).rejects.toThrow(
+				"Not connected to memcache server localhost:11211",
+			);
+		});
+
 		it("should handle protocol errors", async () => {
 			await node.connect();
 

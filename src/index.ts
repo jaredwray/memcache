@@ -82,6 +82,14 @@ function allResultsEqual(results: unknown[], expected: string): boolean {
 	return results.every((r) => r === expected);
 }
 
+/**
+ * A command that fails has no result (undefined), so the caller reports a
+ * failure, e.g. set() resolves false, instead of rejecting.
+ */
+const noResult = (): undefined => undefined;
+const noResults = (): unknown[] => [undefined];
+const toResults = (result: unknown): unknown[] => [result];
+
 export class Memcache extends Hookified {
 	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
@@ -722,7 +730,9 @@ export class Memcache extends Hookified {
 		const resolvedKey = this.resolveKey(key);
 		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const commandOptions = {
 			isMultiline: true,
 			requestedKeys: [resolvedKey],
@@ -920,7 +930,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(valueStr);
 		const line = `cas ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes} ${casToken}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -965,7 +977,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(value);
 		const line = `set ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, value, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -1003,7 +1017,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(valueStr);
 		const line = `add ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -1041,7 +1057,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(valueStr);
 		const line = `replace ${resolvedKey} ${flags} ${sanitizedExptime} ${bytes}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -1071,7 +1089,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(valueStr);
 		const line = `append ${resolvedKey} 0 0 ${bytes}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -1101,7 +1121,9 @@ export class Memcache extends Hookified {
 		const bytes = this.validateValue(valueStr);
 		const line = `prepend ${resolvedKey} 0 0 ${bytes}`;
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.store(line, valueStr, bytes, nodes);
 		const success = allResultsEqual(results, "STORED");
 
@@ -1127,7 +1149,9 @@ export class Memcache extends Hookified {
 		const resolvedKey = this.resolveKey(key);
 		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.execute(`delete ${resolvedKey}`, nodes);
 		const success = allResultsEqual(results, "DELETED");
 
@@ -1157,7 +1181,9 @@ export class Memcache extends Hookified {
 		const resolvedKey = this.resolveKey(key);
 		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.execute(`incr ${resolvedKey} ${value}`, nodes);
 		const newValue = results.find((v) => typeof v === "number") as
 			| number
@@ -1189,7 +1215,9 @@ export class Memcache extends Hookified {
 		const resolvedKey = this.resolveKey(key);
 		this.validateKey(resolvedKey);
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.execute(`decr ${resolvedKey} ${value}`, nodes);
 		const newValue = results.find((v) => typeof v === "number") as
 			| number
@@ -1219,7 +1247,9 @@ export class Memcache extends Hookified {
 		this.validateKey(resolvedKey);
 		const sanitizedExptime = this.validateExpiration(exptime);
 
-		const nodes = await this.getNodesByKey(resolvedKey);
+		const nodes =
+			this.connectedNodesByKey(resolvedKey) ??
+			(await this.getNodesByKey(resolvedKey));
 		const results = await this.execute(
 			`touch ${resolvedKey} ${sanitizedExptime}`,
 			nodes,
@@ -1368,17 +1398,12 @@ export class Memcache extends Hookified {
 	 */
 	public async getNodesByKey(key: string): Promise<Array<MemcacheNode>> {
 		const nodes = this._hash.getNodesByKey(key);
-		/* v8 ignore next -- @preserve */
 		if (nodes.length === 0) {
 			throw new Error(`No node available for key: ${key}`);
 		}
 
-		// Fast path: skip loop when single node is already connected (common case)
-		if (nodes.length === 1 && nodes[0].isConnected()) {
-			return nodes;
-		}
-
-		// Lazy connect if not connected
+		// Lazy connect if not connected. The commands only come here when a
+		// node isn't connected: connectedNodesByKey() covers the rest
 		for (const node of nodes) {
 			if (!node.isConnected()) {
 				await node.connect();
@@ -1395,14 +1420,13 @@ export class Memcache extends Hookified {
 	 * @param {ExecuteOptions} options - Optional execution options including retry overrides
 	 * @returns {Promise<unknown[]>} Promise resolving to array of results from each node
 	 */
-	public async execute(
+	public execute(
 		command: string,
 		nodes: MemcacheNode[],
 		options?: ExecuteOptions,
 	): Promise<unknown[]> {
 		const configuredRetries = options?.retries ?? this._retries;
-		const retryDelay = options?.retryDelay ?? this._retryDelay;
-		const retryBackoff = options?.retryBackoff ?? this._retryBackoff;
+		const commandOptions = options?.commandOptions;
 
 		// Determine effective max retries based on idempotent flag
 		// If retryOnlyIdempotent is true (default), only retry if idempotent is explicitly true
@@ -1411,31 +1435,37 @@ export class Memcache extends Hookified {
 		const maxRetries =
 			this._retryOnlyIdempotent && !isIdempotent ? 0 : configuredRetries;
 
-		// Fast path: single node (common case) — avoid map + Promise.all overhead
-		if (nodes.length === 1) {
-			const result = await this.executeWithRetry(
-				nodes[0],
-				command,
-				options?.commandOptions,
-				maxRetries,
-				retryDelay,
-				retryBackoff,
+		// Fast path: no retries (the default). Each command's promise gets one
+		// handler, with no async function around it; a failure gives undefined
+		if (maxRetries === 0) {
+			// Single node (common case): no map or Promise.all
+			if (nodes.length === 1) {
+				return nodes[0]
+					.command(command, commandOptions)
+					.then(toResults, noResults);
+			}
+
+			return Promise.all(
+				nodes.map((node) =>
+					node.command(command, commandOptions).catch(noResult),
+				),
 			);
-			return [result];
 		}
 
-		const promises = nodes.map(async (node) => {
-			return this.executeWithRetry(
-				node,
-				command,
-				options?.commandOptions,
-				maxRetries,
-				retryDelay,
-				retryBackoff,
-			);
-		});
-
-		return Promise.all(promises);
+		const retryDelay = options?.retryDelay ?? this._retryDelay;
+		const retryBackoff = options?.retryBackoff ?? this._retryBackoff;
+		return Promise.all(
+			nodes.map((node) =>
+				this.executeWithRetry(
+					node,
+					command,
+					commandOptions,
+					maxRetries,
+					retryDelay,
+					retryBackoff,
+				),
+			),
+		);
 	}
 
 	/**
@@ -1565,6 +1595,22 @@ export class Memcache extends Hookified {
 	}
 
 	/**
+	 * The nodes for a key when all of them are connected (the common case),
+	 * so a command goes out without an await first. Otherwise undefined: the
+	 * caller then awaits getNodesByKey(), which connects them.
+	 */
+	private connectedNodesByKey(key: string): MemcacheNode[] | undefined {
+		const nodes = this._hash.getNodesByKey(key);
+		for (const node of nodes) {
+			if (!node.isConnected()) {
+				return undefined;
+			}
+		}
+
+		return nodes.length > 0 ? nodes : undefined;
+	}
+
+	/**
 	 * Run a storage command on the nodes. A large value is written after the
 	 * command line as its own part: joined to the command string, it was
 	 * copied once more before being encoded.
@@ -1583,7 +1629,8 @@ export class Memcache extends Hookified {
 	}
 
 	/**
-	 * Execute a command on a single node with retry logic.
+	 * Execute a command on a single node with retry logic. Commands without
+	 * retries don't come here: execute() sends them directly.
 	 * @param {MemcacheNode} node - The node to execute on
 	 * @param {string} command - The command string
 	 * @param {CommandOptions} commandOptions - Optional command options
@@ -1600,15 +1647,6 @@ export class Memcache extends Hookified {
 		retryDelay: number,
 		retryBackoff: RetryBackoffFunction,
 	): Promise<unknown> {
-		// Fast path: no retries configured (default)
-		if (maxRetries === 0) {
-			try {
-				return await node.command(command, commandOptions);
-			} catch {
-				return undefined;
-			}
-		}
-
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
 				return await node.command(command, commandOptions);
