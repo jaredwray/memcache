@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HashRing, KetamaHash } from "../src/ketama.js";
 import { MemcacheNode } from "../src/node.js";
 import { generateKey } from "./test-utils.js";
@@ -489,7 +489,9 @@ describe("KetamaHash", () => {
 
 		it("should evict cache once it exceeds the bounded size", () => {
 			const distribution = new KetamaHash();
+			// With one node, keys aren't hashed or remembered at all
 			distribution.addNode(new MemcacheNode("localhost", 11211));
+			distribution.addNode(new MemcacheNode("localhost", 11212));
 
 			// CACHE_MAX in ketama.ts is 5000 — fill it past the threshold.
 			// On the entry that crosses CACHE_MAX, the cache is cleared before
@@ -503,6 +505,97 @@ describe("KetamaHash", () => {
 				distribution as unknown as { _cache: Map<string, unknown> }
 			)._cache;
 			expect(cache.size).toBe(1);
+		});
+
+		it("should return one frozen array per node, shared by its keys", () => {
+			const distribution = new KetamaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			const node2 = new MemcacheNode("server2", 11211);
+			distribution.addNode(node1);
+			distribution.addNode(node2);
+
+			const results = new Map<MemcacheNode, MemcacheNode[]>();
+			for (let i = 0; i < 100; i++) {
+				const nodes = distribution.getNodesByKey(`shared-${i}`);
+				expect(Object.isFrozen(nodes)).toBe(true);
+				const earlier = results.get(nodes[0]);
+				if (earlier) {
+					expect(nodes).toBe(earlier);
+				} else {
+					results.set(nodes[0], nodes);
+				}
+			}
+			expect([...results.keys()]).toEqual(
+				expect.arrayContaining([node1, node2]),
+			);
+		});
+
+		it("should not hash keys while the ring has one node", () => {
+			const distribution = new KetamaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			const node2 = new MemcacheNode("server2", 11211);
+			const ring = (distribution as unknown as { hashRing: HashRing }).hashRing;
+			const getNode = vi.spyOn(ring, "getNode");
+
+			distribution.addNode(node1);
+			expect(distribution.getNodesByKey("a")).toEqual([node1]);
+			expect(getNode).not.toHaveBeenCalled();
+
+			distribution.addNode(node2);
+			distribution.getNodesByKey("a");
+			expect(getNode).toHaveBeenCalledTimes(1);
+
+			distribution.removeNode(node2.id);
+			getNode.mockClear();
+			expect(distribution.getNodesByKey("b")).toEqual([node1]);
+			expect(getNode).not.toHaveBeenCalled();
+		});
+
+		it("should not treat a node with no points on the ring as the only node", () => {
+			// Weight 0 leaves a node off the ring, and a tiny weight rounds to no points
+			for (const weight of [0, 0.001]) {
+				const distribution = new KetamaHash();
+				const node = new MemcacheNode("server1", 11211);
+				node.weight = weight;
+				distribution.addNode(node);
+				expect(distribution.getNodesByKey("a")).toEqual([]);
+			}
+		});
+
+		it("should not hash keys when the other nodes have no points on the ring", () => {
+			const distribution = new KetamaHash();
+			const node1 = new MemcacheNode("server1", 11211);
+			// Too light to get a point on the ring, so it gets no keys
+			const light = new MemcacheNode("server2", 11211);
+			light.weight = 0.001;
+			const ring = (distribution as unknown as { hashRing: HashRing }).hashRing;
+			const getNode = vi.spyOn(ring, "getNode");
+
+			distribution.addNode(node1);
+			distribution.addNode(light);
+			expect(distribution.getNodesByKey("a")).toEqual([node1]);
+			expect(getNode).not.toHaveBeenCalled();
+		});
+
+		it("should forget remembered keys when a node is removed", () => {
+			const distribution = new KetamaHash();
+			const nodes = ["server1", "server2", "server3"].map(
+				(host) => new MemcacheNode(host, 11211),
+			);
+			for (const node of nodes) {
+				distribution.addNode(node);
+			}
+
+			const keys = Array.from({ length: 60 }, (_, i) => `moved-${i}`);
+			const onThird = keys.filter(
+				(key) => distribution.getNodesByKey(key)[0] === nodes[2],
+			);
+			expect(onThird.length).toBeGreaterThan(0);
+
+			distribution.removeNode(nodes[2].id);
+			for (const key of onThird) {
+				expect(distribution.getNodesByKey(key)[0]).not.toBe(nodes[2]);
+			}
 		});
 	});
 
