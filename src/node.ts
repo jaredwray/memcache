@@ -5,7 +5,6 @@ import {
 } from "node:tls";
 import { Hookified } from "hookified";
 import {
-	type BinaryHeader,
 	buildAddRequest,
 	buildAppendRequest,
 	buildDecrementRequest,
@@ -27,6 +26,7 @@ import {
 	parseGetResponse,
 	parseIncrDecrResponse,
 	RESPONSE_MAGIC,
+	readStatus,
 	STATUS_AUTH_ERROR,
 	STATUS_KEY_NOT_FOUND,
 	STATUS_SUCCESS,
@@ -98,7 +98,7 @@ export type CommandQueueItem = {
 type BinaryQueueItem = {
 	opaque: number;
 	/** Handles one response packet and returns `true` once the request is complete. */
-	onPacket: (packet: Buffer, header: BinaryHeader) => boolean;
+	onPacket: (packet: Buffer) => boolean;
 	// biome-ignore lint/suspicious/noExplicitAny: expected
 	reject: (reason?: any) => void;
 };
@@ -627,15 +627,15 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildSaslPlainRequest(this._sasl.username, this._sasl.password),
 		);
-		const header = deserializeHeader(response);
+		const status = readStatus(response);
 
-		if (header.status === STATUS_SUCCESS) {
+		if (status === STATUS_SUCCESS) {
 			this._authenticated = true;
 			this.emit("authenticated");
 			return;
 		}
 
-		if (header.status === STATUS_AUTH_ERROR) {
+		if (status === STATUS_AUTH_ERROR) {
 			const body = response.subarray(HEADER_SIZE);
 			throw new Error(
 				`SASL authentication failed: ${body.toString() || "Invalid credentials"}`,
@@ -643,7 +643,7 @@ export class MemcacheNode extends Hookified {
 		}
 
 		throw new Error(
-			`SASL authentication failed with status: 0x${header.status.toString(16)}`,
+			`SASL authentication failed with status: 0x${status.toString(16)}`,
 		);
 	}
 
@@ -781,17 +781,17 @@ export class MemcacheNode extends Hookified {
 			return;
 		}
 
-		const header = deserializeHeader(packet);
-		if (header.opaque !== request.opaque) {
+		const opaque = packet.readUInt32BE(12);
+		if (opaque !== request.opaque) {
 			this.failBinaryRequests(
 				new Error(
-					`Binary response out of order from ${this.id}: expected opaque ${request.opaque}, received ${header.opaque}`,
+					`Binary response out of order from ${this.id}: expected opaque ${request.opaque}, received ${opaque}`,
 				),
 			);
 			return;
 		}
 
-		if (request.onPacket(packet, header)) {
+		if (request.onPacket(packet)) {
 			this._binaryQueue.shift();
 		}
 	}
@@ -820,21 +820,20 @@ export class MemcacheNode extends Hookified {
 	 */
 	public async binaryGet(key: string): Promise<string | undefined> {
 		const response = await this.binaryRequest(buildGetRequest(key));
-		const { header, value } = parseGetResponse(response);
+		const { status, value } = parseGetResponse(response);
 
-		if (header.status === STATUS_KEY_NOT_FOUND) {
+		if (status === STATUS_KEY_NOT_FOUND) {
 			this.emit("miss", key);
 			return undefined;
 		}
 
 		/* v8 ignore next 3 -- @preserve */
-		if (header.status !== STATUS_SUCCESS || !value) {
+		if (status !== STATUS_SUCCESS || value === undefined) {
 			return undefined;
 		}
 
-		const result = value.toString("utf8");
-		this.emit("hit", key, result);
-		return result;
+		this.emit("hit", key, value);
+		return value;
 	}
 
 	/**
@@ -849,8 +848,7 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildSetRequest(key, value, flags, exptime),
 		);
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -865,8 +863,7 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildAddRequest(key, value, flags, exptime),
 		);
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -881,8 +878,7 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildReplaceRequest(key, value, flags, exptime),
 		);
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -890,10 +886,8 @@ export class MemcacheNode extends Hookified {
 	 */
 	public async binaryDelete(key: string): Promise<boolean> {
 		const response = await this.binaryRequest(buildDeleteRequest(key));
-		const header = deserializeHeader(response);
-		return (
-			header.status === STATUS_SUCCESS || header.status === STATUS_KEY_NOT_FOUND
-		);
+		const status = readStatus(response);
+		return status === STATUS_SUCCESS || status === STATUS_KEY_NOT_FOUND;
 	}
 
 	/**
@@ -908,10 +902,10 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildIncrementRequest(key, delta, initial, exptime),
 		);
-		const { header, value } = parseIncrDecrResponse(response);
+		const { status, value } = parseIncrDecrResponse(response);
 
 		/* v8 ignore next 3 -- @preserve */
-		if (header.status !== STATUS_SUCCESS) {
+		if (status !== STATUS_SUCCESS) {
 			return undefined;
 		}
 
@@ -930,10 +924,10 @@ export class MemcacheNode extends Hookified {
 		const response = await this.binaryRequest(
 			buildDecrementRequest(key, delta, initial, exptime),
 		);
-		const { header, value } = parseIncrDecrResponse(response);
+		const { status, value } = parseIncrDecrResponse(response);
 
 		/* v8 ignore next 3 -- @preserve */
-		if (header.status !== STATUS_SUCCESS) {
+		if (status !== STATUS_SUCCESS) {
 			return undefined;
 		}
 
@@ -945,8 +939,7 @@ export class MemcacheNode extends Hookified {
 	 */
 	public async binaryAppend(key: string, value: string): Promise<boolean> {
 		const response = await this.binaryRequest(buildAppendRequest(key, value));
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -954,8 +947,7 @@ export class MemcacheNode extends Hookified {
 	 */
 	public async binaryPrepend(key: string, value: string): Promise<boolean> {
 		const response = await this.binaryRequest(buildPrependRequest(key, value));
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -963,8 +955,7 @@ export class MemcacheNode extends Hookified {
 	 */
 	public async binaryTouch(key: string, exptime: number): Promise<boolean> {
 		const response = await this.binaryRequest(buildTouchRequest(key, exptime));
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -973,8 +964,7 @@ export class MemcacheNode extends Hookified {
 	/* v8 ignore next -- @preserve */
 	public async binaryFlush(exptime = 0): Promise<boolean> {
 		const response = await this.binaryRequest(buildFlushRequest(exptime));
-		const header = deserializeHeader(response);
-		return header.status === STATUS_SUCCESS;
+		return readStatus(response) === STATUS_SUCCESS;
 	}
 
 	/**
@@ -1003,7 +993,8 @@ export class MemcacheNode extends Hookified {
 		return new Promise((resolve, reject) => {
 			this.queueBinaryRequest(
 				buildStatRequest(),
-				(packet, header) => {
+				(packet) => {
+					const header = deserializeHeader(packet);
 					// An empty packet ends the list. An error is a single packet,
 					// so it ends the request too.
 					if (
