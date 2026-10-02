@@ -518,7 +518,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N1 | Encode large values once | [#157](https://github.com/jaredwray/memcache/pull/157) | Done |
 | N2 | Cheaper key lookups (Ketama memo kept) | [#158](https://github.com/jaredwray/memcache/pull/158) | Done |
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
-| N4 | Cheaper line parsing, and a listener crash fix | | Done |
+| N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
 | N5–N6 | Next tier | | Not started |
 | R1 | Docs and release | | Not started |
 
