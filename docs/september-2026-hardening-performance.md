@@ -566,7 +566,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N3 | Fewer async layers per request | [#159](https://github.com/jaredwray/memcache/pull/159) | Done |
 | N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
 | N5 | Binary packets in one allocation | [#161](https://github.com/jaredwray/memcache/pull/161) | Done |
-| N6 | Optional pending request limit (`maxPendingCommands`) | | Done |
+| N6 | Optional pending request limit (`maxPendingCommands`) | [#162](https://github.com/jaredwray/memcache/pull/162) | Done |
 | R1 | Docs and release | | Not started |
 
 ## Appendix — How the numbers were measured
