@@ -1307,6 +1307,8 @@ For more details, see the [memcached TLS documentation](https://github.com/memca
 
 Set, Get and Delete compares this client with other Node.js memcached clients on single-key and multi-key tasks run one at a time in random order, and the next section compares them under load and on multi-gets. The other tables show how this client behaves under load; in each one, every row does the same total work in a different shape.
 
+All the tables come from one run of `pnpm benchmark:readme`, with Node.js 22 on Linux, against the benchmark containers' IPs (see [Running the benchmarks](#running-the-benchmarks)). The absolute numbers depend on the machine; the comparisons within each table are what carry over.
+
 <!-- BENCHMARK:set-get:START -->
 ## Set, Get and Delete (one task at a time, in random order)
 
@@ -1316,9 +1318,9 @@ Total time per library, the median of the 5 runs (lower is better). 🥇 marks t
 
 | Tasks | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| 1,000 × set, get, delete 1 key | 🥇 **328 ms** | 336 ms (+2.3%) | 358 ms (+8.9%) |
-| 1,000 × set, get, delete 10 keys | 🥇 **508 ms** | 578 ms (+14%) | 771 ms (+52%) |
-| All 2,000 tasks | 🥇 **832 ms** | 916 ms (+10%) | 1.12 s (+35%) |
+| 1,000 × set, get, delete 1 key | 🥇 **290 ms** | 322 ms (+11%) | 333 ms (+15%) |
+| 1,000 × set, get, delete 10 keys | 🥇 **424 ms** | 566 ms (+33%) | 789 ms (+86%) |
+| All 2,000 tasks | 🥇 **713 ms** | 893 ms (+25%) | 1.12 s (+57%) |
 <!-- BENCHMARK:set-get:END -->
 
 <!-- BENCHMARK:compare:START -->
@@ -1330,72 +1332,72 @@ Requests per second, 500 requests per run (higher is better). memcached pools up
 
 | Workload | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| gets, 1 in flight | 11.6K (-1.1%) | 🥇 **11.8K** | 11.0K (-6.8%) |
-| gets, 10 in flight | 🥇 **81.1K** | 64.6K (-20%) | 46.4K (-43%) |
-| gets, 100 in flight | 🥇 **186.4K** | 104.0K (-44%) | 50.3K (-73%) |
-| gets, 500 in flight | 🥇 **217.0K** | 105.4K (-51%) | 60.7K (-72%) |
-| sets, 1 in flight | 🥇 **11.7K** | 11.5K (-2.3%) | 10.8K (-8.0%) |
-| sets, 10 in flight | 🥇 **83.9K** | 65.4K (-22%) | 36.0K (-57%) |
-| sets, 100 in flight | 🥇 **233.0K** | 79.6K (-66%) | 42.5K (-82%) |
-| sets, 500 in flight | 🥇 **255.6K** | 98.2K (-62%) | 41.9K (-84%) |
+| gets, 1 in flight | 🥇 **12.3K** | 11.8K (-3.5%) | 10.5K (-14%) |
+| gets, 10 in flight | 🥇 **86.8K** | 65.0K (-25%) | 44.6K (-49%) |
+| gets, 100 in flight | 🥇 **285.6K** | 104.0K (-64%) | 59.7K (-79%) |
+| gets, 500 in flight | 🥇 **298.1K** | 109.9K (-63%) | 60.0K (-80%) |
+| sets, 1 in flight | 🥇 **13.2K** | 11.8K (-11%) | 10.7K (-19%) |
+| sets, 10 in flight | 🥇 **106.8K** | 64.9K (-39%) | 35.6K (-67%) |
+| sets, 100 in flight | 🥇 **328.9K** | 92.1K (-72%) | 42.9K (-87%) |
+| sets, 500 in flight | 🥇 **272.1K** | 93.7K (-66%) | 46.3K (-83%) |
 
 Time to fetch 10,000 keys in batches (lower is better). memjs has no multi-get, so it sends one get per key, all at once.
 
 | Batches | memcache (v1.11.0) | memjs (v1.3.2) | memcached (v2.2.2) |
 |---|--:|--:|--:|
-| 100 × 100 keys | 🥇 **47 ms** | 92 ms (+97%) | 75 ms (+60%) |
-| 10 × 1,000 keys | 🥇 **34 ms** | 94 ms (+173%) | 139 ms (+303%) |
-| 1 × 10,000 keys | 🥇 **33 ms** | 146 ms (+343%) | 2.69 s (+8058%) |
+| 100 × 100 keys | 🥇 **28 ms** | 93 ms (+230%) | 68 ms (+141%) |
+| 10 × 1,000 keys | 🥇 **18 ms** | 97 ms (+443%) | 132 ms (+642%) |
+| 1 × 10,000 keys | 🥇 **21 ms** | 146 ms (+606%) | 2.63 s (+12649%) |
 <!-- BENCHMARK:compare:END -->
 
 <!-- BENCHMARK:concurrency:START -->
 ## Concurrent Requests (500 per operation)
 |           name            |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |---------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  500 sets, 500 in flight  |    🥇     |     505   |      2ms  |  ±1.83%  |     477   |
-|  500 sets, 100 in flight  |   -9.5%   |     457   |      2ms  |  ±1.87%  |     434   |
-|  500 gets, 500 in flight  |   -25%    |     381   |      3ms  |  ±2.12%  |     361   |
-|  500 gets, 100 in flight  |   -29%    |     360   |      3ms  |  ±1.86%  |     347   |
-|  500 sets, 10 in flight   |   -63%    |     187   |      5ms  |  ±1.91%  |     184   |
-|  500 gets, 10 in flight   |   -70%    |     150   |      7ms  |  ±3.33%  |     143   |
-|  500 sets, 1 in flight    |   -95%    |      24   |     43ms  |  ±2.80%  |      64   |
-|  500 gets, 1 in flight    |   -95%    |      24   |     43ms  |  ±2.61%  |      64   |
+|  500 sets, 100 in flight  |    🥇     |     725   |      1ms  |  ±1.27%  |     697   |
+|  500 gets, 500 in flight  |   -16%    |     606   |      2ms  |  ±1.71%  |     571   |
+|  500 sets, 500 in flight  |   -19%    |     588   |      2ms  |  ±1.74%  |     558   |
+|  500 gets, 100 in flight  |   -24%    |     549   |      2ms  |  ±1.50%  |     526   |
+|  500 sets, 10 in flight   |   -70%    |     216   |      5ms  |  ±2.38%  |     209   |
+|  500 gets, 10 in flight   |   -75%    |     182   |      6ms  |  ±1.97%  |     179   |
+|  500 sets, 1 in flight    |   -96%    |      27   |     37ms  |  ±1.68%  |      64   |
+|  500 gets, 1 in flight    |   -96%    |      26   |     39ms  |  ±1.91%  |      64   |
 <!-- BENCHMARK:concurrency:END -->
 
 <!-- BENCHMARK:multi-get:START -->
 ## Multi-Get (10,000 keys per operation)
 |            name             |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |-----------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  10 × gets() of 1,000 keys  |    🥇     |      47   |     21ms  |  ±1.76%  |     140   |
-|  1 × gets() of 10,000 keys  |   -19%    |      38   |     27ms  |  ±2.65%  |     113   |
-|  100 × gets() of 100 keys   |   -22%    |      37   |     28ms  |  ±2.83%  |     108   |
+|  10 × gets() of 1,000 keys  |    🥇     |      56   |     18ms  |  ±1.77%  |     166   |
+|  1 × gets() of 10,000 keys  |   -14%    |      48   |     21ms  |  ±2.02%  |     143   |
+|  100 × gets() of 100 keys   |   -30%    |      39   |     26ms  |  ±2.39%  |     116   |
 <!-- BENCHMARK:multi-get:END -->
 
 <!-- BENCHMARK:large-values:START -->
 ## Large Values (4 MB per operation)
 |          name           |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |-------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  TCP: 4 × 1 MB sets     |    🥇     |     193   |      5ms  |  ±2.68%  |     186   |
-|  TCP: 1 × 4 MB sets     |  -0.57%   |     192   |      5ms  |  ±1.66%  |     190   |
-|  TCP: 16 × 256 KB sets  |    -6%    |     181   |      6ms  |  ±2.33%  |     177   |
-|  TLS: 1 × 4 MB sets     |   -33%    |     129   |      8ms  |  ±3.37%  |     122   |
-|  TCP: 1 × 4 MB gets     |   -35%    |     126   |      8ms  |  ±3.52%  |     118   |
-|  TCP: 4 × 1 MB gets     |   -39%    |     118   |      9ms  |  ±3.38%  |     113   |
-|  TLS: 4 × 1 MB sets     |   -41%    |     114   |     10ms  |  ±4.23%  |     105   |
-|  TLS: 1 × 4 MB gets     |   -45%    |     106   |     10ms  |  ±5.30%  |      99   |
-|  TLS: 4 × 1 MB gets     |   -45%    |     106   |     10ms  |  ±3.23%  |     104   |
-|  TCP: 16 × 256 KB gets  |   -48%    |     101   |     10ms  |  ±2.46%  |     100   |
-|  TLS: 16 × 256 KB sets  |   -50%    |      97   |     11ms  |  ±3.81%  |      94   |
-|  TLS: 16 × 256 KB gets  |   -64%    |      70   |     15ms  |  ±4.52%  |      67   |
+|  TCP: 4 × 1 MB sets     |    🥇     |     157   |      7ms  |  ±2.15%  |     154   |
+|  TCP: 1 × 4 MB sets     |   -1.6%   |     155   |      7ms  |  ±1.68%  |     153   |
+|  TCP: 16 × 256 KB sets  |   -4.2%   |     151   |      7ms  |  ±1.84%  |     149   |
+|  TLS: 4 × 1 MB sets     |   -23%    |     121   |      8ms  |  ±2.74%  |     118   |
+|  TLS: 1 × 4 MB sets     |   -24%    |     120   |      8ms  |  ±1.50%  |     120   |
+|  TCP: 1 × 4 MB gets     |   -29%    |     112   |      9ms  |  ±2.23%  |     110   |
+|  TCP: 16 × 256 KB gets  |   -30%    |     110   |     10ms  |  ±4.03%  |     104   |
+|  TLS: 16 × 256 KB sets  |   -34%    |     104   |     10ms  |  ±3.18%  |     102   |
+|  TCP: 4 × 1 MB gets     |   -35%    |     102   |     10ms  |  ±2.67%  |     100   |
+|  TLS: 4 × 1 MB gets     |   -40%    |      94   |     11ms  |  ±4.72%  |      90   |
+|  TLS: 1 × 4 MB gets     |   -40%    |      94   |     11ms  |  ±5.67%  |      87   |
+|  TLS: 16 × 256 KB gets  |   -54%    |      73   |     14ms  |  ±3.92%  |      72   |
 <!-- BENCHMARK:large-values:END -->
 
 <!-- BENCHMARK:bursts:START -->
 ## Bursts (60,000 gets per operation)
 |             name             |  summary  |  ops/sec  |  time/op  |  margin  |  samples  |
 |------------------------------|:---------:|----------:|----------:|:--------:|----------:|
-|  6 × 10,000 concurrent gets  |    🥇     |       3   |    364ms  |  ±3.11%  |      14   |
-|  1 × 60,000 concurrent gets  |   -6.7%   |       3   |    393ms  |  ±5.84%  |      13   |
-|  2 × 30,000 concurrent gets  |   -12%    |       2   |    418ms  |  ±6.31%  |      13   |
+|  6 × 10,000 concurrent gets  |    🥇     |       4   |    268ms  |  ±6.48%  |      19   |
+|  2 × 30,000 concurrent gets  |   -8.3%   |       4   |    292ms  |  ±7.15%  |      18   |
+|  1 × 60,000 concurrent gets  |   -8.4%   |       4   |    293ms  |  ±7.67%  |      18   |
 <!-- BENCHMARK:bursts:END -->
 
 <!-- BENCHMARK:cold-start:START -->
