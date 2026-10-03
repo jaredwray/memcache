@@ -559,6 +559,27 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 - The `concurrency` table was not regenerated for N3. In that session the bench containers' published ports took about twice as long per round trip as when the table was made, on `main` as on N3 (1 in flight: 24 → 11–12 operations per second), so a new table would have shown drops N3 didn't cause. Regenerate all tables in one session here.
 - Release notes for each PR. H1, H2 and P1–P4 are fixes. H3 changes observable behavior, so ship it in a minor release. Mention the `commandQueue` snapshot change (P4), that N4 fixes a crash when a hit or miss listener closes the connection, and the new `maxPendingCommands` option (N6).
 - Keep the tracking table below up to date.
+- **Done.** The README already covered H3's `timeout` option and event, concurrent `binary*` requests (H1) and the benchmark section (B1).
+  - All the README benchmark tables were regenerated in one session, against the bench containers' IPs; a line above them says how they were made.
+  - The version stays at 1.11.0 until the release. The bump to 1.12.0, a minor release for H3's behavior change and N6's new option, comes with it. Two tables label memcache with the version in `package.json`, so they read v1.11.0 until then; `pnpm benchmark:readme set-get compare` updates them after the bump.
+  - Large-value sets came out lower than in N1's PR: 157 against 200–222 operations per second for 4 × 1 MB over TCP. N1's own code measured the same as `main` in this session (156–170), so the difference is the machine, not a regression.
+  - Release notes for 1.12.0 are drafted in the R1 PR, for the release: the version bump, then the GitHub release, which publishes to npm. They include this comparison of 1.11.0 and `main`: today's benchmark files against both in one session, taking turns, 2–4 runs each (time per operation, so lower is better).
+
+    | Benchmark | 1.11.0 | `main` | Speedup |
+    |---|--:|--:|--:|
+    | 500 gets, 100 in flight | 5.8 ms | 1.9 ms | 3.1× |
+    | 500 sets, 100 in flight | 5.0 ms | 1.6 ms | 3.2× |
+    | 500 gets, 10 in flight | 7.6 ms | 5.4 ms | 1.4× |
+    | 500 gets, 1 in flight | 41 ms | 40 ms | unchanged |
+    | `gets()` of 10,000 keys, one batch | 1.69 s | 22 ms | 77× |
+    | `gets()` of 10,000 keys, 10 batches | 228 ms | 19 ms | 12× |
+    | 60,000 gets in one burst | 6.7 s | 296 ms | 23× |
+    | get of a 4 MB value, TLS | 105 ms | 10 ms | 10.6× |
+    | get of a 4 MB value, TCP | 31 ms | 8.5 ms | 3.6× |
+    | 4 sets of 1 MB values, TCP | 8.5 ms | 6.2 ms | 1.4× |
+    | 1,000 tasks setting, getting and deleting 10 keys, one at a time | 519 ms | 412 ms | 1.26× |
+
+    50 concurrent first requests opened 50 sockets on 1.11.0 and 1 on `main`. Against memjs and memcached, `main` is the fastest client in every row; 1.11.0 trailed memjs on gets with 100 or more in flight, on sets with 500, and on multi-gets of 1,000 or more keys per batch.
 
 ## Tracking
 
@@ -579,7 +600,7 @@ Smaller wins; each needs B1 before/after numbers in its PR. The numbers here com
 | N4 | Cheaper line parsing, and a listener crash fix | [#160](https://github.com/jaredwray/memcache/pull/160) | Done |
 | N5 | Binary packets in one allocation | [#161](https://github.com/jaredwray/memcache/pull/161) | Done |
 | N6 | Optional pending request limit (`maxPendingCommands`) | [#162](https://github.com/jaredwray/memcache/pull/162) | Done |
-| R1 | Docs and release | | Not started |
+| R1 | Docs and release | [#163](https://github.com/jaredwray/memcache/pull/163) | Done |
 
 ## Appendix — How the numbers were measured
 
