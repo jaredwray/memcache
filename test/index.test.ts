@@ -1,5 +1,10 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test file
-import { type AddressInfo, createConnection, createServer } from "node:net";
+import {
+	type AddressInfo,
+	createConnection,
+	createServer,
+	type Socket,
+} from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Memcache, {
 	createNode,
@@ -1336,6 +1341,136 @@ describe("Memcache", () => {
 			await expect(client.set("orphan", "value")).rejects.toThrow(
 				"No node available for key: orphan",
 			);
+		});
+	});
+
+	describe("maxPendingCommands", () => {
+		it("should default to no limit and pass the option to every node", () => {
+			expect(client.maxPendingCommands).toBe(0);
+			expect(client.nodes[0].maxPendingCommands).toBe(0);
+
+			const limited = new Memcache({
+				nodes: ["localhost:11211", "localhost:11212"],
+				maxPendingCommands: 100,
+			});
+			expect(limited.maxPendingCommands).toBe(100);
+			expect(limited.nodes.map((node) => node.maxPendingCommands)).toEqual([
+				100, 100,
+			]);
+		});
+
+		it("should round the limit down and treat other values as no limit", () => {
+			expect(new Memcache({ maxPendingCommands: 2.9 }).maxPendingCommands).toBe(
+				2,
+			);
+			expect(new Memcache({ maxPendingCommands: -5 }).maxPendingCommands).toBe(
+				0,
+			);
+			expect(
+				new Memcache({ maxPendingCommands: Number.NaN }).maxPendingCommands,
+			).toBe(0);
+			expect(new Memcache("localhost:11211").maxPendingCommands).toBe(0);
+
+			client.maxPendingCommands = Number.POSITIVE_INFINITY;
+			expect(client.maxPendingCommands).toBe(0);
+			expect(client.nodes[0].maxPendingCommands).toBe(0);
+		});
+
+		it("should apply a new limit to existing nodes and to nodes added later", async () => {
+			client.maxPendingCommands = 7;
+			expect(client.nodes[0].maxPendingCommands).toBe(7);
+
+			await client.addNode("localhost:11212");
+			expect(client.getNode("localhost:11212")?.maxPendingCommands).toBe(7);
+		});
+
+		it("should fail commands at once while a node has the limit pending", async () => {
+			const limited = new Memcache({ maxPendingCommands: 1 });
+			await limited.connect();
+			const socket = limited.nodes[0].socket as Socket;
+			const write = vi.spyOn(socket, "write").mockImplementation(() => true);
+			const key = generateKey("limited");
+
+			const first = limited.set(key, "1");
+			// The node has one command waiting: these fail without being sent
+			expect(await limited.set(key, "2")).toBe(false);
+			expect(await limited.get(key)).toBeUndefined();
+			expect(await limited.delete(key)).toBe(false);
+			expect(write).toHaveBeenCalledTimes(1);
+
+			socket.emit("data", Buffer.from("STORED\r\n"));
+			expect(await first).toBe(true);
+			write.mockRestore();
+
+			// Room again, and this one reaches the server
+			expect(await limited.set(key, "3")).toBe(true);
+			expect(await limited.get(key)).toBe("3");
+			await limited.disconnect();
+		});
+
+		it("should not retry a request refused at the limit", async () => {
+			const limited = new Memcache({
+				maxPendingCommands: 1,
+				retries: 2,
+				retryDelay: 50,
+				retryOnlyIdempotent: false,
+			});
+			await limited.connect();
+			const node = limited.nodes[0];
+			const socket = node.socket as Socket;
+			const write = vi.spyOn(socket, "write").mockImplementation(() => true);
+			const command = vi.spyOn(node, "command");
+			const key = generateKey("no-retry");
+
+			const first = limited.set(key, "1");
+			expect(await limited.set(key, "2")).toBe(false);
+			// The refused set was tried once
+			expect(command).toHaveBeenCalledTimes(2);
+
+			socket.emit("data", Buffer.from("STORED\r\n"));
+			expect(await first).toBe(true);
+			write.mockRestore();
+			await limited.disconnect();
+		});
+
+		it("should count requests waiting for a node's connection", async () => {
+			// Accepts connections but never answers, so the TLS handshake stalls
+			const server = createServer((socket) => {
+				socket.on("data", () => undefined);
+			});
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve);
+			});
+			const { port } = server.address() as AddressInfo;
+			const limited = new Memcache({
+				nodes: [`127.0.0.1:${port}`],
+				tls: { rejectUnauthorized: false },
+				timeout: 200,
+				lazyConnect: true,
+				maxPendingCommands: 2,
+			});
+
+			try {
+				const waiting = [limited.get("a"), limited.set("b", "1")];
+				let settled = false;
+				void Promise.allSettled(waiting).then(() => {
+					settled = true;
+				});
+
+				// Past the limit, requests fail at once, as a failed connection does
+				await expect(limited.delete("c")).rejects.toThrow(
+					"Too many pending commands",
+				);
+				expect(await limited.gets(["d"])).toEqual(new Map());
+				expect(settled).toBe(false);
+
+				for (const request of waiting) {
+					await expect(request).rejects.toThrow("Connection timeout");
+				}
+			} finally {
+				await limited.disconnect();
+				server.close();
+			}
 		});
 	});
 

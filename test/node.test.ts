@@ -1637,6 +1637,193 @@ describe("MemcacheNode", () => {
 		});
 	});
 
+	describe("Pending command limit", () => {
+		let socket: Socket;
+		let writeSpy: MockInstance;
+
+		beforeEach(async () => {
+			await node.connect();
+			socket = node.socket as Socket;
+			// Requests never reach the server; each test supplies the response
+			writeSpy = vi.spyOn(socket, "write").mockImplementation(() => true);
+		});
+
+		afterEach(() => {
+			writeSpy.mockRestore();
+		});
+
+		it("should have no limit unless one is given", () => {
+			expect(node.maxPendingCommands).toBe(0);
+			const limited = new MemcacheNode("localhost", 11211, {
+				maxPendingCommands: 3,
+			});
+			expect(limited.maxPendingCommands).toBe(3);
+		});
+
+		it("should fail a command at once while the limit is pending", async () => {
+			node.maxPendingCommands = 2;
+			const first = node.command("delete a");
+			const second = node.command("delete b");
+
+			await expect(node.command("delete c")).rejects.toThrow(
+				"Too many pending commands on memcache server localhost:11211 (maxPendingCommands: 2)",
+			);
+			// Neither queued nor written
+			expect(node.commandQueue).toHaveLength(2);
+			expect(writeSpy).toHaveBeenCalledTimes(2);
+
+			// A reply makes room again
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			expect(await first).toBe("DELETED");
+			const third = node.command("delete c");
+			socket.emit("data", Buffer.from("NOT_FOUND\r\nDELETED\r\n"));
+			expect(await second).toBe("NOT_FOUND");
+			expect(await third).toBe("DELETED");
+		});
+
+		it("should count a command whose reply is still arriving", async () => {
+			node.maxPendingCommands = 1;
+			const partial = node.command("get a", {
+				isMultiline: true,
+				requestedKeys: ["a"],
+			});
+			// The reply has started, so the command is no longer queued
+			socket.emit("data", Buffer.from("VALUE a 0 5\r\nhel"));
+			expect(node.commandQueue).toHaveLength(0);
+
+			await expect(node.command("delete b")).rejects.toThrow(
+				"Too many pending commands",
+			);
+
+			socket.emit("data", Buffer.from("lo\r\nEND\r\n"));
+			expect(await partial).toEqual({ values: ["hello"], foundKeys: ["a"] });
+		});
+
+		it("should give refused requests one error, rebuilt when the limit changes", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.command("delete a");
+			const first = await node.command("delete b").catch((error) => error);
+			const second = await node.command("delete c").catch((error) => error);
+			expect(second).toBe(first);
+			expect(first.message).toContain("(maxPendingCommands: 1)");
+
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			await pending;
+			node.maxPendingCommands = 2;
+			const more = [node.command("delete d"), node.command("delete e")];
+			const third = await node.command("delete f").catch((error) => error);
+			expect(third).not.toBe(first);
+			expect(third.message).toContain("(maxPendingCommands: 2)");
+
+			socket.emit("data", Buffer.from("DELETED\r\nDELETED\r\n"));
+			await Promise.all(more);
+		});
+
+		it("should count binary requests toward the same limit", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.binaryGet("a");
+
+			await expect(node.command("version")).rejects.toThrow(
+				"Too many pending commands",
+			);
+			await expect(node.binaryGet("b")).rejects.toThrow(
+				"Too many pending commands",
+			);
+			expect(writeSpy).toHaveBeenCalledTimes(1);
+
+			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
+			expect(await pending).toBe("value-a");
+		});
+
+		it("should still send a quit at the limit, behind the requests ahead of it", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.command("delete a");
+			const quitting = node.quit();
+			expect(writeSpy).toHaveBeenLastCalledWith("quit\r\n");
+
+			// The delete gets its reply before memcached closes the connection
+			socket.emit("data", Buffer.from("DELETED\r\n"));
+			expect(await pending).toBe("DELETED");
+			socket.destroy();
+			await quitting;
+			expect(node.isConnected()).toBe(false);
+		});
+
+		it("should still send a binary quit at the limit", async () => {
+			node.maxPendingCommands = 1;
+			const pending = node.binaryGet("a");
+			await node.binaryQuit();
+			expect(writeSpy).toHaveBeenCalledTimes(2);
+			expect((writeSpy.mock.calls[1][0] as Buffer)[1]).toBe(OPCODE_QUIT);
+
+			socket.emit("data", getResponse(writtenOpaque(writeSpy), "value-a"));
+			expect(await pending).toBe("value-a");
+		});
+
+		it("should round the limit down and treat other values as no limit", () => {
+			const cases: Array<[number, number]> = [
+				[2.9, 2],
+				[0.5, 0],
+				[-3, 0],
+				[Number.NaN, 0],
+				[Number.POSITIVE_INFINITY, 0],
+			];
+			for (const [value, limit] of cases) {
+				node.maxPendingCommands = value;
+				expect(node.maxPendingCommands).toBe(limit);
+				const created = new MemcacheNode("localhost", 11211, {
+					maxPendingCommands: value,
+				});
+				expect(created.maxPendingCommands).toBe(limit);
+			}
+		});
+
+		it("should count requests waiting for the connection, and refuse them past the limit", async () => {
+			const server = await startStalledServer();
+			// The TLS handshake gets no response, so the connection never opens
+			const tlsNode = new MemcacheNode("127.0.0.1", server.port, {
+				timeout: 200,
+				tls: { rejectUnauthorized: false },
+				maxPendingCommands: 2,
+			});
+
+			try {
+				const waiting = [
+					tlsNode.connectForRequest(),
+					tlsNode.connectForRequest(),
+				];
+				await expect(tlsNode.connectForRequest()).rejects.toThrow(
+					`Too many pending commands on memcache server 127.0.0.1:${server.port} (maxPendingCommands: 2)`,
+				);
+
+				// Once they fail with the connection, the next request may wait
+				for (const wait of waiting) {
+					await expect(wait).rejects.toThrow("Connection timeout");
+				}
+				await expect(tlsNode.connectForRequest()).rejects.toThrow(
+					"Connection timeout",
+				);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("should stop counting requests that waited once the connection opens", async () => {
+			const fresh = new MemcacheNode("localhost", 11211, {
+				maxPendingCommands: 1,
+			});
+			const waiting = fresh.connectForRequest();
+			await expect(fresh.connectForRequest()).rejects.toThrow(
+				"Too many pending commands",
+			);
+
+			await waiting;
+			await expect(fresh.connectForRequest()).resolves.toBeUndefined();
+			expect(await fresh.command("version")).toMatch(/^VERSION /);
+			await fresh.disconnect();
+		});
+	});
+
 	describe("Error Handling", () => {
 		it("should handle ERROR response for stats command", async () => {
 			await node.connect();

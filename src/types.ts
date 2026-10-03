@@ -74,6 +74,17 @@ export interface MemcacheOptions {
 	 */
 	timeout?: number;
 	/**
+	 * The most requests each node keeps waiting for a response or for its
+	 * connection to open. A request made while a node has that many fails at
+	 * once and is not retried. On an open connection it fails like any
+	 * failed command: `set()` resolves `false` and `get()` `undefined`. While
+	 * the connection is being opened it fails like a failed connection:
+	 * single-key commands reject. `0`, or anything below 1 or not finite,
+	 * means no limit.
+	 * @default 0
+	 */
+	maxPendingCommands?: number;
+	/**
 	 * Whether to keep the connection alive.
 	 * @default true
 	 */

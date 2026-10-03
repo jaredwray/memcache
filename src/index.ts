@@ -4,7 +4,13 @@ import { AutoDiscovery } from "./auto-discovery.js";
 import { BroadcastHash } from "./broadcast.js";
 import { KetamaHash } from "./ketama.js";
 import { ModulaHash } from "./modula.js";
-import { type CommandOptions, createNode, MemcacheNode } from "./node.js";
+import {
+	type CommandOptions,
+	createNode,
+	MemcacheNode,
+	PendingLimitError,
+	toPendingLimit,
+} from "./node.js";
 import {
 	type AutoDiscoverOptions,
 	type ClusterConfig,
@@ -93,6 +99,7 @@ const toResults = (result: unknown): unknown[] => [result];
 export class Memcache extends Hookified {
 	private _nodes: Array<MemcacheNode> = [];
 	private _timeout: number;
+	private _maxPendingCommands: number;
 	private _keepAlive: boolean;
 	private _keepAliveDelay: number;
 	private _hash: HashProvider;
@@ -118,6 +125,7 @@ export class Memcache extends Hookified {
 		if (typeof options === "string") {
 			this._hash = new KetamaHash();
 			this._timeout = 5000;
+			this._maxPendingCommands = 0;
 			this._keepAlive = true;
 			this._keepAliveDelay = 1000;
 			this._retries = 0;
@@ -138,6 +146,7 @@ export class Memcache extends Hookified {
 			// Handle MemcacheOptions object
 			this._hash = options?.hash ?? new KetamaHash();
 			this._timeout = options?.timeout || 5000;
+			this._maxPendingCommands = toPendingLimit(options?.maxPendingCommands);
 			this._keepAlive = options?.keepAlive !== false;
 			this._keepAliveDelay = options?.keepAliveDelay || 1000;
 			this._retries = options?.retries ?? 0;
@@ -266,6 +275,31 @@ export class Memcache extends Hookified {
 		}
 		if (this._autoDiscovery) {
 			this._autoDiscovery.timeout = value;
+		}
+	}
+
+	/**
+	 * Get the most requests each node keeps waiting for a response or for
+	 * its connection to open. A request made while a node has that many
+	 * fails at once. `0` means no limit.
+	 * @returns {number}
+	 * @default 0
+	 */
+	public get maxPendingCommands(): number {
+		return this._maxPendingCommands;
+	}
+
+	/**
+	 * Set the most requests each node keeps waiting for a response or for
+	 * its connection to open. Applies to existing nodes. `0`, or anything
+	 * below 1 or not finite, means no limit.
+	 * @param {number} value
+	 * @default 0
+	 */
+	public set maxPendingCommands(value: number) {
+		this._maxPendingCommands = toPendingLimit(value);
+		for (const node of this._nodes) {
+			node.maxPendingCommands = this._maxPendingCommands;
 		}
 	}
 
@@ -546,6 +580,7 @@ export class Memcache extends Hookified {
 			// node even when the client-level `tls` option is not set.
 			node = new MemcacheNode(host, port, {
 				timeout: this._timeout,
+				maxPendingCommands: this._maxPendingCommands,
 				keepAlive: this._keepAlive,
 				keepAliveDelay: this._keepAliveDelay,
 				weight,
@@ -822,7 +857,7 @@ export class Memcache extends Hookified {
 		const promises = Array.from(keysByNode.entries()).map(
 			async ([node, nodeKeys]) => {
 				try {
-					if (!node.isConnected()) await node.connect();
+					if (!node.isConnected()) await node.connectForRequest();
 
 					const keysStr = nodeKeys.join(" ");
 					const result = await node.command(`get ${keysStr}`, {
@@ -873,7 +908,7 @@ export class Memcache extends Hookified {
 			for (const replica of replicas) {
 				try {
 					/* v8 ignore next -- @preserve */
-					if (!replica.isConnected()) await replica.connect();
+					if (!replica.isConnected()) await replica.connectForRequest();
 
 					const result = await replica.command(`get ${resolvedKey}`, {
 						isMultiline: true,
@@ -1281,7 +1316,7 @@ export class Memcache extends Hookified {
 			this._nodes.map(async (node) => {
 				/* v8 ignore next -- @preserve */
 				if (!node.isConnected()) {
-					await node.connect();
+					await node.connectForRequest();
 				}
 				return node.command(command);
 			}),
@@ -1306,7 +1341,7 @@ export class Memcache extends Hookified {
 			/* v8 ignore next -- @preserve */
 			this._nodes.map(async (node) => {
 				if (!node.isConnected()) {
-					await node.connect();
+					await node.connectForRequest();
 				}
 
 				const stats = await node.command(command, { isStats: true });
@@ -1329,7 +1364,7 @@ export class Memcache extends Hookified {
 			/* v8 ignore next -- @preserve */
 			this._nodes.map(async (node) => {
 				if (!node.isConnected()) {
-					await node.connect();
+					await node.connectForRequest();
 				}
 
 				const version = await node.command("version");
@@ -1394,7 +1429,9 @@ export class Memcache extends Hookified {
 	 * Returns an array to support replication strategies.
 	 * @param {string} key - The cache key
 	 * @returns {Promise<Array<MemcacheNode>>} The nodes responsible for this key
-	 * @throws {Error} If no nodes are available for the key
+	 * @throws {Error} If no nodes are available for the key, or if a node's
+	 * connection is being opened and `maxPendingCommands` requests already
+	 * wait for it
 	 */
 	public async getNodesByKey(key: string): Promise<Array<MemcacheNode>> {
 		const nodes = this._hash.getNodesByKey(key);
@@ -1403,10 +1440,12 @@ export class Memcache extends Hookified {
 		}
 
 		// Lazy connect if not connected. The commands only come here when a
-		// node isn't connected: connectedNodesByKey() covers the rest
+		// node isn't connected: connectedNodesByKey() covers the rest. A
+		// request waiting for the connection counts toward the node's
+		// maxPendingCommands
 		for (const node of nodes) {
 			if (!node.isConnected()) {
-				await node.connect();
+				await node.connectForRequest();
 			}
 		}
 
@@ -1650,8 +1689,10 @@ export class Memcache extends Hookified {
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
 				return await node.command(command, commandOptions);
-			} catch {
-				if (attempt >= maxRetries) {
+			} catch (error) {
+				// A request refused for maxPendingCommands fails at once: a retry
+				// would only wait and add to the load
+				if (attempt >= maxRetries || error instanceof PendingLimitError) {
 					break;
 				}
 
@@ -1843,6 +1884,7 @@ export class Memcache extends Hookified {
 			await this.addNode(
 				new MemcacheNode(host, node.port, {
 					timeout: this._timeout,
+					maxPendingCommands: this._maxPendingCommands,
 					keepAlive: this._keepAlive,
 					keepAliveDelay: this._keepAliveDelay,
 					sasl: this._sasl,
