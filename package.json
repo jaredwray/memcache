@@ -81,7 +81,7 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2",
-    "wrangler": "^4.127.1"
+    "wrangler": "^4.143.0"
   },
   "dependencies": {
     "hashery": "^3.0.1",
