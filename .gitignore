@@ -145,5 +145,7 @@ yarn.lock
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# AI
-.claude
+# AI (keep the shared Claude Code settings and hooks; ignore local state)
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
