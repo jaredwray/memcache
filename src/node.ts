@@ -693,7 +693,12 @@ export class MemcacheNode extends Hookified {
 	 * the socket.
 	 */
 	private buildTlsConnectOptions(tls: MemcacheTlsOption): TlsConnectionOptions {
-		const options: TlsConnectionOptions = tls === true ? {} : { ...tls };
+		// @types/node 24.19 omits keepAlive on tls.ConnectionOptions.
+		// tls.connect still passes these fields to net.connect.
+		const options: TlsConnectionOptions & {
+			keepAlive?: boolean;
+			keepAliveInitialDelay?: number;
+		} = tls === true ? {} : { ...tls };
 		// Node identity always wins over any host/port/path in user options.
 		options.host = undefined;
 		options.port = undefined;
