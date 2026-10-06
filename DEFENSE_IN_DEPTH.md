@@ -30,7 +30,7 @@ Profile: npm library · public
 - [x] Every action pinned to a full commit SHA (`npx actions-up`) — PR #170
 - [x] Every job installs Socket Firewall (`SocketDev/action` SHA-pinned, `firewall-version` pinned); `pnpm install` / `npm install` run as `sfw pnpm install` / `sfw npm install` — verified 2026-10-06
 - [x] `.github/workflows/check-workflows.yaml` lints workflows with zizmor on every PR — PR #116
-- [ ] Workflow `name:` and job `name:` contain no spaces (kebab-case) so they can be set as required status checks (PR pending)
+- [ ] Workflow `name:` and job `name:` contain no spaces (kebab-case) so they can be set as required status checks (PR #179 pending)
 - [x] `persist-credentials: false` on checkouts that don't push — PR #116
 - [x] No `pull_request_target` on workflows that run untrusted PR code — verified 2026-10-06
 - [x] Artifact-publishing workflows disable `actions/setup-node` default caching (`package-manager-cache: false`) to prevent cache poisoning — PR #116
