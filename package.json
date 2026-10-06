@@ -85,7 +85,7 @@
   },
   "dependencies": {
     "hashery": "^3.0.2",
-    "hookified": "^3.0.3"
+    "hookified": "^3.0.4"
   },
   "files": [
     "dist",
