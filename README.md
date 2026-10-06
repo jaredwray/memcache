@@ -5,6 +5,7 @@
 [![npm](https://img.shields.io/npm/v/memcache)](https://www.npmjs.com/package/memcache)
 [![npm](https://img.shields.io/npm/dm/memcache)](https://www.npmjs.com/package/memcache)
 [![license](https://img.shields.io/github/license/jaredwray/memcache)](https://github.com/jaredwray/memcache/blob/main/LICENSE)
+[![Drydock review](https://img.shields.io/endpoint?url=https%3A%2F%2Fdrydock.org%2Fpublic%2Fbadge%2Fnpm%2Fmemcache)](https://drydock.org/diff/memcache)
 
 # Memcache
 Nodejs Memcache Client
