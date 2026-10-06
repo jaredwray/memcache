@@ -9,3 +9,6 @@ minimumReleaseAgeStrict: true # fail instead of falling back to a too-new versio
 minimumReleaseAgeIgnoreMissingTime: false # missing publish-time metadata fails closed
 blockExoticSubdeps: true
 trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
+# Vitest 5 depends on why-is-node-running ^3.2.1. 3.2.2 is a trust downgrade.
+overrides:
+  why-is-node-running: 3.2.1
