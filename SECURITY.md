@@ -26,6 +26,7 @@ This repository follows the [defense-in-depth](https://github.com/jaredwray/agen
 - Tags can only be created by repository admins; published GitHub Releases are immutable (assets and tags cannot be changed after publish).
 - Workflow runs from outside collaborators always require maintainer approval, and only allowlisted GitHub Actions can run.
 - CI runs with read-only permissions (no job has `contents: write`); generated output is an artifact, never committed back; every action is pinned to a full commit SHA; Socket Firewall (`sfw`) wraps `pnpm install` / `npm install`; workflows are security-linted with zizmor on every PR.
-- Codespaces and Cursor Cloud Agents install through Aikido Safe Chain; package-manager shims must not be bypassed.
+- Codespaces, Cursor Cloud Agents, Claude Code on the web, and Codex cloud install through Aikido Safe Chain; package-manager shims must not be bypassed.
+- The Codespaces Dev Container image is pinned by digest (`name:<tag>@sha256:<digest>`), not a floating tag.
 - Dependencies install through pnpm with a 7-day cooldown on new versions, lifecycle scripts blocked by default, and `trustPolicy: no-downgrade`. Socket reviews every dependency change; Aikido scans every build.
 - npm releases are staged, never published directly: CI publishes via stage-only OIDC trusted publishing, Drydock reviews the exact staged artifact, and a maintainer promotes it with 2FA. There are no npm tokens. Staging waits on a passing Aikido `scan-release` of the commit (SAST, IaC, and secrets).
