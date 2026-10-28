@@ -7,6 +7,11 @@ allowBuilds:
 minimumReleaseAge: 10080 # 7 days, in minutes
 minimumReleaseAgeStrict: true # fail instead of falling back to a too-new version
 minimumReleaseAgeIgnoreMissingTime: false # missing publish-time metadata fails closed
+# Needs Jared's sign-off. @jaredwray/fumanchu 4.7.5 (published 2026-10-26) is inside
+# the 7-day cooldown. It is the release that depends on markdown-it ^15.0.3
+# (CVE-2026-111758, fixed in 15.0.3; CVE-2026-111759, fixed in 15.0.2).
+minimumReleaseAgeExclude:
+  - "@jaredwray/fumanchu@4.7.5"
 blockExoticSubdeps: true
 trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
 # Vitest 5 depends on why-is-node-running ^3.2.1. 3.2.2 is a trust downgrade.
