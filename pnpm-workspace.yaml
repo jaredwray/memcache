@@ -14,10 +14,8 @@ minimumReleaseAgeExclude:
   - "@jaredwray/fumanchu@4.7.5"
 blockExoticSubdeps: true
 trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
-# Vitest 5 depends on why-is-node-running ^3.2.1. 3.2.2 is a trust downgrade.
 # Minimum versions for transitive dependencies that parent releases do not force.
 overrides:
-  why-is-node-running: 3.2.1
   # CVE-2026-87018, CVE-2026-109869, and CVE-2026-109383 are fixed in undici 7.30.1.
   # CVE-2026-109829 is fixed in undici 8.12.2. docula accepts undici ^8.10.2.
   "undici@7": ">=7.30.1 <8"
