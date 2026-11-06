@@ -164,7 +164,6 @@ settings:
 
 overrides:
   undici@7: 8.12.3
-  handlebars@4: '>=4.7.10 <5'
 
 importers:
 
