@@ -164,7 +164,6 @@ settings:
 
 overrides:
   undici@7: 8.12.3
-  zod@4: '>=4.6.7 <5'
   brace-expansion@1: '>=1.1.19 <2'
   brace-expansion@5: '>=5.0.11'
   postcss@8: '>=8.5.18'
@@ -242,43 +241,43 @@ packages:
     resolution: {integrity: sha512-7PzZEf2brum218FSdXf6gE9yz4gKkLwkoLkPwoBExWYFj/Qsbi2JetWDKnFOdV6eezOnP72pGs3T0OKUaAEcLw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/gateway@4.0.100':
     resolution: {integrity: sha512-diJXVW2D1/NUW2JSg99b8yTpN8eW9AK5ntXSW4B7NrsW5STqwcGJAAOFlfOrQBzYHJlWReyy11WefWetdx4Qsw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/gateway@4.0.48':
     resolution: {integrity: sha512-62yBV2sD8I488UIRsS0mu2axhtd/bt1neyQUpe3N5UbJhAeVbZr0OhA7N/K7COQosLJjkhiO9EfSvddTbZCoLw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/google@4.0.85':
     resolution: {integrity: sha512-gYfORjh13EkLZWKvpF3gEe2cAMEC3O9tnWniz2wuz8mHqJo08RfCjtLtP8iTka/xq4+a8lnXD4OGipDELd/GnA==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/openai@4.0.80':
     resolution: {integrity: sha512-rd3IiSqiniCSB+3E6FryRb3VfNgBErRqklp50zUqA90EovtumFglzHZfRRjBnUfw49aArKvpWwMe5/1RGZDaKg==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/provider-utils@5.0.26':
     resolution: {integrity: sha512-0mqhqx+Dcv+msI84+zkbLXmnCHb/mpkYJ9DU3HBvB1px+UjFQss4lLZqRCSzJ0w3NxwQk4Ishk7cP0r8wEQD5w==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/provider-utils@5.0.51':
     resolution: {integrity: sha512-z0IsEsDx+dxlZqyCtDjMbBj16NGmxFVTgQcP3+n3EFm9ttNU6wjOgL/kgvaPwtmZM6F7JbtRuLyzr6WOfo5DMw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/provider@4.0.19':
     resolution: {integrity: sha512-ryVZSSfmpEsr4bM8rbt9cSBWal+KGYRrm57C+k/hiPQHMiMahaqg2bPF0MpxSUWY8mGpt7s/ajM6PAqNTMKqPQ==}
@@ -1730,13 +1729,13 @@ packages:
     resolution: {integrity: sha512-Un4yVROG+BMd6Q62xUxb9yV+wlTrUGeXhRtg5ltEFDV0p3lOYQaQHK9ozB6rdPdqlH3LyaszfbFdUkZ1p00nIQ==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   ai@7.0.60:
     resolution: {integrity: sha512-b56otp/hSz61+wqDuiadtRRTV+8+bU/+3XDCvl3r66e6jPwuJKc4oe75ltjGfL4NF1dOkLoBaHyinT+jI569ew==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: '>=4.6.7 <5'
+      zod: ^3.25.76 || ^4.1.8
 
   ansi-align@3.0.1:
     resolution: {integrity: sha512-IOfwwBF5iczOjp/WeY4YxyjqAFMQoZufdQWDd19SEExbVLNXqvpzSJ/M7Za4/sCPmQ0+GRquoA7bGcINcxew6w==}
