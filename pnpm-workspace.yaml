@@ -18,6 +18,3 @@ trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
 overrides:
   # The undici 7 selector resolves to 8.12.3. That release passes the 7-day gate.
   "undici@7": "8.12.3"
-  # docula uses ecto and @jaredwray/fumanchu. Those packages accept handlebars 4.7.9.
-  # CVE-2026-106446 and CVE-2026-106445 have a fix in handlebars 4.7.10.
-  "handlebars@4": ">=4.7.10 <5"
