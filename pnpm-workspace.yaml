@@ -18,7 +18,6 @@ trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
 overrides:
   # The undici 7 selector resolves to 8.12.3. That release passes the 7-day gate.
   "undici@7": "8.12.3"
-  "nanoid@3": ">=3.3.18 <4"
   "source-map-js": ">=1.2.2"
   "vite@7": ">=7.3.2 <8"
   # docula uses ecto and @jaredwray/fumanchu. Those packages accept handlebars 4.7.9.
