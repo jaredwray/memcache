@@ -232,7 +232,7 @@ describe("MemcacheNode", () => {
 		});
 	});
 
-	describe("Constructor and Properties", () => {
+	describe("Keep Alive", () => {
 		it("should have default keepAlive of true", () => {
 			const testNode = new MemcacheNode("localhost", 11211);
 			expect(testNode.keepAlive).toBe(true);
@@ -1824,7 +1824,7 @@ describe("MemcacheNode", () => {
 		});
 	});
 
-	describe("Error Handling", () => {
+	describe("Server Error Responses", () => {
 		it("should handle ERROR response for stats command", async () => {
 			await node.connect();
 
