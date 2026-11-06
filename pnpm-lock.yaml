@@ -164,7 +164,6 @@ settings:
 
 overrides:
   undici@7: 8.12.3
-  undici@8: '>=8.12.2 <9'
   zod@4: '>=4.6.7 <5'
   brace-expansion@1: '>=1.1.19 <2'
   brace-expansion@5: '>=5.0.11'

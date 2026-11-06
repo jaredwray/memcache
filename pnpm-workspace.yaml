@@ -16,10 +16,8 @@ blockExoticSubdeps: true
 trustPolicy: no-downgrade # fail if a later version has weaker trust evidence
 # Minimum versions for transitive dependencies that parent releases do not force.
 overrides:
-  # CVE-2026-109829 is fixed in undici 8.12.2. docula accepts undici ^8.10.2.
   # The undici 7 selector resolves to 8.12.3. That release passes the 7-day gate.
   "undici@7": "8.12.3"
-  "undici@8": ">=8.12.2 <9"
   # writr accepts zod ^4.4.3. CVE-2023-54404 / GHSA-mrhx-c7xc-m3w5 is fixed in zod 4.6.6.
   "zod@4": ">=4.6.7 <5"
   "brace-expansion@1": ">=1.1.19 <2"
