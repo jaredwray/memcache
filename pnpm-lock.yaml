@@ -170,8 +170,8 @@ importers:
   .:
     dependencies:
       hashery:
-        specifier: ^3.0.2
-        version: 3.0.2
+        specifier: ^3.0.5
+        version: 3.0.5
       hookified:
         specifier: ^3.0.4
         version: 3.0.4
@@ -2067,8 +2067,8 @@ packages:
     resolution: {integrity: sha512-iZyKG96/JwPz1N55vj2Ie2vXbhu440zfUfJvSwEqEbeLluk7NnapfGqa7LH0mOsnDxTF85Mx8/dyR6HfqcbmbQ==}
     engines: {node: '>=20'}
 
-  hashery@3.0.2:
-    resolution: {integrity: sha512-840jNJwXnqjLg43qvTwE/MFCq/+RkeSgYqunLgmUyycW09IWC/MGv7qsfampIUCYb6Mjk4cGmtw/AmlzFz/UTA==}
+  hashery@3.0.5:
+    resolution: {integrity: sha512-JqXNwGkTWXpPcz6I1nQVPcVUt8fFOQpl4mRlAjJttrv2J3Sh+c1ZvA/PmglZyf6BHYoL9C0q3w7Q47lXOigfOA==}
     engines: {node: '>=22.18'}
 
   hashring@3.2.0:
@@ -4321,7 +4321,7 @@ snapshots:
       ai: 7.0.122(zod@4.6.7)
       colorette: 2.0.20
       ecto: 5.1.0(supports-color@10.2.2)
-      hashery: 3.0.2
+      hashery: 3.0.5
       ipaddr.js: 2.5.0
       jiti: 2.7.0
       serve-handler: 6.1.7
@@ -4566,7 +4566,7 @@ snapshots:
     dependencies:
       hookified: 1.15.1
 
-  hashery@3.0.2:
+  hashery@3.0.5:
     dependencies:
       hookified: 3.0.4
 
@@ -6143,7 +6143,7 @@ snapshots:
     dependencies:
       ai: 7.0.60(zod@4.6.7)
       cacheable: 2.5.0
-      hashery: 3.0.2
+      hashery: 3.0.5
       hookified: 3.0.4
       html-react-parser: 6.1.5(react@19.2.8)
       js-yaml: 5.2.3
