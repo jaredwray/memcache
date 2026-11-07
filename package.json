@@ -84,7 +84,7 @@
     "wrangler": "^4.149.0"
   },
   "dependencies": {
-    "hashery": "^3.0.2",
+    "hashery": "^3.0.5",
     "hookified": "^3.0.4"
   },
   "files": [
